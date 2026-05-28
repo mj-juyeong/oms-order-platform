@@ -4,7 +4,7 @@
 
 ## 0. 문서 적용 기준
 
-- 마스터 API는 이 문서의 version 분리 구조를 기준으로 한다.
+- 마스터 API는 tenant별 현재 마스터를 upsert하고, 파일 단위 업로드 이력을 남기는 구조를 기준으로 한다.
 - 마스터 API를 제외한 업로드, 배치, 검증, 주문, Scan, PL, Label, 다운로드, 차수별 추후 API는 `OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md`의 API 경로를 기준으로 한다.
 - 차수별 주문 조회와 차수별 다운로드는 1차 MVP 필수 구현에서 제외하고 추후 구현으로 둔다.
 
@@ -12,7 +12,11 @@
 
 ### Tenant / Client Context
 
-- 내부 운영 API는 로그인 사용자의 `tenant_id`를 기준으로 동작한다.
+- 로그인 사용자는 `SYSTEM`, `TENANT`, `CLIENT` 스코프로 구분한다.
+- `SYSTEM` 사용자는 시스템 전체 관리자이며 tenant 생성/관리 같은 전역 기능 후보를 수행한다.
+- `TENANT` 사용자는 특정 물류사 소속이며 1차 MVP의 기본 운영 사용자다.
+- `CLIENT` 사용자는 특정 고객사/화주사 소속이다. 고객사 직접 로그인은 1차 필수 구현이 아니며 추후 기능으로 둔다.
+- 내부 운영 API는 기본적으로 로그인 사용자의 `tenant_id`를 기준으로 동작한다. `SYSTEM` 사용자의 tenant 선택/전환 정책은 추후 관리자 기능에서 확정한다.
 - 주문/업로드 관련 API는 `clientId`를 받아 특정 고객사/화주사 범위를 명확히 한다.
 - 외부 API Key는 `tenant_id`에 소속되며, 필요 시 `client_id`로 접근 범위를 제한한다.
 - 1차 MVP의 마스터 매칭은 고객사 코드 매핑 없이 `product_code -> ezadmin_code`, `store_code/orderBusinessSiteCode -> baljugo_code` 직접 매칭을 사용한다.
@@ -57,7 +61,8 @@
 | `PUBLIC` | 인증 전 |
 | `VIEWER` | 조회 가능 |
 | `OPERATOR` | 업로드, 검증, 다운로드 가능 |
-| `ADMIN` | 사용자, 권한, 롤백, 마스터 활성화 가능 |
+| `ADMIN` | 사용자, 권한, 롤백, 마스터 업로드 가능 |
+| `SYSTEM_ADMIN` | 시스템 전체 tenant/client/user 관리 후보 |
 | `API_KEY` | 외부 API Key 인증 |
 
 ## 2. Auth / User
@@ -66,23 +71,23 @@
 |---|---|---|---|---|---|---|
 | POST | `/api/v1/auth/login` | 로그인 | PUBLIC | Body: `{ "loginId": "admin", "password": "secret" }` | `{ "accessToken": "...", "user": { "id": 1, "name": "관리자", "roles": ["ADMIN"] } }` | `INVALID_CREDENTIALS`, `USER_DISABLED` |
 | POST | `/api/v1/auth/logout` | 로그아웃 | VIEWER | 없음 | `{ "loggedOut": true }` | `UNAUTHORIZED` |
-| GET | `/api/v1/auth/me` | 현재 사용자 조회 | VIEWER | 없음 | `{ "id": 1, "loginId": "admin", "roles": ["ADMIN"] }` | `UNAUTHORIZED` |
-| GET | `/api/v1/users` | 사용자 목록 | ADMIN | Query: `status`, `keyword`, `page`, `size` | `{ "items": [{ "id": 1, "loginId": "admin", "status": "ACTIVE" }], "page": 0, "total": 1 }` | `FORBIDDEN` |
-| POST | `/api/v1/users` | 사용자 생성 | ADMIN | Body: `{ "loginId": "ops01", "name": "운영자", "password": "secret", "roleCodes": ["OPERATOR"] }` | `{ "id": 2 }` | `DUPLICATE_LOGIN_ID`, `INVALID_ROLE` |
-| PATCH | `/api/v1/users/{userId}` | 사용자 수정 | ADMIN | Body: `{ "name": "운영자", "status": "ACTIVE", "roleCodes": ["OPERATOR"] }` | `{ "id": 2, "updated": true }` | `USER_NOT_FOUND`, `INVALID_ROLE` |
+| GET | `/api/v1/auth/me` | 현재 사용자 조회 | VIEWER | 없음 | `{ "id": 1, "loginId": "admin", "userScopeType": "TENANT", "tenantId": 1, "clientId": null, "roles": ["ADMIN"] }` | `UNAUTHORIZED` |
+| GET | `/api/v1/users` | 사용자 목록 | ADMIN | Query: `userScopeType`, `tenantId`, `clientId`, `status`, `keyword`, `page`, `size` | `{ "items": [{ "id": 1, "loginId": "admin", "userScopeType": "TENANT", "tenantId": 1, "status": "ACTIVE" }], "page": 0, "total": 1 }` | `FORBIDDEN` |
+| POST | `/api/v1/users` | 사용자 생성 | ADMIN | Body: `{ "loginId": "ops01", "name": "운영자", "userScopeType": "TENANT", "tenantId": 1, "clientId": null, "password": "secret", "roleCodes": ["OPERATOR"] }` | `{ "id": 2 }` | `DUPLICATE_LOGIN_ID`, `INVALID_ROLE`, `INVALID_USER_SCOPE` |
+| PATCH | `/api/v1/users/{userId}` | 사용자 수정 | ADMIN | Body: `{ "name": "운영자", "status": "ACTIVE", "userScopeType": "TENANT", "tenantId": 1, "clientId": null, "roleCodes": ["OPERATOR"] }` | `{ "id": 2, "updated": true }` | `USER_NOT_FOUND`, `INVALID_ROLE`, `INVALID_USER_SCOPE` |
 
 ## 3. Upload
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/order-excel-batches` | OIS 입력 엑셀 업로드 및 배치 생성 | OPERATOR | Multipart: `file`, `clientId`, optional `productMasterVersionId`, `storeRouteMasterVersionId`, `memo` | `{ "batchId": 1001, "clientId": 10, "status": "UPLOADED", "fileName": "input.xlsm" }` | `INVALID_FILE_EXTENSION`, `FILE_TOO_LARGE`, `CLIENT_NOT_FOUND`, `MASTER_VERSION_NOT_FOUND` |
+| POST | `/api/v1/order-excel-batches` | OIS 입력 엑셀 업로드 및 배치 생성 | OPERATOR | Multipart: `file`, `clientId`, optional `memo` | `{ "batchId": 1001, "clientId": 10, "status": "UPLOADED", "fileName": "input.xlsm" }` | `INVALID_FILE_EXTENSION`, `FILE_TOO_LARGE`, `CLIENT_NOT_FOUND` |
 
 ## 4. Batch
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
 | GET | `/api/v1/order-excel-batches` | 배치 목록 조회 | VIEWER | Query: `clientId`, `status`, `deliveryDate`, `from`, `to`, `page`, `size` | `{ "items": [{ "id": 1001, "clientId": 10, "status": "CONFIRMED", "deliveryDate": "2025-12-15" }], "total": 1 }` | `INVALID_QUERY` |
-| GET | `/api/v1/order-excel-batches/{batchId}` | 배치 상세 조회 | VIEWER | Path: `batchId` | `{ "id": 1001, "status": "VALIDATED", "errorCount": 0, "warningCount": 3 }` | `BATCH_NOT_FOUND` |
+| GET | `/api/v1/order-excel-batches/{batchId}` | 배치 상세 조회 | VIEWER | Path: `batchId` | `{ "id": 1001, "status": "READY_TO_CONFIRM", "errorCount": 0, "warningCount": 3 }` | `BATCH_NOT_FOUND` |
 | POST | `/api/v1/order-excel-batches/{batchId}/confirm` | 배치 확정 | OPERATOR | Path: `batchId` | `{ "id": 1001, "status": "CONFIRMED", "confirmedAt": "2026-05-28T10:30:00+09:00" }` | `BATCH_NOT_FOUND`, `VALIDATION_ERROR_EXISTS`, `INVALID_BATCH_STATUS` |
 | POST | `/api/v1/order-excel-batches/{batchId}/cancel` | 배치 취소 | OPERATOR | Body: `{ "reason": "잘못된 파일 업로드" }` | `{ "id": 1001, "status": "CANCELLED" }` | `INVALID_BATCH_STATUS` |
 | POST | `/api/v1/order-excel-batches/{batchId}/rollback` | 확정 배치 롤백 | ADMIN | Body: `{ "reason": "운영 요청" }` | `{ "id": 1001, "status": "ROLLED_BACK" }` | `FORBIDDEN`, `INVALID_BATCH_STATUS` |
@@ -91,26 +96,24 @@
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/order-excel-batches/{batchId}/validate` | 배치 검증 또는 재검증 실행 | OPERATOR | Body: optional `{ "productMasterVersionId": 3, "storeRouteMasterVersionId": 5 }` | `{ "batchId": 1001, "errorCount": 0, "warningCount": 3, "infoCount": 1 }` | `BATCH_NOT_FOUND`, `MASTER_VERSION_NOT_FOUND`, `INVALID_BATCH_STATUS` |
+| POST | `/api/v1/order-excel-batches/{batchId}/validate` | 배치 검증 또는 재검증 실행 | OPERATOR | Body: optional `{ "memo": "재검증 사유" }` | `{ "batchId": 1001, "errorCount": 0, "warningCount": 3, "infoCount": 1, "productMasterCheckedAt": "2026-05-28T10:30:00+09:00", "storeRouteMasterCheckedAt": "2026-05-28T10:30:00+09:00" }` | `BATCH_NOT_FOUND`, `INVALID_BATCH_STATUS` |
 | GET | `/api/v1/order-excel-batches/{batchId}/validation-errors` | 검증 오류 목록 조회 | VIEWER | Query: `severity`, `sheetName`, `errorCode`, `page`, `size` | `{ "items": [{ "severity": "ERROR", "sheetName": "PL_EA", "rowNo": 12, "message": "상품 마스터에 존재하지 않는 품목코드입니다." }] }` | `BATCH_NOT_FOUND` |
 
 ## 6. Product Master
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/masters/products/versions` | 상품 마스터 CSV 업로드 | ADMIN | Multipart: `file`, `versionName`, optional `scopeType`, `clientId` | `{ "versionId": 3, "scopeType": "TENANT", "rowCount": 1200, "status": "UPLOADED" }` | `INVALID_FILE_EXTENSION`, `DUPLICATE_MASTER_KEY`, `INVALID_COLUMNS` |
-| GET | `/api/v1/masters/products/versions` | 상품 마스터 버전 목록 | VIEWER | Query: `activeYn`, `page`, `size` | `{ "items": [{ "id": 3, "versionName": "2026-05-28", "activeYn": true }] }` | `INVALID_QUERY` |
-| POST | `/api/v1/masters/products/versions/{versionId}/activate` | 상품 마스터 활성화 | ADMIN | Path: `versionId` | `{ "versionId": 3, "activeYn": true }` | `MASTER_VERSION_NOT_FOUND` |
-| GET | `/api/v1/masters/products` | 상품 마스터 조회 | VIEWER | Query: `versionId`, `ezadminCode`, `productName`, `operationStatus`, `page`, `size` | `{ "items": [{ "ezadminCode": "P001", "productName": "상품A", "boxQty": 10 }] }` | `MASTER_VERSION_NOT_FOUND` |
+| POST | `/api/v1/masters/products/uploads` | 상품 마스터 CSV 업로드 및 upsert | ADMIN | Multipart: `file` | `{ "uploadId": 3, "rowCount": 1200, "insertedCount": 20, "updatedCount": 15, "unchangedCount": 1160, "failedCount": 5, "status": "PARTIAL_FAILED" }` | `INVALID_FILE_EXTENSION`, `DUPLICATE_MASTER_KEY`, `INVALID_COLUMNS` |
+| GET | `/api/v1/masters/products/uploads` | 상품 마스터 업로드 이력 조회 | VIEWER | Query: `status`, `from`, `to`, `page`, `size` | `{ "items": [{ "id": 3, "fileName": "products.csv", "insertedCount": 20, "updatedCount": 15, "uploadedAt": "2026-05-28T10:30:00+09:00" }] }` | `INVALID_QUERY` |
+| GET | `/api/v1/masters/products` | 현재 상품 마스터 조회 | VIEWER | Query: `ezadminCode`, `productName`, `operationStatus`, `page`, `size` | `{ "items": [{ "ezadminCode": "P001", "productName": "상품A", "boxQty": 10, "activeYn": true }] }` | `INVALID_QUERY` |
 
 ## 7. Store Route Master
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
-| POST | `/api/v1/masters/store-routes/versions` | 배송지/차량 마스터 XLSX 업로드 | ADMIN | Multipart: `file`, `versionName`, optional `scopeType`, `clientId` | `{ "versionId": 5, "scopeType": "TENANT", "rowCount": 300, "status": "UPLOADED" }` | `INVALID_FILE_EXTENSION`, `SHEET_NOT_FOUND`, `DUPLICATE_MASTER_KEY` |
-| GET | `/api/v1/masters/store-routes/versions` | 배송지/차량 마스터 버전 목록 | VIEWER | Query: `activeYn`, `page`, `size` | `{ "items": [{ "id": 5, "versionName": "2026-05-28", "activeYn": true }] }` | `INVALID_QUERY` |
-| POST | `/api/v1/masters/store-routes/versions/{versionId}/activate` | 배송지/차량 마스터 활성화 | ADMIN | Path: `versionId` | `{ "versionId": 5, "activeYn": true }` | `MASTER_VERSION_NOT_FOUND` |
-| GET | `/api/v1/masters/store-routes` | 배송지/차량 마스터 조회 | VIEWER | Query: `versionId`, `baljugoCode`, `brandName`, `storeName`, `area`, `deliveryRound`, `vehicleName`, `page`, `size` | `{ "items": [{ "baljugoCode": "S001", "storeName": "지점A", "deliveryRound": "1", "vehicleName": "차량1" }] }` | `MASTER_VERSION_NOT_FOUND` |
+| POST | `/api/v1/masters/store-routes/uploads` | 배송지/차량 마스터 XLSX 업로드 및 upsert | ADMIN | Multipart: `file` | `{ "uploadId": 5, "rowCount": 300, "insertedCount": 10, "updatedCount": 8, "unchangedCount": 280, "failedCount": 2, "status": "PARTIAL_FAILED" }` | `INVALID_FILE_EXTENSION`, `SHEET_NOT_FOUND`, `DUPLICATE_MASTER_KEY` |
+| GET | `/api/v1/masters/store-routes/uploads` | 배송지/차량 마스터 업로드 이력 조회 | VIEWER | Query: `status`, `from`, `to`, `page`, `size` | `{ "items": [{ "id": 5, "fileName": "store-routes.xlsx", "insertedCount": 10, "updatedCount": 8, "uploadedAt": "2026-05-28T10:30:00+09:00" }] }` | `INVALID_QUERY` |
+| GET | `/api/v1/masters/store-routes` | 현재 배송지/차량 마스터 조회 | VIEWER | Query: `baljugoCode`, `brandName`, `storeName`, `area`, `deliveryRound`, `vehicleName`, `page`, `size` | `{ "items": [{ "baljugoCode": "S001", "storeName": "지점A", "deliveryRound": "1", "vehicleName": "차량1", "activeYn": true }] }` | `INVALID_QUERY` |
 
 ## 8. Order
 
@@ -181,3 +184,22 @@
 - 다운로드는 CONFIRMED 배치 기준을 기본으로 한다.
 - 차수별 주문 조회와 차수별 다운로드는 1차 MVP 필수 API가 아니며 추후 구현으로 둔다.
 - API Key 원문은 생성 응답에서 한 번만 반환하고 DB에는 hash만 저장한다.
+- 마스터 업로드는 version 생성이 아니라 tenant별 현재 마스터 upsert로 처리한다.
+- 마스터 업로드 이력은 파일 단위 요약 건수만 1차 MVP에 포함하고, row 단위 변경 이력은 추후 구현으로 둔다.
+
+## 17. DB 모델 정합성 점검 TODO
+
+이 섹션은 API 구현 항목이 아니라 Phase 1 DB 설계와 API 초안의 불일치 점검 결과다.
+
+| 점검 항목 | 결과/TODO |
+|---|---|
+| Endpoint와 테이블명 | API는 업무 리소스명(`/order-excel-batches`)을 사용하고 DB는 `upload_batches`를 사용한다. 충돌 없음. |
+| 배치 상태명 | DB enum은 `UPLOADED`, `VALIDATING`, `VALIDATION_FAILED`, `READY_TO_CONFIRM`, `CONFIRMED`, `CANCELLED`, `ROLLED_BACK`만 사용한다. `VALIDATED` 표현은 사용하지 않는다. |
+| 외부 API 노출 기준 | `/external/v1/wos/scan-upload`, `/external/v1/pl/picking-list`는 반드시 `CONFIRMED` 배치만 응답해야 한다. |
+| 차수별 API | `/api/v1/orders/by-round`, `/api/v1/downloads/orders/by-round`는 추후 구현 후보이며 1차 MVP 필수 구현이 아니다. |
+| tenant/client | 내부 API는 로그인 사용자의 `tenant_id`를 사용하고, 업로드/운영 데이터 API는 `clientId`를 명시해야 한다. 응답에 `tenantId` 노출 필요 여부는 확인 필요. |
+| user scope | `SYSTEM`, `TENANT`, `CLIENT` 스코프를 응답에 포함한다. 고객사 직접 로그인과 SYSTEM 사용자의 tenant 선택 정책은 추후 상세화한다. |
+| batchId | 조회/다운로드/외부 API 응답에는 추적 가능한 `batchId` 포함을 권장한다. |
+| master checked at | 배치 상세 응답에는 `productMasterCheckedAt`, `storeRouteMasterCheckedAt` 포함을 권장한다. |
+| deliveryDate/dueDate | Scan은 `deliveryDate`, PL/Label/Order는 `dueDate` 기반이다. 대표 `deliveryDate` 산정 기준은 확인 필요. |
+| requestId | 공통 응답 meta의 `requestId`는 `api_call_logs`, `batch_audit_logs`, `download_logs`와 연결 가능해야 한다. |

@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+
+<html lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>일괄 업로드 (OIS) - OMS Logistics</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        /* Custom scrollbar for data tables */
+        .table-scroll::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+        .table-scroll::-webkit-scrollbar-track {
+            background: #f8f9ff;
+        }
+        .table-scroll::-webkit-scrollbar-thumb {
+            background-color: #c5c5d3;
+            border-radius: 4px;
+        }
+    </style>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "surface-dim": "#ccdbf4",
+                        "on-background": "#0d1c2f",
+                        "primary": "#00236f",
+                        "tertiary-fixed-dim": "#c4c7c9",
+                        "surface-variant": "#d5e3fd",
+                        "primary-fixed": "#dce1ff",
+                        "on-tertiary-container": "#aaadaf",
+                        "on-surface": "#0d1c2f",
+                        "tertiary": "#272b2d",
+                        "tertiary-container": "#3d4143",
+                        "surface-container-high": "#dde9ff",
+                        "inverse-surface": "#233144",
+                        "secondary-fixed-dim": "#b7c8e1",
+                        "outline-variant": "#c5c5d3",
+                        "on-error": "#ffffff",
+                        "error": "#ba1a1a",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "surface-tint": "#4059aa",
+                        "primary-container": "#1e3a8a",
+                        "on-secondary": "#ffffff",
+                        "on-tertiary-fixed": "#191c1e",
+                        "on-primary-fixed": "#00164e",
+                        "surface-container-highest": "#d5e3fd",
+                        "surface-container-low": "#eff4ff",
+                        "on-secondary-fixed-variant": "#38485d",
+                        "on-primary-container": "#90a8ff",
+                        "outline": "#757682",
+                        "on-tertiary-fixed-variant": "#444749",
+                        "on-secondary-container": "#54647a",
+                        "on-secondary-fixed": "#0b1c30",
+                        "background": "#f8f9ff",
+                        "secondary": "#505f76",
+                        "surface-container": "#e6eeff",
+                        "inverse-primary": "#b6c4ff",
+                        "secondary-fixed": "#d3e4fe",
+                        "tertiary-fixed": "#e0e3e5",
+                        "surface-bright": "#f8f9ff",
+                        "primary-fixed-dim": "#b6c4ff",
+                        "on-primary": "#ffffff",
+                        "secondary-container": "#d0e1fb",
+                        "surface": "#f8f9ff",
+                        "on-surface-variant": "#444651",
+                        "inverse-on-surface": "#ebf1ff",
+                        "error-container": "#ffdad6",
+                        "on-error-container": "#93000a",
+                        "on-primary-fixed-variant": "#264191"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    spacing: {
+                        "container_gutter": "24px",
+                        "header_height": "64px",
+                        "sidebar_width": "260px",
+                        "stack_gap_lg": "24px",
+                        "stack_gap_md": "16px",
+                        "table_cell_padding": "12px 16px",
+                        "stack_gap_sm": "8px"
+                    },
+                    fontFamily: {
+                        "display-lg": ["Noto Sans KR"],
+                        "body-sm": ["Noto Sans KR"],
+                        "headline-md": ["Noto Sans KR"],
+                        "title-sm": ["Noto Sans KR"],
+                        "caption": ["Noto Sans KR"],
+                        "label-mono": ["JetBrains Mono"],
+                        "body-md": ["Noto Sans KR"]
+                    },
+                    fontSize: {
+                        "display-lg": ["30px", { lineHeight: "40px", letterSpacing: "-0.02em", fontWeight: "700" }],
+                        "body-sm": ["13px", { lineHeight: "18px", fontWeight: "400" }],
+                        "headline-md": ["20px", { lineHeight: "28px", letterSpacing: "-0.01em", fontWeight: "600" }],
+                        "title-sm": ["16px", { lineHeight: "24px", fontWeight: "600" }],
+                        "caption": ["11px", { lineHeight: "14px", letterSpacing: "0.02em", fontWeight: "500" }],
+                        "label-mono": ["12px", { lineHeight: "16px", fontWeight: "400" }],
+                        "body-md": ["14px", { lineHeight: "20px", fontWeight: "400" }]
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-background text-on-background font-body-md antialiased overflow-x-hidden">
+<!-- Shared Component: SideNavBar -->
+<nav class="fixed left-0 top-0 h-screen w-[260px] bg-on-background dark:bg-on-background border-r border-outline-variant z-50 flex flex-col py-6 transition-all duration-200 ease-in-out">
+<div class="px-6 mb-8 flex flex-col gap-2">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-primary-fixed" style="font-variation-settings: 'FILL' 1; font-size: 32px;">local_shipping</span>
+<span class="font-display-lg text-display-lg font-bold text-primary-fixed tracking-tight">OMS Admin</span>
+</div>
+<span class="font-body-sm text-body-sm text-tertiary-fixed-dim">물류 운영 관리 시스템</span>
+</div>
+<div class="flex-1 px-3 space-y-1">
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">dashboard</span>
+<span class="font-title-sm text-title-sm">대시보드</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-primary-container text-on-primary-container border-l-4 border-primary-fixed rounded-r-lg group" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">upload_file</span>
+<span class="font-title-sm text-title-sm">일괄 업로드 (OIS)</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">list_alt</span>
+<span class="font-title-sm text-title-sm">배치 목록</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">settings</span>
+<span class="font-title-sm text-title-sm">설정</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined group-hover:scale-110 transition-transform">terminal</span>
+<span class="font-title-sm text-title-sm">시스템 로그</span>
+</a>
+</div>
+<div class="px-3 mt-auto space-y-1 border-t border-tertiary-container pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-body-md text-body-md">도움말</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors rounded-lg group" href="#">
+<span class="material-symbols-outlined">logout</span>
+<span class="font-body-md text-body-md">로그아웃</span>
+</a>
+<div class="mt-4 px-4 flex items-center gap-3">
+<div class="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-on-primary font-bold text-caption">LA</div>
+<div class="flex flex-col">
+<span class="font-title-sm text-title-sm text-surface-variant text-sm">Logistics Admin</span>
+<span class="font-caption text-caption text-tertiary-fixed-dim">ID: ADM-9921</span>
+</div>
+</div>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="ml-[260px] min-h-screen flex flex-col">
+<!-- Shared Component: TopAppBar -->
+<header class="bg-surface-container-lowest docked full-width top-0 sticky z-40 border-b border-outline-variant flex items-center justify-between h-[64px] px-container_gutter transition-all duration-200">
+<div class="flex items-center gap-4">
+<span class="font-title-sm text-title-sm font-bold text-on-background">OMS Logistics</span>
+<div class="h-4 w-px bg-outline-variant"></div>
+<span class="font-body-sm text-body-sm text-secondary">일괄 업로드 (OIS) 운영</span>
+</div>
+<div class="flex items-center gap-2">
+<button class="p-2 text-secondary hover:text-primary hover:bg-surface-container-low transition-colors rounded-full relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-error rounded-full border border-surface-container-lowest"></span>
+</button>
+<button class="p-2 text-secondary hover:text-primary hover:bg-surface-container-low transition-colors rounded-full">
+<span class="material-symbols-outlined">hub</span>
+</button>
+<button class="p-2 text-secondary hover:text-primary hover:bg-surface-container-low transition-colors rounded-full">
+<span class="material-symbols-outlined">account_circle</span>
+</button>
+</div>
+</header>
+<!-- Page Content Canvas -->
+<main class="flex-1 p-container_gutter flex flex-col gap-stack_gap_lg">
+<!-- Page Header & Global Actions -->
+<div class="flex items-center justify-between">
+<div>
+<h1 class="font-headline-md text-headline-md text-on-background">OIS 엑셀 업로드</h1>
+<p class="font-body-sm text-body-sm text-secondary mt-1">주문, 상품, 배송지 정보를 포함한 복합 엑셀 파일을 시스템에 일괄 등록합니다.</p>
+</div>
+<div>
+<!-- Primary Action after upload: 검증 실행 -->
+<button class="flex items-center gap-2 px-5 py-2.5 bg-primary text-on-primary rounded-lg font-title-sm text-title-sm hover:bg-primary-container transition-colors shadow-sm">
+<span class="material-symbols-outlined text-[20px]">rule</span>
+                    검증 실행
+                </button>
+</div>
+</div>
+<!-- 2-Column Grid Layout -->
+<div class="grid grid-cols-1 xl:grid-cols-12 gap-stack_gap_lg items-start">
+<!-- Left Column -->
+<div class="xl:col-span-8 flex flex-col gap-stack_gap_lg">
+<!-- Main Upload Card -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 flex flex-col gap-6 shadow-sm">
+<!-- Stepper -->
+<div class="flex items-center justify-between relative px-4">
+<div class="absolute top-1/2 left-8 right-8 h-0.5 bg-surface-container -z-10 -translate-y-1/2"></div>
+<div class="absolute top-1/2 left-8 w-[50%] h-0.5 bg-primary -z-10 -translate-y-1/2"></div>
+<div class="flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm ring-4 ring-surface-container-lowest">
+<span class="material-symbols-outlined text-[18px]">check</span>
+</div>
+<span class="font-title-sm text-title-sm text-primary">파일 선택</span>
+</div>
+<div class="flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full bg-primary text-on-primary flex items-center justify-center font-bold text-sm ring-4 ring-surface-container-lowest">
+                                2
+                            </div>
+<span class="font-title-sm text-title-sm text-primary">시트 인식</span>
+</div>
+<div class="flex flex-col items-center gap-2 bg-surface-container-lowest px-2">
+<div class="w-8 h-8 rounded-full bg-surface-container text-secondary flex items-center justify-center font-bold text-sm ring-4 ring-surface-container-lowest">
+                                3
+                            </div>
+<span class="font-title-sm text-title-sm text-secondary">검증 대기</span>
+</div>
+</div>
+<!-- FileUploadDropzone -->
+<div class="border-2 border-dashed border-outline-variant bg-surface-bright rounded-xl p-10 flex flex-col items-center justify-center gap-4 hover:border-primary hover:bg-surface-container-low transition-all cursor-pointer group">
+<div class="w-16 h-16 rounded-full bg-surface-container flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
+<span class="material-symbols-outlined text-[32px]">upload_file</span>
+</div>
+<div class="text-center">
+<p class="font-title-sm text-title-sm text-on-background">OIS 엑셀 파일을 여기에 드래그하거나 클릭하여 업로드하세요.</p>
+<p class="font-body-sm text-body-sm text-secondary mt-1">지원 형식: .xlsx, .xls, .xlsm (최대 50MB)</p>
+</div>
+</div>
+<!-- File Info & Actions -->
+<div class="flex items-center justify-between p-4 bg-background border border-outline-variant rounded-lg">
+<div class="flex items-center gap-4 flex-1">
+<span class="material-symbols-outlined text-primary text-[28px] opacity-80">description</span>
+<div class="flex flex-col flex-1">
+<div class="flex justify-between mb-1">
+<span class="font-title-sm text-title-sm text-on-background font-label-mono">OIS_master_upload_20231025.xlsx</span>
+<span class="font-caption text-caption text-secondary">3.2 MB</span>
+</div>
+<div class="w-full bg-surface-container rounded-full h-1.5 overflow-hidden">
+<div class="bg-primary h-1.5 rounded-full" style="width: 100%"></div>
+</div>
+</div>
+<button class="p-1 text-secondary hover:text-error transition-colors rounded-full">
+<span class="material-symbols-outlined text-[20px]">close</span>
+</button>
+</div>
+</div>
+<div class="flex justify-end gap-3">
+<button class="px-4 py-2 border border-outline-variant text-secondary rounded-lg font-title-sm text-title-sm hover:bg-surface-bright transition-colors">
+                            취소
+                        </button>
+<!-- 상태 로직: 파일 선택 완료 상태에서 '업로드 시작' 활성화 (현재 샘플은 업로드 완료 상태이므로 검증 실행이 메인) -->
+<button class="px-4 py-2 bg-primary text-on-primary rounded-lg font-title-sm text-title-sm hover:bg-primary-container shadow-sm transition-colors">
+                            업로드 시작
+                        </button>
+</div>
+</div>
+<!-- Alert: Upload Complete -->
+<div class="bg-surface-container border border-surface-tint/20 rounded-lg p-4 flex items-start gap-3 shadow-sm">
+<span class="material-symbols-outlined text-surface-tint mt-0.5" style="font-variation-settings: 'FILL' 1;">info</span>
+<div>
+<h4 class="font-title-sm text-title-sm text-on-background">업로드가 완료되었습니다. 인식된 시트를 확인한 뒤 검증을 실행하세요.</h4>
+<p class="font-body-sm text-body-sm text-secondary mt-1">총 6개의 시트가 감지되었습니다. 각 시트의 파싱 상태를 확인해 주세요.</p>
+</div>
+</div>
+<!-- Sheet Parsing Result Table -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden shadow-sm flex flex-col">
+<div class="px-5 py-4 border-b border-outline-variant flex items-center justify-between bg-surface-bright">
+<h3 class="font-title-sm text-title-sm text-on-background">시트 인식 결과</h3>
+<span class="font-caption text-caption text-secondary">총 6건</span>
+</div>
+<div class="overflow-x-auto table-scroll">
+<table class="w-full text-left whitespace-nowrap">
+<thead class="bg-background border-b border-outline-variant text-secondary font-caption text-caption uppercase tracking-wider">
+<tr>
+<th class="px-4 py-3 font-medium">시트명</th>
+<th class="px-4 py-3 font-medium">시트유형</th>
+<th class="px-4 py-3 font-medium">Suffix</th>
+<th class="px-4 py-3 font-medium text-right">데이터 행 수</th>
+<th class="px-4 py-3 font-medium">파싱 상태</th>
+<th class="px-4 py-3 font-medium">검증 상태</th>
+<th class="px-4 py-3 font-medium">메시지</th>
+</tr>
+</thead>
+<tbody class="font-body-sm text-body-sm text-on-background divide-y divide-surface-container font-label-mono">
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">Scan_upload_장지</td>
+<td class="px-4 py-2.5">Scan</td>
+<td class="px-4 py-2.5">장지</td>
+<td class="px-4 py-2.5 text-right">128</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary truncate max-w-[150px]">일부 코드 확인 필요</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">Scan_upload_군량리</td>
+<td class="px-4 py-2.5">Scan</td>
+<td class="px-4 py-2.5">군량리</td>
+<td class="px-4 py-2.5 text-right">0</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary">0건 정상 시트</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">PL_EA</td>
+<td class="px-4 py-2.5">PL</td>
+<td class="px-4 py-2.5">EA</td>
+<td class="px-4 py-2.5 text-right">245</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary">-</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">PL_Box</td>
+<td class="px-4 py-2.5">PL</td>
+<td class="px-4 py-2.5">Box</td>
+<td class="px-4 py-2.5 text-right">88</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary">-</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">Label_EA</td>
+<td class="px-4 py-2.5">Label</td>
+<td class="px-4 py-2.5">EA</td>
+<td class="px-4 py-2.5 text-right">245</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary">-</td>
+</tr>
+<tr class="hover:bg-surface-bright transition-colors">
+<td class="px-4 py-2.5 bg-surface-container/30">Label_Box</td>
+<td class="px-4 py-2.5">Label</td>
+<td class="px-4 py-2.5">Box</td>
+<td class="px-4 py-2.5 text-right">88</td>
+<td class="px-4 py-2.5">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-container-high text-on-surface font-caption text-[10px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-surface-tint"></span> 정상
+                                        </span>
+</td>
+<td class="px-4 py-2.5 text-secondary">대기</td>
+<td class="px-4 py-2.5 text-secondary">-</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<!-- Right Column -->
+<div class="xl:col-span-4 flex flex-col gap-stack_gap_md">
+<!-- Settings Bento Box -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 shadow-sm"><div class="flex items-center gap-2 mb-4"><span class="material-symbols-outlined text-secondary">tune</span><h3 class="font-title-sm text-title-sm text-on-background">현재 검증 기준 마스터</h3></div><div class="space-y-6"><div><label class="block font-caption text-caption text-secondary mb-2">상품 마스터</label><div class="bg-surface-bright border border-surface-container-high rounded-md p-3 flex items-center justify-between"><div class="flex flex-col"><span class="font-label-mono text-label-mono text-on-background font-bold">12,482건</span><span class="text-[10px] text-secondary">2024.08.01 업로드</span></div><span class="px-2 py-0.5 rounded bg-primary-container text-on-primary-container text-[10px] font-bold">ACTIVE</span></div></div><div class="pt-4 border-t border-outline-variant"><label class="block font-caption text-caption text-secondary mb-2">배송지/차량 마스터</label><div class="bg-surface-bright border border-surface-container-high rounded-md p-3 flex items-center justify-between"><div class="flex flex-col"><span class="font-label-mono text-label-mono text-on-background font-bold">12,482건</span><span class="text-[10px] text-secondary">2023.11.02 업로드</span></div><span class="px-2 py-0.5 rounded bg-primary-container text-on-primary-container text-[10px] font-bold">ACTIVE</span></div></div><p class="font-caption text-[11px] text-secondary leading-relaxed">업로드된 OIS 엑셀은 현재 마스터 데이터를 기준으로 검증됩니다.</p></div></div>
+<!-- Info Bento Box -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 shadow-sm">
+<div class="flex items-center gap-2 mb-3">
+<span class="material-symbols-outlined text-secondary">rule</span>
+<h3 class="font-title-sm text-title-sm text-on-background">업로드 규칙 안내</h3>
+</div>
+<ul class="space-y-2.5 list-disc list-inside font-body-sm text-body-sm text-secondary">
+<li>표준 OIS 템플릿 양식을 반드시 준수해야 합니다.</li>
+<li>시트명은 <span class="font-label-mono text-xs bg-surface-container px-1 py-0.5 rounded">유형_Suffix</span> 형식을 권장합니다.</li>
+<li>숨김 처리된 행이나 열은 파싱 대상에서 제외됩니다.</li>
+<li>필수 항목 누락 시 검증 단계에서 <strong>Error</strong>로 처리됩니다.</li>
+<li>대용량 파일은 검증 시 시간이 지연될 수 있습니다.</li>
+</ul>
+</div>
+<!-- History Box -->
+<div class="bg-surface-container-lowest border border-outline-variant rounded-xl p-5 shadow-sm">
+<div class="flex items-center justify-between mb-3">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-secondary">history</span>
+<h3 class="font-title-sm text-title-sm text-on-background">최근 업로드 이력</h3>
+</div>
+<button class="text-primary hover:underline font-caption text-caption">전체보기</button>
+</div>
+<div class="space-y-3">
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-surface-tint opacity-70 mt-0.5">description</span>
+<div>
+<p class="font-body-sm text-body-sm text-on-background line-clamp-1 font-label-mono">OIS_daily_batch_1024.xlsx</p>
+<div class="flex items-center gap-2 mt-0.5 font-caption text-[10px] text-secondary">
+<span>어제 18:30</span>
+<span class="w-0.5 h-0.5 rounded-full bg-outline-variant"></span>
+<span>배치 확정 완료 (2,401건)</span>
+</div>
+</div>
+</div>
+<div class="flex items-start gap-3">
+<span class="material-symbols-outlined text-surface-tint opacity-70 mt-0.5">description</span>
+<div>
+<p class="font-body-sm text-body-sm text-on-background line-clamp-1 font-label-mono">urgent_order_fix_V2.xlsx</p>
+<div class="flex items-center gap-2 mt-0.5 font-caption text-[10px] text-secondary">
+<span>어제 14:12</span>
+<span class="w-0.5 h-0.5 rounded-full bg-outline-variant"></span>
+<span>배치 확정 완료 (12건)</span>
+</div>
+</div>
+</div>
+<div class="flex items-start gap-3 opacity-60">
+<span class="material-symbols-outlined text-error opacity-70 mt-0.5">error</span>
+<div>
+<p class="font-body-sm text-body-sm text-on-background line-clamp-1 font-label-mono">OIS_daily_batch_1023.xlsx</p>
+<div class="flex items-center gap-2 mt-0.5 font-caption text-[10px] text-error">
+<span>10월 23일</span>
+<span class="w-0.5 h-0.5 rounded-full bg-error/50"></span>
+<span>검증 실패 (포맷 오류)</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+</div>
+</body></html>

@@ -1,0 +1,536 @@
+<!DOCTYPE html>
+
+<html lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>OMS Logistics - PL 조회</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "secondary-container": "#d0e1fb",
+                        "tertiary-fixed-dim": "#c4c7c9",
+                        "primary-fixed-dim": "#b6c4ff",
+                        "on-surface": "#0d1c2f",
+                        "secondary": "#505f76",
+                        "on-tertiary-container": "#aaadaf",
+                        "surface-container": "#e6eeff",
+                        "error": "#ba1a1a",
+                        "on-background": "#0d1c2f",
+                        "background": "#f8f9ff",
+                        "primary-container": "#1e3a8a",
+                        "on-tertiary-fixed": "#191c1e",
+                        "surface-variant": "#d5e3fd",
+                        "surface-dim": "#ccdbf4",
+                        "on-tertiary": "#ffffff",
+                        "inverse-primary": "#b6c4ff",
+                        "primary": "#00236f",
+                        "tertiary-fixed": "#e0e3e5",
+                        "on-primary-container": "#90a8ff",
+                        "secondary-fixed-dim": "#b7c8e1",
+                        "outline": "#757682",
+                        "on-surface-variant": "#444651",
+                        "inverse-surface": "#233144",
+                        "surface-container-highest": "#d5e3fd",
+                        "surface-bright": "#f8f9ff",
+                        "on-secondary": "#ffffff",
+                        "on-error-container": "#93000a",
+                        "surface-tint": "#4059aa",
+                        "on-error": "#ffffff",
+                        "surface-container-low": "#eff4ff",
+                        "on-primary-fixed-variant": "#264191",
+                        "on-primary": "#ffffff",
+                        "surface": "#f8f9ff",
+                        "error-container": "#ffdad6",
+                        "primary-fixed": "#dce1ff",
+                        "surface-container-high": "#dde9ff",
+                        "on-secondary-container": "#54647a",
+                        "tertiary": "#272b2d",
+                        "surface-container-lowest": "#ffffff",
+                        "secondary-fixed": "#d3e4fe",
+                        "on-secondary-fixed-variant": "#38485d",
+                        "on-secondary-fixed": "#0b1c30",
+                        "tertiary-container": "#3d4143",
+                        "on-tertiary-fixed-variant": "#444749",
+                        "inverse-on-surface": "#ebf1ff",
+                        "on-primary-fixed": "#00164e",
+                        "outline-variant": "#c5c5d3"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "sidebar_width": "260px",
+                        "container_gutter": "24px",
+                        "table_cell_padding": "12px 16px",
+                        "stack_gap_md": "16px",
+                        "stack_gap_sm": "8px",
+                        "stack_gap_lg": "24px",
+                        "header_height": "64px"
+                    },
+                    "fontFamily": {
+                        "headline-md": ["Noto Sans KR"],
+                        "label-mono": ["JetBrains Mono"],
+                        "display-lg": ["Noto Sans KR"],
+                        "caption": ["Noto Sans KR"],
+                        "title-sm": ["Noto Sans KR"],
+                        "body-md": ["Noto Sans KR"],
+                        "body-sm": ["Noto Sans KR"]
+                    },
+                    "fontSize": {
+                        "headline-md": ["20px", {"lineHeight": "28px", "letterSpacing": "-0.01em", "fontWeight": "600"}],
+                        "label-mono": ["12px", {"lineHeight": "16px", "fontWeight": "400"}],
+                        "display-lg": ["30px", {"lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700"}],
+                        "caption": ["11px", {"lineHeight": "14px", "letterSpacing": "0.02em", "fontWeight": "500"}],
+                        "title-sm": ["16px", {"lineHeight": "24px", "fontWeight": "600"}],
+                        "body-md": ["14px", {"lineHeight": "20px", "fontWeight": "400"}],
+                        "body-sm": ["13px", {"lineHeight": "18px", "fontWeight": "400"}]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .code-cell {
+            background-color: #f1f5f9;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 12px;
+            color: #334155;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .code-cell:hover {
+            background-color: #e2e8f0;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-background font-body-md text-body-md overflow-hidden">
+<!-- Sidebar -->
+<aside class="fixed left-0 top-0 h-screen w-[260px] bg-on-background flex flex-col py-6 border-r border-outline-variant z-50">
+<div class="px-6 mb-8">
+<h1 class="font-display-lg text-display-lg font-bold text-primary-fixed">OMS Admin</h1>
+<p class="text-on-primary-container font-title-sm text-title-sm opacity-70">물류 운영 관리 시스템</p>
+</div>
+<nav class="flex-1 px-2 space-y-1"><a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="dashboard">dashboard</span>
+<span class="font-body-md text-body-md">대시보드</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 bg-primary-container text-on-primary-container border-l-4 border-primary-fixed" href="#">
+<span class="material-symbols-outlined" data-icon="manage_search">manage_search</span>
+<span class="font-body-md text-body-md">PL 조회</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="list_alt">list_alt</span>
+<span class="font-body-md text-body-md">배치 목록</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="upload_file">upload_file</span>
+<span class="font-body-md text-body-md">일괄 업로드 (OIS)</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-body-md text-body-md">설정</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+<span class="font-body-md text-body-md">시스템 로그</span>
+</a></nav>
+<div class="px-2 mt-auto border-t border-outline-variant/30 pt-4">
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+<span class="font-body-md text-body-md">도움말</span>
+</a>
+<a class="flex items-center gap-3 px-4 py-3 text-surface-variant hover:bg-tertiary-container hover:text-on-tertiary-container transition-colors" href="#">
+<span class="material-symbols-outlined" data-icon="logout">logout</span>
+<span class="font-body-md text-body-md">로그아웃</span>
+</a>
+</div>
+</aside>
+<!-- Main Content wrapper -->
+<main class="ml-[260px] h-screen flex flex-col relative">
+<!-- Header -->
+<header class="flex items-center justify-between h-[64px] px-container_gutter sticky top-0 z-40 bg-surface-container-lowest border-b border-outline-variant">
+<div class="flex items-center gap-4">
+<h2 class="font-title-sm text-title-sm font-bold text-on-background">PL 조회</h2>
+<div class="h-4 w-[1px] bg-outline-variant"></div>
+<div class="flex items-center bg-surface-container-low rounded-lg px-3 py-1.5 gap-2 border border-outline-variant/50">
+<span class="material-symbols-outlined text-secondary text-[20px]" data-icon="search">search</span>
+<input class="bg-transparent border-none focus:ring-0 text-body-sm w-64 outline-none" placeholder="통합 검색..." type="text"/>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 hover:bg-surface-container-low rounded-full transition-colors relative">
+<span class="material-symbols-outlined text-secondary" data-icon="notifications">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-error rounded-full border-2 border-surface-container-lowest"></span>
+</button>
+<button class="p-2 hover:bg-surface-container-low rounded-full transition-colors">
+<span class="material-symbols-outlined text-secondary" data-icon="hub">hub</span>
+</button>
+<div class="flex items-center gap-3 pl-4 border-l border-outline-variant">
+<div class="text-right">
+<p class="text-body-sm font-bold">김관리 매니저</p>
+<p class="text-[10px] text-secondary">인천 1센터</p>
+</div>
+<div class="w-8 h-8 rounded-full bg-primary-fixed flex items-center justify-center">
+<span class="material-symbols-outlined text-on-primary-fixed" data-icon="account_circle">account_circle</span>
+</div>
+</div>
+</div>
+</header>
+<!-- Page Body Area -->
+<div class="flex-1 p-container_gutter overflow-y-auto custom-scrollbar">
+<!-- Unit Tabs -->
+<div class="flex gap-1 bg-surface-container rounded-lg p-1 w-fit mb-6">
+<button class="px-8 py-2 rounded-lg bg-surface-container-lowest shadow-sm text-primary font-bold text-body-md transition-all">EA</button>
+<button class="px-8 py-2 rounded-lg text-secondary font-medium text-body-md hover:bg-surface-container-low transition-all">BOX</button>
+</div>
+<!-- Filter Panel -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl p-6 mb-6">
+<div class="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4">
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">배치</label>
+<select class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none">
+<option>B-20231101-001</option>
+<option>B-20231101-002</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">고객사</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="고객사명 입력" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">PL 유형</label>
+<select class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none">
+<option>전체</option>
+<option>상온</option>
+<option>냉장</option>
+<option>냉동</option>
+</select>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">납기일</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" type="date"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">주문번호</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="ORD-XXXX" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">거래처코드</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="Code" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">품목코드</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="Item Code" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">차량명</label>
+<input class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none" placeholder="차량번호/기사명" type="text"/>
+</div>
+<div class="space-y-1">
+<label class="text-caption text-secondary font-bold">보관온도</label>
+<select class="w-full h-10 px-3 bg-surface border border-outline-variant rounded-lg text-body-sm focus:border-primary focus:ring-1 focus:ring-primary outline-none">
+<option>전체</option>
+<option>정온</option>
+<option>위험물</option>
+</select>
+</div>
+<div class="flex items-end gap-2">
+<button class="flex-1 h-10 bg-primary text-white rounded-lg flex items-center justify-center gap-2 hover:opacity-90 transition-all font-bold">
+<span class="material-symbols-outlined text-[18px]" data-icon="search">search</span>
+                            조회
+                        </button>
+<button class="w-10 h-10 border border-outline-variant rounded-lg flex items-center justify-center text-secondary hover:bg-surface-container-low transition-all">
+<span class="material-symbols-outlined" data-icon="restart_alt">restart_alt</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Table Section -->
+<section class="bg-surface-container-lowest border border-outline-variant rounded-xl overflow-hidden flex flex-col">
+<div class="p-4 flex items-center justify-between border-b border-outline-variant bg-surface-container-low/30">
+<div class="flex items-center gap-4">
+<h3 class="font-title-sm text-title-sm text-on-surface">주문 리스트 <span class="text-primary text-body-sm ml-2">Total 1,284</span></h3>
+</div>
+<div class="flex items-center gap-2">
+<button class="px-3 py-1.5 border border-outline-variant rounded text-body-sm flex items-center gap-2 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-[18px]" data-icon="download">download</span>
+                            엑셀 다운로드
+                        </button>
+<button class="px-3 py-1.5 border border-outline-variant rounded text-body-sm flex items-center gap-2 hover:bg-surface-container transition-all">
+<span class="material-symbols-outlined text-[18px]" data-icon="print">print</span>
+                            QR 일괄 인쇄
+                        </button>
+</div>
+</div>
+<div class="overflow-x-auto custom-scrollbar">
+<table class="w-full border-collapse text-left whitespace-nowrap">
+<thead class="sticky top-0 bg-[#f1f5f9] z-10">
+<tr class="border-b border-outline-variant">
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">rowNo</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">PL 유형</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">주문번호</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">거래처코드</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">거래처명</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">브랜드</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">품목코드</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">품명</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">단위</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">보관온도</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">납기요청일</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">주문량</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">차량명</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm">CBM</th>
+<th class="px-4 py-3 font-semibold text-on-surface text-body-sm text-center">QR코드</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/50">
+<!-- Sample Row 1 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer group" onclick="toggleDrawer(true)">
+<td class="px-4 py-3 text-body-sm text-secondary">001</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>박스피킹
+                                    </span>
+</td>
+<td class="px-4 py-3"><span class="code-cell">ORD-2311-00102</span></td>
+<td class="px-4 py-3"><span class="code-cell">ACC-9921</span></td>
+<td class="px-4 py-3 text-body-sm font-medium">로지스허브 코리아</td>
+<td class="px-4 py-3 text-body-sm text-secondary">Global Logistics</td>
+<td class="px-4 py-3"><span class="code-cell">SKU-A-092</span></td>
+<td class="px-4 py-3 text-body-sm">고출력 산업용 선풍기 V3</td>
+<td class="px-4 py-3 text-body-sm">EA</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>상온
+                                    </span>
+</td>
+<td class="px-4 py-3 text-body-sm">2023-11-05</td>
+<td class="px-4 py-3 text-body-sm font-bold text-primary">1,200</td>
+<td class="px-4 py-3 text-body-sm">인천-88-가-1234</td>
+<td class="px-4 py-3 text-body-sm">0.85</td>
+<td class="px-4 py-3 text-center">
+<span class="code-cell" title="Click to view QR"><span class="material-symbols-outlined text-[16px] align-middle" data-icon="qr_code_2">qr_code_2</span> VIEW</span>
+</td>
+</tr>
+<!-- Sample Row 2 -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer" onclick="toggleDrawer(true)">
+<td class="px-4 py-3 text-body-sm text-secondary">002</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-orange-100 text-orange-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-orange-600"></span>낱개피킹
+                                    </span>
+</td>
+<td class="px-4 py-3"><span class="code-cell">ORD-2311-00103</span></td>
+<td class="px-4 py-3"><span class="code-cell">ACC-9945</span></td>
+<td class="px-4 py-3 text-body-sm font-medium">미래식품상사</td>
+<td class="px-4 py-3 text-body-sm text-secondary">Premium Food</td>
+<td class="px-4 py-3"><span class="code-cell">SKU-B-114</span></td>
+<td class="px-4 py-3 text-body-sm">유기농 올리브유 500ml</td>
+<td class="px-4 py-3 text-body-sm">EA</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-amber-600"></span>정온
+                                    </span>
+</td>
+<td class="px-4 py-3 text-body-sm">2023-11-05</td>
+<td class="px-4 py-3 text-body-sm font-bold text-primary">50</td>
+<td class="px-4 py-3 text-body-sm">경기-72-나-5566</td>
+<td class="px-4 py-3 text-body-sm">0.12</td>
+<td class="px-4 py-3 text-center">
+<span class="code-cell" title="Click to view QR"><span class="material-symbols-outlined text-[16px] align-middle" data-icon="qr_code_2">qr_code_2</span> VIEW</span>
+</td>
+</tr>
+<!-- Repeat Row -->
+<tr class="hover:bg-surface-container-low transition-colors cursor-pointer" onclick="toggleDrawer(true)">
+<td class="px-4 py-3 text-body-sm text-secondary">003</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-blue-600"></span>박스피킹
+                                    </span>
+</td>
+<td class="px-4 py-3"><span class="code-cell">ORD-2311-00104</span></td>
+<td class="px-4 py-3"><span class="code-cell">ACC-9921</span></td>
+<td class="px-4 py-3 text-body-sm font-medium">로지스허브 코리아</td>
+<td class="px-4 py-3 text-body-sm text-secondary">Global Logistics</td>
+<td class="px-4 py-3"><span class="code-cell">SKU-A-093</span></td>
+<td class="px-4 py-3 text-body-sm">산업용 덕트 호스 10m</td>
+<td class="px-4 py-3 text-body-sm">BOX</td>
+<td class="px-4 py-3">
+<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 text-green-800 text-[11px] font-bold">
+<span class="w-1.5 h-1.5 rounded-full bg-green-600"></span>상온
+                                    </span>
+</td>
+<td class="px-4 py-3 text-body-sm">2023-11-06</td>
+<td class="px-4 py-3 text-body-sm font-bold text-primary">200</td>
+<td class="px-4 py-3 text-body-sm">인천-88-가-1234</td>
+<td class="px-4 py-3 text-body-sm">1.2</td>
+<td class="px-4 py-3 text-center">
+<span class="code-cell" title="Click to view QR"><span class="material-symbols-outlined text-[16px] align-middle" data-icon="qr_code_2">qr_code_2</span> VIEW</span>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="px-6 py-4 border-t border-outline-variant flex items-center justify-between">
+<span class="text-body-sm text-secondary">Showing 1 to 20 of 1,284 entries</span>
+<div class="flex items-center gap-1">
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container transition-all"><span class="material-symbols-outlined text-[18px]" data-icon="chevron_left">chevron_left</span></button>
+<button class="w-8 h-8 flex items-center justify-center rounded bg-primary text-white font-bold">1</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container">2</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container">3</button>
+<span class="px-2">...</span>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container">65</button>
+<button class="w-8 h-8 flex items-center justify-center rounded hover:bg-surface-container transition-all"><span class="material-symbols-outlined text-[18px]" data-icon="chevron_right">chevron_right</span></button>
+</div>
+</div>
+</section>
+</div>
+<!-- Floating Action Button (Primary action for this page) -->
+<!-- Right Side Drawer -->
+<div class="fixed right-0 top-0 h-screen w-[420px] bg-white border-l border-outline-variant shadow-2xl transition-transform translate-x-full z-50 flex flex-col" id="rightDrawer">
+<div class="flex items-center justify-between p-6 border-b border-outline-variant bg-surface-container-low">
+<div>
+<h4 class="font-headline-md text-headline-md text-on-surface">상세 정보</h4>
+<p class="text-body-sm text-secondary">rowNo: 001 상세 분석 데이터</p>
+</div>
+<button class="p-2 hover:bg-surface-container rounded-full" onclick="toggleDrawer(false)">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+<div class="flex-1 overflow-y-auto p-6 space-y-8 custom-scrollbar">
+<!-- Original Value Info -->
+<div class="space-y-4">
+<div class="flex items-center gap-2 text-primary font-bold">
+<span class="material-symbols-outlined text-[20px]" data-icon="source">source</span>
+<span>원본 데이터 (Raw Data)</span>
+</div>
+<div class="bg-surface-container-low rounded-xl p-4 border border-outline-variant">
+<div class="grid grid-cols-2 gap-y-4">
+<div>
+<p class="text-caption text-secondary mb-1">원본 rowNo</p>
+<p class="font-label-mono text-label-mono">CSV_LINE_0024</p>
+</div>
+<div>
+<p class="text-caption text-secondary mb-1">필드 구분</p>
+<p class="text-body-sm">표준 데이터</p>
+</div>
+<div class="col-span-2">
+<p class="text-caption text-secondary mb-1">원본값</p>
+<div class="bg-surface-container p-3 rounded-lg border border-outline-variant/30 text-body-sm font-label-mono overflow-x-auto">
+                                    {"order_id": "ORD2311-00102", "item": "FAN_V3_IND", "qty": 1200, "temp": "NORMAL"}
+                                </div>
+</div>
+</div>
+</div>
+</div>
+<!-- Normalization Info -->
+<div class="space-y-4">
+<div class="flex items-center gap-2 text-primary font-bold">
+<span class="material-symbols-outlined text-[20px]" data-icon="auto_fix">auto_fix</span>
+<span>정규화 결과 (Normalized)</span>
+</div>
+<div class="bg-white border border-outline-variant rounded-xl overflow-hidden">
+<table class="w-full text-left text-body-sm">
+<thead class="bg-surface-container-low">
+<tr>
+<th class="px-4 py-2 font-medium">필드명</th>
+<th class="px-4 py-2 font-medium">정규화 값</th>
+</tr>
+</thead>
+<tbody class="divide-y divide-outline-variant/30">
+<tr>
+<td class="px-4 py-3 text-secondary">품목코드</td>
+<td class="px-4 py-3 font-label-mono">SKU-A-092</td>
+</tr>
+<tr>
+<td class="px-4 py-3 text-secondary">주문단위</td>
+<td class="px-4 py-3">EA (EACH)</td>
+</tr>
+<tr>
+<td class="px-4 py-3 text-secondary">보관기준</td>
+<td class="px-4 py-3">상온 (Amb)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+<!-- Summary Link -->
+<div class="space-y-4">
+<div class="flex items-center gap-2 text-primary font-bold">
+<span class="material-symbols-outlined text-[20px]" data-icon="link">link</span>
+<span>주문 요약 연결 정보</span>
+</div>
+<div class="p-4 bg-primary-container/10 border border-primary/20 rounded-xl">
+<div class="flex items-start gap-4">
+<div class="w-12 h-12 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container shrink-0">
+<span class="material-symbols-outlined text-[24px]" data-icon="inventory_2">inventory_2</span>
+</div>
+<div class="flex-1">
+<p class="text-body-sm font-bold text-on-surface">연결된 마스터 주문 #M-2023-09</p>
+<p class="text-caption text-secondary mt-1">이 항목은 총 5개의 배송 분할 중 세 번째(Incheon_Split_03)에 해당합니다.</p>
+<button class="mt-3 text-primary text-body-sm font-bold flex items-center gap-1 hover:underline">
+                                    마스터 주문 상세 보기
+                                    <span class="material-symbols-outlined text-[16px]" data-icon="open_in_new">open_in_new</span>
+</button>
+</div>
+</div>
+</div>
+</div>
+</div>
+<div class="p-6 border-t border-outline-variant bg-surface-container-low flex gap-2">
+<button class="flex-1 py-3 bg-primary text-white rounded-lg font-bold hover:opacity-90 transition-all">데이터 수정</button>
+<button class="px-6 py-3 border border-outline rounded-lg font-bold hover:bg-surface-container transition-all">닫기</button>
+</div>
+</div>
+</main>
+<script>
+        function toggleDrawer(isOpen) {
+            const drawer = document.getElementById('rightDrawer');
+            if (isOpen) {
+                drawer.classList.remove('translate-x-full');
+            } else {
+                drawer.classList.add('translate-x-full');
+            }
+        }
+        
+        // Interaction micro-animations
+        document.querySelectorAll('tr').forEach(row => {
+            row.addEventListener('click', () => {
+                // Remove previous highligh
+                document.querySelectorAll('tr').forEach(r => r.classList.remove('bg-surface-container-high'));
+                // Add highlight to current
+                row.classList.add('bg-surface-container-high');
+            });
+        });
+    </script>
+</body></html>

@@ -52,7 +52,7 @@
 | 구현 대상 | OMS | 자료 기반 |
 | 구현 제외 | OIS, WMS, WOS, PL 시스템, 라벨 시스템 자체 | 자료 기반 |
 | 외부 제공 | WOS는 Scan 데이터 API, PL은 Picking List API, 라벨은 엑셀 다운로드 | 자료 기반 |
-| 주요 사용자 | 물류 운영자, OMS 관리자, 조회 사용자, API 사용자, 물류사 tenant 관리자 | 제안 |
+| 주요 사용자 | 물류 운영자, OMS 관리자, 조회 사용자, API 사용자, 물류사 tenant 관리자, 시스템 전체 관리자 후보, 고객사 사용자 후보 | 제안 |
 | 개발 기준 스택 | React + TypeScript + Tailwind CSS / Spring Boot + Kotlin | 확정 반영 |
 
 ## 1-2. 시스템 위치
@@ -233,7 +233,7 @@ oms/
 
 - 상품 마스터와 배송지/차량 마스터를 서로 직접 조인하여 하나의 마스터로 만들지 않는다.
 - 두 마스터는 업로드된 운영 데이터에 각각 매칭된다.
-- 배치마다 적용된 상품 마스터 버전과 배송지/차량 마스터 버전을 기록한다.
+- 배치 검증은 검증 시점의 tenant별 현재 상품 마스터와 배송지/차량 마스터 기준으로 수행하고, 검증 기준 시각을 기록한다.
 
 ## 3-4. 차수별 조회
 
@@ -340,9 +340,9 @@ oms/
 | 항목 | 요구사항 |
 |---|---|
 | 업로드 방식 | 상품 마스터 CSV, 배송지/차량 마스터 XLSX 업로드 지원 |
-| 버전관리 | 업로드할 때마다 `masterVersion` 생성 |
-| 활성 버전 | 주문 엑셀 검증에 사용할 활성 버전을 지정할 수 있어야 함 |
-| 배치 기록 | 주문 배치에는 적용된 상품 마스터 버전과 배송지/차량 마스터 버전을 저장 |
+| 마스터 반영 | 업로드할 때마다 전체 버전을 만들지 않고, tenant별 현재 마스터에 upsert |
+| 업로드 이력 | 누가 어떤 파일을 올렸고 몇 건이 추가/수정/변경없음/실패했는지 저장 |
+| 배치 기록 | 주문 배치에는 상품/배송지 마스터 검증 기준 시각을 저장 |
 | 조회 | 상품코드, 상품명, 운영여부, 발주고코드, 브랜드명, 지점명, 권역, 차수, 차량명 검색 지원 |
 | 수정 | 1차는 파일 업로드 기반 관리 권장. 화면 직접 수정은 P2로 분리 |
 
@@ -384,16 +384,15 @@ oms/
 
 | 테이블 | 목적 | 주요 키/컬럼 |
 |---|---|---|
-| `upload_batch` | OIS 입력 엑셀 업로드 배치 | `id`, `fileName`, `customerName`, `deliveryDate`, `status`, `productMasterVersionId`, `storeRouteMasterVersionId`, `uploadedBy`, `uploadedAt` |
+| `upload_batch` | OIS 입력 엑셀 업로드 배치 | `id`, `fileName`, `customerName`, `deliveryDate`, `status`, `productMasterCheckedAt`, `storeRouteMasterCheckedAt`, `uploadedBy`, `uploadedAt` |
 | `uploaded_file` | 원본 파일 메타정보 | `id`, `batchId`, `originalFileName`, `storedPath`, `fileHash`, `fileSize` |
 | `scan_line` | `Scan_upload_*` 행 저장 | `id`, `batchId`, `sheetName`, `scanCenter`, `deliveryDate`, `bus`, `barcode`, `storeCode`, `storeName`, `productCode`, `productName`, `labelQty`, `unit`, `temperatureType`, `rowNo` |
 | `pl_line` | `PL_EA` / `PL_Box` 행 저장 | `id`, `batchId`, `plType`, `orderNo`, `storeCode`, `storeName`, `brandName`, `productCode`, `productName`, `unit`, `storageTemperature`, `dueDate`, `orderQty`, `vehicleName`, `cbm`, `qrCode`, `rowNo` |
 | `label_line` | `Label_EA` / `Label_Box` 행 저장 | `id`, `batchId`, `labelType`, `orderNo`, `storeCode`, `storeName`, `productCode`, `productName`, `orderQty`, `qrCode`, `matchingCode`, `boxSequence`, `totalBoxQty`, `rowNo` |
 | `order_line` | PL 기반 주문 조회용 요약 데이터 | `id`, `batchId`, `sourcePlLineId`, `orderNo`, `storeCode`, `productCode`, `orderQty`, `unit`, `dueDate`, `vehicleName`, `deliveryRound`, `area` |
-| `product_master_version` | 상품 마스터 버전 | `id`, `versionName`, `fileName`, `activeYn`, `createdBy`, `createdAt` |
-| `product_master_item` | 상품 마스터 행 | `id`, `versionId`, `ezadminCode`, `productName`, `boxQty`, `outboundUnit`, `temperatureType`, `cbm`, `activeYn` |
-| `store_route_master_version` | 배송지/차량 마스터 버전 | `id`, `versionName`, `fileName`, `activeYn`, `createdBy`, `createdAt` |
-| `store_route_master_item` | 배송지/차량 마스터 행 | `id`, `versionId`, `baljugoCode`, `brandName`, `storeName`, `area`, `deliveryDay`, `deliveryRound`, `vehicleName`, `activeYn` |
+| `master_upload_batch` | 마스터 업로드 이력 | `id`, `tenantId`, `masterType`, `fileName`, `insertedCount`, `updatedCount`, `unchangedCount`, `failedCount`, `uploadedBy`, `uploadedAt` |
+| `product_master_item` | 현재 상품 마스터 행 | `id`, `tenantId`, `ezadminCode`, `productName`, `boxQty`, `outboundUnit`, `temperatureType`, `cbm`, `activeYn`, `lastMasterUploadBatchId` |
+| `store_route_master_item` | 현재 배송지/차량 마스터 행 | `id`, `tenantId`, `baljugoCode`, `brandName`, `storeName`, `area`, `deliveryDay`, `deliveryRound`, `vehicleName`, `activeYn`, `lastMasterUploadBatchId` |
 | `validation_error` | 검증 오류/경고 | `id`, `batchId`, `domain`, `sheetName`, `rowNo`, `columnName`, `errorCode`, `severity`, `originalValue`, `message`, `resolvedYn` |
 | `batch_audit_log` | 배치 상태 변경 이력 | `id`, `batchId`, `actionType`, `actorId`, `beforeStatus`, `afterStatus`, `message`, `createdAt` |
 | `api_call_log` | 외부 API 호출 이력 | `id`, `clientId`, `endpoint`, `batchId`, `statusCode`, `responseTimeMs`, `calledAt` |
@@ -428,10 +427,11 @@ erDiagram
     upload_batch ||--o{ order_line : derives
     upload_batch ||--o{ validation_error : has
     upload_batch ||--o{ batch_audit_log : logs
-    product_master_version ||--o{ product_master_item : has
-    store_route_master_version ||--o{ store_route_master_item : has
-    upload_batch }o--|| product_master_version : uses
-    upload_batch }o--|| store_route_master_version : uses
+    tenant ||--o{ master_upload_batch : uploads_master
+    tenant ||--o{ product_master_item : owns
+    tenant ||--o{ store_route_master_item : owns
+    master_upload_batch ||--o{ product_master_item : last_updates
+    master_upload_batch ||--o{ store_route_master_item : last_updates
 ```
 
 ---
@@ -442,9 +442,9 @@ erDiagram
 
 | 단계 | 사용자 행동 | 시스템 처리 | 결과 |
 |---:|---|---|---|
-| 1 | 상품 마스터 CSV 업로드 | 컬럼 검증, 중복 코드 검증 | 상품 마스터 버전 생성 |
-| 2 | 배송지/차량 마스터 XLSX 업로드 | `●Store_Data` 시트 파싱, 발주고코드 중복 검증 | 배송지/차량 마스터 버전 생성 |
-| 3 | 활성 버전 지정 | 해당 버전을 검증 기준으로 설정 | 이후 주문 배치에 적용 |
+| 1 | 상품 마스터 CSV 업로드 | 컬럼 검증, 중복 코드 검증 | `tenant_id + ezadmin_code` 기준 upsert |
+| 2 | 배송지/차량 마스터 XLSX 업로드 | `●Store_Data` 시트 파싱, 발주고코드 중복 검증 | `tenant_id + baljugo_code` 기준 upsert |
+| 3 | 업로드 이력 확인 | 추가/수정/변경없음/실패 건수 확인 | 운영 추적 |
 | 4 | 마스터 조회 | 검색/필터 | 운영자가 기준정보 확인 |
 
 ## 7-2. OIS 입력 엑셀 처리 흐름
@@ -490,8 +490,8 @@ erDiagram
 | FR-005 | [필수] PL 저장 | `PL_EA`, `PL_Box` 행 저장 | PL 시트 | EA/BOX 구분 저장 | `pl_line` |
 | FR-006 | [필수] Label 저장 | `Label_EA`, `Label_Box` 행 저장 | Label 시트 | EA/BOX 구분 저장 | `label_line` |
 | FR-007 | [필수] 주문 조회용 데이터 재구성 | PL 기준 `order_line` 생성 | `pl_line` | 주문성 컬럼 추출 | `order_line` |
-| FR-008 | [필수] 상품 마스터 관리 | 상품 CSV 업로드/조회/버전관리 | CSV | 파싱, 검증, 저장 | 상품 마스터 |
-| FR-009 | [필수] 배송지/차량 마스터 관리 | Link_Area 업로드/조회/버전관리 | XLSX | `●Store_Data` 파싱 | 배송지/차량 마스터 |
+| FR-008 | [필수] 상품 마스터 관리 | 상품 CSV 업로드/upsert/조회 | CSV | 파싱, 검증, 저장 | 상품 마스터 |
+| FR-009 | [필수] 배송지/차량 마스터 관리 | Link_Area 업로드/upsert/조회 | XLSX | `●Store_Data` 파싱 | 배송지/차량 마스터 |
 | FR-010 | [필수] 마스터 매칭 | 운영 데이터와 두 마스터 매칭 | Scan/PL/Label/Order + Master | 코드 조인 | 매칭 결과/오류 |
 | FR-011 | [필수] 오류/예외 관리 | 오류 행 조회 및 재검증 | 검증 결과 | Error/Warning 분류 | 오류 화면 |
 | FR-012 | [필수] 배치 확정 | Error 없는 배치 확정 | 배치 | 상태 전환 | 확정 배치 |
@@ -626,14 +626,12 @@ erDiagram
 | GET | `/api/v1/label-lines` | Label 데이터 조회 | 조회 이상 |
 | GET | `/api/v1/downloads/labels` | 라벨 엑셀 다운로드 | 운영자/관리자 |
 | GET | `/api/v1/downloads/orders/by-round` | 추후 구현: 차수별 주문 다운로드 | 운영자/관리자 |
-| POST | `/api/v1/masters/products/versions` | 상품 마스터 CSV 업로드 및 버전 생성 | 관리자 |
-| GET | `/api/v1/masters/products/versions` | 상품 마스터 버전 목록 | 조회 이상 |
-| POST | `/api/v1/masters/products/versions/{versionId}/activate` | 상품 마스터 활성 버전 지정 | 관리자 |
-| GET | `/api/v1/masters/products` | 상품 마스터 상세 조회 | 조회 이상 |
-| POST | `/api/v1/masters/store-routes/versions` | 배송지/차량 마스터 XLSX 업로드 및 버전 생성 | 관리자 |
-| GET | `/api/v1/masters/store-routes/versions` | 배송지/차량 마스터 버전 목록 | 조회 이상 |
-| POST | `/api/v1/masters/store-routes/versions/{versionId}/activate` | 배송지/차량 마스터 활성 버전 지정 | 관리자 |
-| GET | `/api/v1/masters/store-routes` | 배송지/차량 마스터 상세 조회 | 조회 이상 |
+| POST | `/api/v1/masters/products/uploads` | 상품 마스터 CSV 업로드 및 upsert | 관리자 |
+| GET | `/api/v1/masters/products/uploads` | 상품 마스터 업로드 이력 목록 | 조회 이상 |
+| GET | `/api/v1/masters/products` | 현재 상품 마스터 조회 | 조회 이상 |
+| POST | `/api/v1/masters/store-routes/uploads` | 배송지/차량 마스터 XLSX 업로드 및 upsert | 관리자 |
+| GET | `/api/v1/masters/store-routes/uploads` | 배송지/차량 마스터 업로드 이력 목록 | 조회 이상 |
+| GET | `/api/v1/masters/store-routes` | 현재 배송지/차량 마스터 조회 | 조회 이상 |
 | GET | `/api/v1/audit/batches` | 배치 이력 조회 | 관리자/지원자 |
 | GET | `/api/v1/audit/api-calls` | API 호출 로그 조회 | 관리자/지원자 |
 
@@ -702,7 +700,7 @@ erDiagram
 | `DataTable` | 대용량 표 조회, 정렬, 페이징 |
 | `DownloadButton` | 파일 다운로드 |
 | `ValidationErrorPanel` | 오류 요약 및 상세 행 표시 |
-| `MasterVersionSelector` | 적용 마스터 버전 선택 |
+| `MasterUploadSummary` | 마스터 업로드 이력과 처리 건수 요약 |
 
 ## 11-3. 차수별 조회 화면 필터
 
@@ -729,7 +727,7 @@ erDiagram
 | `upload` | 파일 업로드, 파일 저장, 배치 생성 |
 | `excel` | Apache POI 기반 Workbook/Sheet/Row 파싱 |
 | `batch` | 배치 상태 전환, 확정/취소/롤백 |
-| `master` | 상품/배송지 마스터 업로드, 조회, 버전관리 |
+| `master` | 상품/배송지 마스터 업로드, upsert, 조회, 업로드 이력 |
 | `scan` | Scan 데이터 저장/조회/WOS API 원천 |
 | `pl` | PL 데이터 저장/조회/PL API 원천 |
 | `label` | Label 데이터 저장/조회/다운로드 원천 |
@@ -856,7 +854,7 @@ interface ExcelSheetParser<T> {
 | Phase | 범위 | 목표 |
 |---|---|---|
 | Phase 1 | 업로드, 시트 파싱, DB 저장, 기본 검증 | OIS 엑셀을 OMS에 안정적으로 적재 |
-| Phase 2 | 마스터 업로드/버전관리, 마스터 매칭, 오류 조회 | 운영 데이터 정합성 확보 |
+| Phase 2 | 마스터 업로드/upsert, 마스터 매칭, 오류 조회 | 운영 데이터 정합성 확보 |
 | Phase 3 | 주문 조회, 라벨 다운로드 | 운영자가 화면에서 1차 MVP 업무 가능 |
 | Phase 4 | WOS API, PL API, API 로그 | 외부 시스템 연동 가능 |
 | Phase 5 | 권한, 롤백, 이력, 다운로드 로그 | 운영 안정성 확보 |
@@ -893,8 +891,8 @@ OMS는 OIS가 생성한 `Scan_upload_*`, `PL_EA`, `PL_Box`, `Label_EA`, `Label_B
 2. `Scan_upload_*` prefix 기반 시트 인식
 3. PL/Label/Scan 데이터 DB 저장
 4. PL 기반 주문 조회용 `order_line` 재구성
-5. 상품 마스터 업로드/버전관리
-6. 배송지/차량 마스터 업로드/버전관리
+5. 상품 마스터 업로드/upsert
+6. 배송지/차량 마스터 업로드/upsert
 7. 운영 데이터와 두 마스터의 개별 매칭 검증
 8. WOS/PL 외부 API
 9. 라벨 엑셀 다운로드
@@ -924,7 +922,7 @@ OMS는 OIS가 생성한 `Scan_upload_*`, `PL_EA`, `PL_Box`, `Label_EA`, `Label_B
 - 주문/업로드 데이터는 `tenant_id + client_id` 기준으로 관리한다.
 - `upload_batches`, `scan_lines`, `pl_lines`, `label_lines`, `order_lines`, `validation_errors`, 로그성 테이블은 `tenant_id`, `client_id`를 가져야 한다.
 - 마스터 데이터는 1차 MVP에서 물류사 `tenant_id` 기준으로 관리한다.
-- 고객사별 전용 마스터는 1차 필수 구현이 아니며, 추후 `scope_type = CLIENT`로 확장한다.
+- 고객사별 전용 마스터는 1차 필수 구현이 아니며, 추후 `client_id` 또는 고객사별 코드 매핑 테이블로 확장한다.
 
 ## B. 마스터 매칭 기준
 
@@ -940,7 +938,16 @@ OMS는 OIS가 생성한 `Scan_upload_*`, `PL_EA`, `PL_Box`, `Label_EA`, `Label_B
 - PostgreSQL은 JSONB, GIN index, partial index, materialized view 등 향후 확장성 장점이 있으므로 비교안으로 함께 검토한다.
 - DB 설계는 MySQL과 PostgreSQL 양쪽에서 구현 가능한 표준 RDB 구조를 우선한다.
 - PostgreSQL 전용 기능은 선택 기능 또는 DB별 대안으로 분리한다.
-- 마스터 버전 unique 제약은 MySQL nullable unique 이슈를 피하기 위해 `scope_key` 사용을 우선 검토한다.
+- 1차 MVP의 마스터는 tenant별 현재 데이터를 upsert한다. 상품은 `tenant_id + ezadmin_code`, 배송지/차량은 `tenant_id + baljugo_code` 기준으로 unique 처리한다.
+
+## C-1. 사용자 스코프
+
+- 로그인 사용자는 `SYSTEM`, `TENANT`, `CLIENT` 스코프로 구분한다.
+- `SYSTEM` 사용자는 시스템 전체 관리자 후보이며 `tenant_id`, `client_id` 없이 존재할 수 있다.
+- `TENANT` 사용자는 특정 물류사 소속이며 1차 MVP의 기본 운영 사용자다.
+- `CLIENT` 사용자는 특정 고객사/화주사 소속이다.
+- 고객사 직접 로그인과 다중 고객사 접근은 1차 필수 구현이 아니며 추후 기능으로 둔다.
+- DB는 `user_scope_type`, nullable `tenant_id`, nullable `client_id`를 준비하고, 상세 인증/인가 정책은 구현 단계에서 확정한다.
 
 ## D. 차수별 주문 조회 / 다운로드
 
@@ -950,7 +957,7 @@ OMS는 OIS가 생성한 `Scan_upload_*`, `PL_EA`, `PL_Box`, `Label_EA`, `Label_B
 
 ## E. API 경로 기준
 
-- 마스터 API는 `API_DESIGN_DRAFT.md`의 version 분리 구조를 따른다.
+- 마스터 API는 `API_DESIGN_DRAFT.md`의 current master upsert 구조를 따른다.
 - 마스터 API를 제외한 업로드, 배치, 검증, 주문, Scan, PL, Label, 다운로드, 차수별 추후 API는 이 최종 요구사항 문서의 API 경로를 따른다.
 
 ## F. 계속 유지되는 핵심 원칙

@@ -67,11 +67,22 @@ OMS는 OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 DB에 저
 - `client`는 물류사의 고객사 또는 화주사를 의미한다.
 - 주문/업로드 데이터는 `tenant_id + client_id` 기준으로 관리한다.
 - 마스터 데이터는 1차 MVP에서 물류사 `tenant_id` 기준으로 관리한다.
-- 고객사별 전용 마스터는 1차 필수 구현이 아니며, 추후 `scope_type = CLIENT`로 확장한다.
-- 마스터 버전 unique 제약은 MySQL nullable unique 이슈를 피하기 위해 `client_id` 직접 조합보다 `scope_key` 사용을 우선 검토한다.
-- 기본 `scope_type`은 `TENANT`, 기본 `scope_key`는 `TENANT`로 둔다.
+- 고객사별 전용 마스터는 1차 필수 구현이 아니며, 추후 `client_id` 또는 고객사별 코드 매핑 테이블로 확장한다.
+- 1차 MVP의 마스터는 업로드마다 전체 버전을 만들지 않고, tenant별 현재 데이터를 upsert한다.
+- 상품 마스터 upsert 기준은 `tenant_id + ezadmin_code`, 배송지/차량 마스터 upsert 기준은 `tenant_id + baljugo_code`로 둔다.
+- 마스터 업로드 이력은 파일 단위 처리 요약을 남기고, row 단위 변경 이력은 1차 MVP에서 제외한다.
 
-## 4-2. 마스터 매칭 확정 원칙
+## 4-2. 사용자 스코프 설계 원칙
+
+- 로그인 사용자는 `SYSTEM`, `TENANT`, `CLIENT` 스코프로 구분한다.
+- `SYSTEM` 사용자는 시스템 전체 관리자이며 `tenant_id`, `client_id` 없이 존재할 수 있다.
+- `TENANT` 사용자는 특정 물류사 소속이며 `tenant_id`를 가진다.
+- `CLIENT` 사용자는 특정 고객사/화주사 소속이며 `tenant_id`, `client_id`를 가진다.
+- 1차 MVP의 기본 운영 사용자는 `TENANT` 스코프다.
+- 고객사 사용자 로그인과 다중 고객사 접근은 1차 필수 구현이 아니며, 추후 `user_client_scopes` 같은 별도 스코프 테이블로 확장한다.
+- DB는 `user_scope_type`, nullable `tenant_id`, nullable `client_id`를 준비하되, 스코프별 필수값 검증은 애플리케이션 정책으로 보완한다.
+
+## 4-3. 마스터 매칭 확정 원칙
 
 - 요구사항 기준 1차 MVP는 고객사 코드 매핑 없이 직접 매칭한다.
 - 운영 데이터의 `product_code`는 상품 마스터의 `ezadmin_code`와 직접 매칭한다.
@@ -182,7 +193,7 @@ oms/
 - 상품 마스터와 배송지/차량 마스터는 서로 직접 조인하지 않는다.
 - 운영 데이터의 `product_code`는 상품 마스터의 `ezadmin_code`와 매칭한다.
 - 운영 데이터의 `store_code` 또는 `order_business_site_code`는 배송지/차량 마스터의 `baljugo_code`와 매칭한다.
-- 배치마다 검증에 사용한 상품 마스터 버전과 배송지/차량 마스터 버전을 기록한다.
+- 배치 검증은 검증 시점의 tenant별 현재 마스터 기준으로 수행하고, 검증 기준 시각을 기록한다.
 - 원본 엑셀 값과 정규화 값을 최대한 함께 보존한다.
 - `Scan_upload_*` suffix 값은 `scan_center` 또는 `scan_route` 컬럼으로 저장한다.
 
@@ -190,7 +201,7 @@ oms/
 
 - 내부 운영 API는 `/api/v1` prefix를 사용한다.
 - 외부 연동 API는 `/external/v1` prefix를 사용한다.
-- 마스터 API만 `docs/API_DESIGN_DRAFT.md`의 version 분리 구조를 따른다.
+- 마스터 API는 `docs/API_DESIGN_DRAFT.md`의 current master upsert 구조를 따른다.
 - 마스터 API를 제외한 업로드, 배치, 검증, 주문, Scan, PL, Label, 다운로드, 차수별 추후 API는 최종 요구사항 문서를 따른다.
 - 외부 API는 API Key 인증을 기본 후보로 둔다.
 - 모든 응답은 추적 가능한 `requestId`, `timestamp`를 포함한다.
