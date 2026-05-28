@@ -17,7 +17,7 @@ export function Breadcrumb({ items }: { items: BreadcrumbItem[] }) {
                 {item.label}
               </Link>
             ) : (
-              <span>{item.label}</span>
+              <span aria-current={index === items.length - 1 ? 'page' : undefined}>{item.label}</span>
             )}
           </li>
         ))}

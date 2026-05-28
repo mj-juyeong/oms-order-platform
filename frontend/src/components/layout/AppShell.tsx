@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router-dom';
 import { Breadcrumb } from './Breadcrumb';
 import { Header } from './Header';
+import { PageHeader } from './PageHeader';
 import { Sidebar } from './Sidebar';
 import { routeMetaByPath } from '../../routes/routeMeta';
 
@@ -16,13 +17,7 @@ export function AppShell() {
         <main className="px-4 py-5 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col gap-5">
             <Breadcrumb items={meta.breadcrumbs} />
-            <div className="flex flex-col gap-2 border-b border-slate-200 pb-4 lg:flex-row lg:items-end lg:justify-between">
-              <div>
-                <h1 className="text-2xl font-bold tracking-normal text-slate-950">{meta.title}</h1>
-                <p className="mt-1 text-sm text-slate-500">{meta.description}</p>
-              </div>
-              {meta.notice ? <p className="max-w-xl text-sm text-slate-500">{meta.notice}</p> : null}
-            </div>
+            <PageHeader {...meta} />
             <Outlet />
           </div>
         </main>
@@ -37,11 +32,21 @@ function resolveRouteMeta(pathname: string) {
   }
 
   if (/^\/batches\/[^/]+\/validation$/.test(pathname)) {
-    return routeMetaByPath['/batches/:batchId/validation'];
+    const batchId = pathname.split('/')[2];
+    const meta = routeMetaByPath['/batches/:batchId/validation'];
+    return {
+      ...meta,
+      secondaryActions: [{ label: '배치 상세', to: `/batches/${batchId}` }],
+    };
   }
 
   if (/^\/batches\/[^/]+$/.test(pathname)) {
-    return routeMetaByPath['/batches/:batchId'];
+    const batchId = pathname.split('/')[2];
+    const meta = routeMetaByPath['/batches/:batchId'];
+    return {
+      ...meta,
+      secondaryActions: [{ label: '검증 결과', to: `/batches/${batchId}/validation` }],
+    };
   }
 
   return routeMetaByPath['/dashboard'];

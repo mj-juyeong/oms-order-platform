@@ -4,6 +4,7 @@ export const fakeCurrentUser: CurrentUser = {
   id: 1,
   loginId: 'ops01',
   name: '운영자01',
+  userScopeType: 'TENANT',
   tenantName: '샘플 물류사',
   clientName: '웰스토리',
   roles: ['ADMIN', 'OPERATOR', 'VIEWER'],
