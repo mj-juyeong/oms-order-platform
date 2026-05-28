@@ -1,25 +1,49 @@
-export function DashboardPage() {
-  return (
-    <main className="min-h-screen bg-oms-panel text-oms-ink">
-      <section className="mx-auto flex min-h-screen w-full max-w-6xl flex-col justify-center px-6 py-10">
-        <div className="border-b border-oms-line pb-5">
-          <p className="text-sm font-semibold uppercase tracking-wide text-oms-accent">OMS Platform</p>
-          <h1 className="mt-3 text-3xl font-bold">Dashboard</h1>
-          <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">
-            Phase 0 frontend scaffold is ready. Operational widgets, upload flows, batch search, master screens, and
-            live API integration are intentionally not implemented yet.
-          </p>
-        </div>
+import { Link } from 'react-router-dom';
+import { Select } from '../components/common';
+import { DataTable, FilterBar, type DataTableColumn } from '../components/data';
+import { BatchStatusBadge, MetricCard } from '../components/domain';
+import { mockBatches } from '../api/mock';
+import type { UploadBatch } from '../types/batch';
 
-        <div className="mt-8 grid gap-4 sm:grid-cols-3">
-          {['Vite React TypeScript', 'Tailwind CSS', 'React Router'].map((label) => (
-            <div key={label} className="rounded-lg border border-oms-line bg-white p-5 shadow-sm">
-              <p className="text-sm font-medium text-slate-500">Ready</p>
-              <p className="mt-2 text-lg font-semibold">{label}</p>
-            </div>
-          ))}
+const columns: DataTableColumn<UploadBatch>[] = [
+  { key: 'id', header: '배치번호', width: '190px', cell: (item) => <Link className="font-mono text-teal-700 hover:underline" to={`/batches/${item.id}`}>{item.id}</Link> },
+  { key: 'client', header: '고객사', cell: (item) => item.clientName },
+  { key: 'deliveryDate', header: '배송일', cell: (item) => item.deliveryDate },
+  { key: 'status', header: '상태', cell: (item) => <BatchStatusBadge status={item.status} /> },
+  { key: 'errors', header: 'Error/Warning', cell: (item) => `${item.errorCount} / ${item.warningCount}` },
+  { key: 'uploadedBy', header: '업로드자', cell: (item) => item.uploadedBy },
+  { key: 'uploadedAt', header: '업로드시각', width: '150px', cell: (item) => item.uploadedAt },
+  { key: 'confirmedAt', header: '확정시각', width: '150px', cell: (item) => item.confirmedAt ?? '-' },
+];
+
+export function DashboardPage() {
+  const confirmedCount = mockBatches.filter((batch) => batch.status === 'CONFIRMED').length;
+  const errorCount = mockBatches.filter((batch) => batch.errorCount > 0).length;
+
+  return (
+    <div className="space-y-5">
+      <FilterBar>
+        <Select label="고객사" options={[{ label: '웰스토리', value: 'wellstory' }]} />
+        <Select label="기간" options={[{ label: '오늘', value: 'today' }, { label: '최근 7일', value: '7days' }]} />
+        <Select label="상태" options={[{ label: '전체', value: 'all' }, { label: '확정 완료', value: 'CONFIRMED' }]} />
+        <div className="flex items-end">
+          <Link
+            className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+            to="/uploads"
+          >
+            업로드 화면
+          </Link>
         </div>
-      </section>
-    </main>
+      </FilterBar>
+
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard description="mock 기준 오늘 생성된 배치" label="오늘 업로드" value={2} tone="blue" />
+        <MetricCard description="외부 API와 라벨 다운로드 가능" label="확정 완료" value={confirmedCount} tone="green" />
+        <MetricCard description="Error 존재로 확정 차단" label="검증 실패" value={errorCount} tone="red" />
+        <MetricCard description="Error는 없고 확정 대기" label="확정 대기" value={1} tone="amber" />
+      </div>
+
+      <DataTable columns={columns} data={mockBatches} getRowKey={(item) => item.id} />
+    </div>
   );
 }
