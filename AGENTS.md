@@ -91,6 +91,7 @@ OMS는 OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 DB에 저
 
 ## 5. Backend 작업 규칙
 
+- Backend 구현 작업 전에는 `backend/BACKEND_IMPLEMENTATION_PLAN.md`가 존재하는 경우 함께 확인한다.
 - 패키지는 도메인 중심으로 분리한다: `auth`, `upload`, `excel`, `batch`, `master`, `order`, `dispatch`, `scan`, `pl`, `label`, `validation`, `download`, `externalapi`, `audit`.
 - API 응답은 공통 응답 포맷을 사용한다.
 - 업로드 파일 원본은 파일 저장소에 보관하고 DB에는 파일명, 저장 경로, 해시, 크기, 업로드자, 업로드 시각을 저장한다.
