@@ -1,0 +1,51 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# Environment
+.env
+.env.*
+!.env.example
+
+# Local runtime files
+.local/
+logs/
+*.log
+
+# Backend / Gradle
+backend/.gradle/
+backend/build/
+backend/out/
+backend/target/
+backend/**/build/
+backend/**/out/
+backend/gradle-app.setting
+
+# Frontend / Node
+frontend/node_modules/
+frontend/dist/
+frontend/build/
+frontend/.vite/
+frontend/.turbo/
+frontend/coverage/
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/pnpm-debug.log*
+
+# Test / coverage
+coverage/
+.nyc_output/
+
+# Uploaded or generated data
+uploads/
+downloads/
+tmp/
+temp/
+
+# Excel working files
+~$*.xls*
