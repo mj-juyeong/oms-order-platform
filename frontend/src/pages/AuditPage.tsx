@@ -1,7 +1,25 @@
+import { useMemo, useState } from 'react';
 import { mockAuditLogs } from '../api/mock';
-import { DateInput, Input, Select } from '../components/common';
+import { DateRangeQuickFilter, Input, Select } from '../components/common';
 import { DataTable, FilterBar, Pagination, type DataTableColumn } from '../components/data';
 import type { AuditLog } from '../types/audit';
+import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
+
+interface AuditFilters {
+  action: string;
+  actor: string;
+  batchId: string;
+  dateRange: DateRangeValue;
+  logType: 'ALL' | AuditLog['logType'];
+}
+
+const initialFilters: AuditFilters = {
+  action: '',
+  actor: '',
+  batchId: '',
+  dateRange: { preset: 'ALL', from: '', to: '' },
+  logType: 'ALL',
+};
 
 const columns: DataTableColumn<AuditLog>[] = [
   { key: 'type', header: '로그 유형', cell: (item) => item.logType },
@@ -15,18 +33,51 @@ const columns: DataTableColumn<AuditLog>[] = [
 ];
 
 export function AuditPage() {
+  const [filters, setFilters] = useState<AuditFilters>(initialFilters);
+  const rows = useMemo(() => filterAuditLogs(mockAuditLogs, filters), [filters]);
+
+  function updateFilter<TKey extends keyof AuditFilters>(key: TKey, value: AuditFilters[TKey]) {
+    setFilters((current) => ({ ...current, [key]: value }));
+  }
+
   return (
     <div className="space-y-5">
-      <FilterBar>
-        <DateInput label="기간 시작" />
-        <DateInput label="기간 종료" />
-        <Select label="로그 유형" options={[{ label: '전체', value: 'all' }, { label: '배치', value: 'BATCH' }, { label: '다운로드', value: 'DOWNLOAD' }, { label: 'API', value: 'API' }]} />
-        <Input label="배치번호" placeholder="BATCH-" />
-        <Input label="action/path" placeholder="CONFIRM" />
-        <Input label="actor" placeholder="운영자" />
+      <FilterBar onReset={() => setFilters(initialFilters)}>
+        <DateRangeQuickFilter label="발생시각" onChange={(value) => updateFilter('dateRange', value)} value={filters.dateRange} />
+        <Select
+          label="로그 유형"
+          onChange={(event) => updateFilter('logType', event.target.value as AuditFilters['logType'])}
+          options={[{ label: '전체', value: 'ALL' }, { label: '배치', value: 'BATCH' }, { label: '다운로드', value: 'DOWNLOAD' }, { label: 'API', value: 'API' }]}
+          value={filters.logType}
+        />
+        <Input label="배치번호" onChange={(event) => updateFilter('batchId', event.target.value)} placeholder="BATCH-" value={filters.batchId} />
+        <Input label="action/path" onChange={(event) => updateFilter('action', event.target.value)} placeholder="CONFIRM" value={filters.action} />
+        <Input label="actor" onChange={(event) => updateFilter('actor', event.target.value)} placeholder="운영자" value={filters.actor} />
       </FilterBar>
-      <DataTable columns={columns} data={mockAuditLogs} getRowKey={(item) => item.id} />
-      <Pagination page={1} total={mockAuditLogs.length} totalPages={1} />
+      <DataTable columns={columns} data={rows} getRowKey={(item) => item.id} />
+      <Pagination page={1} total={rows.length} totalPages={1} />
     </div>
   );
+}
+
+function filterAuditLogs(rows: AuditLog[], filters: AuditFilters) {
+  return rows.filter((row) => {
+    if (!isDateInRange(row.occurredAt, filters.dateRange)) {
+      return false;
+    }
+
+    if (filters.logType !== 'ALL' && row.logType !== filters.logType) {
+      return false;
+    }
+
+    return (
+      includesText(row.batchId ?? '', filters.batchId) &&
+      includesText(row.actionOrPath, filters.action) &&
+      includesText(row.actorName, filters.actor)
+    );
+  });
+}
+
+function includesText(value: string, query: string) {
+  return value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
