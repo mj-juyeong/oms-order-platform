@@ -4,7 +4,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.stereotype.Component
 
 @Component
-@Profile("!local")
-class NoopAuthContext : AuthContext {
-    override fun currentUser(): CurrentUser? = null
+@Profile("local")
+class DbAuthContext : AuthContext {
+	override fun currentUser(): CurrentUser? = RequestUserContext.get()
 }
