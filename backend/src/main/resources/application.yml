@@ -3,6 +3,10 @@ spring:
     name: oms
   jackson:
     default-property-inclusion: always
+  servlet:
+    multipart:
+      max-file-size: ${OMS_MAX_FILE_SIZE:200MB}
+      max-request-size: ${OMS_MAX_REQUEST_SIZE:220MB}
 
 server:
   port: ${SERVER_PORT:8080}
