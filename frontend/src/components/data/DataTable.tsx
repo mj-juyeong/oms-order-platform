@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { MouseEvent, ReactNode } from 'react';
 import { EmptyState } from '../common';
 
 export interface DataTableColumn<TItem> {
@@ -15,6 +15,8 @@ interface DataTableProps<TItem> {
   getRowKey: (item: TItem) => string;
   emptyTitle?: string;
   emptyDescription?: string;
+  getRowClassName?: (item: TItem) => string;
+  onRowClick?: (item: TItem) => void;
 }
 
 const alignClasses = {
@@ -28,7 +30,9 @@ export function DataTable<TItem>({
   data,
   emptyDescription = '필터 조건을 변경하거나 데이터를 다시 확인해 주세요.',
   emptyTitle = '표시할 데이터가 없습니다.',
+  getRowClassName,
   getRowKey,
+  onRowClick,
 }: DataTableProps<TItem>) {
   if (data.length === 0) {
     return <EmptyState description={emptyDescription} title={emptyTitle} />;
@@ -53,7 +57,12 @@ export function DataTable<TItem>({
           </thead>
           <tbody>
             {data.map((item) => (
-              <tr className="hover:bg-slate-50" key={getRowKey(item)}>
+              <tr
+                className={`${getRowClassName?.(item) ?? ''} hover:bg-slate-50 ${onRowClick ? 'cursor-pointer' : ''}`}
+                key={getRowKey(item)}
+                onClick={(event) => handleRowClick(event, item, onRowClick)}
+                tabIndex={onRowClick ? 0 : undefined}
+              >
                 {columns.map((column) => (
                   <td
                     className={`whitespace-nowrap border-b border-slate-100 px-4 py-3 text-slate-700 ${alignClasses[column.align ?? 'left']}`}
@@ -69,4 +78,22 @@ export function DataTable<TItem>({
       </div>
     </div>
   );
+}
+
+function handleRowClick<TItem>(
+  event: MouseEvent<HTMLTableRowElement>,
+  item: TItem,
+  onRowClick: ((item: TItem) => void) | undefined,
+) {
+  if (!onRowClick) {
+    return;
+  }
+
+  const target = event.target;
+
+  if (target instanceof HTMLElement && target.closest('a, button, input, select, textarea')) {
+    return;
+  }
+
+  onRowClick(item);
 }

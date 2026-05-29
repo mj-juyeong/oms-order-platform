@@ -1,9 +1,12 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppShell, ProtectedRoute } from '../components/layout';
 import { AuditPage } from '../pages/AuditPage';
+import { ApiKeysPage } from '../pages/ApiKeysPage';
 import { BatchDetailPage } from '../pages/BatchDetailPage';
 import { BatchesPage } from '../pages/BatchesPage';
 import { DashboardPage } from '../pages/DashboardPage';
+import { ExternalApiStatusPage } from '../pages/ExternalApiStatusPage';
+import { ExternalApiGuidePage } from '../pages/ExternalApiGuidePage';
 import { LabelDownloadsPage } from '../pages/LabelDownloadsPage';
 import { LabelLinesPage } from '../pages/LabelLinesPage';
 import { LoginPage } from '../pages/LoginPage';
@@ -40,6 +43,9 @@ export const router = createBrowserRouter([
           { path: '/pl-lines', element: <PlLinesPage /> },
           { path: '/label-lines', element: <LabelLinesPage /> },
           { path: '/downloads/labels', element: <LabelDownloadsPage /> },
+          { path: '/external-api/guide', element: <ExternalApiGuidePage /> },
+          { path: '/external-api/status', element: <ExternalApiStatusPage /> },
+          { path: '/external-api/api-keys', element: <ApiKeysPage /> },
           { path: '/masters/products', element: <ProductMasterPage /> },
           { path: '/masters/store-routes', element: <StoreRouteMasterPage /> },
           { path: '/audit', element: <AuditPage /> },

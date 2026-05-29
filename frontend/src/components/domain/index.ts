@@ -1,4 +1,5 @@
 export * from './BatchStatusBadge';
+export * from './CodeCell';
 export * from './ConfirmActionModal';
 export * from './FileUploadDropzone';
 export * from './MasterVersionSelector';

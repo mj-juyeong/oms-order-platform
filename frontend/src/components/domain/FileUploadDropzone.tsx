@@ -30,9 +30,9 @@ export function FileUploadDropzone({
   }
 
   return (
-    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-8 text-center">
+    <div className="rounded-lg border border-dashed border-slate-300 bg-white px-6 py-16 text-center">
       <label
-        className={`flex min-h-40 flex-col items-center justify-center rounded-md transition ${
+        className={`flex flex-col items-center justify-center rounded-md py-14 transition ${
           disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer hover:bg-slate-50'
         }`}
       >

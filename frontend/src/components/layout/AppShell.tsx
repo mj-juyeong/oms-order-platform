@@ -12,7 +12,7 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <Sidebar />
-      <div className="min-h-screen lg:pl-64">
+      <div className="min-h-screen lg:pl-[260px]">
         <Header />
         <main className="px-4 py-5 sm:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[1600px] flex-col gap-5">

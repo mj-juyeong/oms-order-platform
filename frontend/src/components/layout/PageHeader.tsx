@@ -22,10 +22,10 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>
         </div>
         {primaryAction || secondaryActions.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
+          <div className="flex w-full flex-wrap gap-3 sm:w-auto sm:justify-end sm:gap-4">
             {secondaryActions.map((action) => (
               <Link
-                className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+                className="inline-flex h-10 min-w-28 items-center justify-center rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
                 key={action.to}
                 to={action.to}
               >
@@ -34,7 +34,7 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
             ))}
             {primaryAction ? (
               <Link
-                className="inline-flex h-10 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-4 text-sm font-semibold text-white transition hover:bg-teal-800"
+                className="inline-flex h-10 min-w-28 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-5 text-sm font-semibold text-white transition hover:bg-teal-800"
                 to={primaryAction.to}
               >
                 {primaryAction.label}

@@ -1,6 +1,8 @@
 import { Link, useLocation } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { fakeCurrentUser, hasAnyRole } from '../../app/auth';
 import { navigationGroups, navigationItems } from '../../app/navigation';
+import type { NavigationIconName } from '../../app/navigation';
 
 export function Sidebar() {
   const location = useLocation();
@@ -12,18 +14,18 @@ export function Sidebar() {
   })).filter((group) => group.items.length > 0);
 
   return (
-    <aside className="border-r border-slate-200 bg-slate-950 text-white lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:w-64">
+    <aside className="border-r border-[#c5c5d3] bg-[#0d1c2f] text-[#d5e3fd] lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:w-[260px]">
       <div className="flex min-h-full flex-col lg:h-full">
-        <div className="border-b border-white/10 px-5 py-5">
+        <div className="border-b border-[#d5e3fd]/15 px-5 py-5">
           <Link className="block" to="/dashboard">
-            <p className="text-lg font-bold">OMS Admin</p>
-            <p className="mt-1 text-xs text-slate-400">물류 운영 관리 시스템</p>
+            <p className="text-lg font-bold text-white">OMS Admin</p>
+            <p className="mt-1 text-xs text-[#b6c4ff]">물류 운영 관리 시스템</p>
           </Link>
         </div>
-        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+        <nav className="flex-1 space-y-5 overflow-y-auto py-4">
           {groupedItems.map((group) => (
             <div key={group.group}>
-              <p className="px-2 text-xs font-semibold text-slate-500">{group.label}</p>
+              <p className="px-5 text-xs font-semibold text-[#90a8ff]">{group.label}</p>
               <div className="mt-2 space-y-1">
                 {group.items.map((item) => {
                   const active = isActiveItem(location.pathname, item.path, item.matchPaths);
@@ -31,16 +33,16 @@ export function Sidebar() {
                   return (
                     <Link
                       aria-current={active ? 'page' : undefined}
-                      className={`block rounded-md px-3 py-2.5 transition ${
-                        active ? 'bg-white text-slate-950 shadow-sm' : 'text-slate-300 hover:bg-white/10 hover:text-white'
+                      className={`flex min-h-11 items-center gap-3 border-l-4 px-4 py-2.5 text-sm font-semibold transition ${
+                        active
+                          ? 'border-[#dce1ff] bg-[#1e3a8a] text-[#dce1ff]'
+                          : 'border-transparent text-[#d5e3fd] hover:bg-[#3d4143] hover:text-white'
                       }`}
                       key={item.path}
                       to={item.path}
                     >
-                      <span className="block text-sm font-semibold">{item.label}</span>
-                      <span className={`mt-0.5 block text-xs ${active ? 'text-slate-600' : 'text-slate-500'}`}>
-                        {item.description}
-                      </span>
+                      <SidebarIcon className="h-5 w-5 shrink-0" name={item.icon} />
+                      <span className="truncate">{item.label}</span>
                     </Link>
                   );
                 })}
@@ -48,9 +50,8 @@ export function Sidebar() {
             </div>
           ))}
         </nav>
-        <div className="border-t border-white/10 px-5 py-4">
-          <p className="text-xs font-semibold text-slate-300">{fakeCurrentUser.name}</p>
-          <p className="mt-1 text-xs text-slate-500">차수별 조회/다운로드는 추후 기능</p>
+        <div className="border-t border-[#d5e3fd]/15 px-5 py-4">
+          <p className="text-xs font-semibold text-white">{fakeCurrentUser.name}</p>
         </div>
       </div>
     </aside>
@@ -64,3 +65,119 @@ function isActiveItem(pathname: string, path: string, matchPaths: string[] = [])
 
   return matchPaths.some((matchPath) => pathname.startsWith(matchPath));
 }
+
+interface IconProps {
+  className?: string;
+}
+
+type IconComponent = (props: IconProps) => JSX.Element;
+
+function SidebarIcon({ className, name }: IconProps & { name: NavigationIconName }) {
+  const Icon = sidebarIcons[name];
+  return <Icon className={className} />;
+}
+
+function IconBase({ children, className }: IconProps & { children: ReactNode }) {
+  return (
+    <svg aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" viewBox="0 0 24 24">
+      {children}
+    </svg>
+  );
+}
+
+const sidebarIcons: Record<NavigationIconName, IconComponent> = {
+  dashboard: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h4A1.5 1.5 0 0 1 11 5.5v4A1.5 1.5 0 0 1 9.5 11h-4A1.5 1.5 0 0 1 4 9.5z" />
+      <path d="M13 5.5A1.5 1.5 0 0 1 14.5 4h4A1.5 1.5 0 0 1 20 5.5v4a1.5 1.5 0 0 1-1.5 1.5h-4A1.5 1.5 0 0 1 13 9.5z" />
+      <path d="M4 14.5A1.5 1.5 0 0 1 5.5 13h4a1.5 1.5 0 0 1 1.5 1.5v4A1.5 1.5 0 0 1 9.5 20h-4A1.5 1.5 0 0 1 4 18.5z" />
+      <path d="M13 14.5a1.5 1.5 0 0 1 1.5-1.5h4a1.5 1.5 0 0 1 1.5 1.5v4a1.5 1.5 0 0 1-1.5 1.5h-4a1.5 1.5 0 0 1-1.5-1.5z" />
+    </IconBase>
+  ),
+  upload: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M12 15V4" />
+      <path d="m7.5 8.5 4.5-4.5 4.5 4.5" />
+      <path d="M5 15v3.5A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5V15" />
+    </IconBase>
+  ),
+  batch: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M8 6h12" />
+      <path d="M8 12h12" />
+      <path d="M8 18h12" />
+      <path d="M4 6h.01" />
+      <path d="M4 12h.01" />
+      <path d="M4 18h.01" />
+    </IconBase>
+  ),
+  orders: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M5 4h14v16H5z" />
+      <path d="M9 8h6" />
+      <path d="M9 12h6" />
+      <path d="M9 16h4" />
+    </IconBase>
+  ),
+  scan: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M4 7V5.5A1.5 1.5 0 0 1 5.5 4H7" />
+      <path d="M17 4h1.5A1.5 1.5 0 0 1 20 5.5V7" />
+      <path d="M20 17v1.5a1.5 1.5 0 0 1-1.5 1.5H17" />
+      <path d="M7 20H5.5A1.5 1.5 0 0 1 4 18.5V17" />
+      <path d="M7 12h10" />
+    </IconBase>
+  ),
+  pl: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M4 7.5 12 4l8 3.5-8 3.5z" />
+      <path d="M4 7.5v9L12 20l8-3.5v-9" />
+      <path d="M12 11v9" />
+    </IconBase>
+  ),
+  label: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4H14l6 6v7.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z" />
+      <path d="M14 4v6h6" />
+      <path d="M8 14h8" />
+      <path d="M8 17h5" />
+    </IconBase>
+  ),
+  download: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M12 4v11" />
+      <path d="m7.5 10.5 4.5 4.5 4.5-4.5" />
+      <path d="M5 19h14" />
+    </IconBase>
+  ),
+  externalApi: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M8 12h8" />
+      <path d="M12 8v8" />
+      <path d="M4.5 8.5A3.5 3.5 0 0 1 8 5h8a3.5 3.5 0 0 1 0 7h-1" />
+      <path d="M19.5 15.5A3.5 3.5 0 0 1 16 19H8a3.5 3.5 0 0 1 0-7h1" />
+    </IconBase>
+  ),
+  productMaster: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M5 6c0-1.1 3.1-2 7-2s7 .9 7 2-3.1 2-7 2-7-.9-7-2" />
+      <path d="M5 6v6c0 1.1 3.1 2 7 2s7-.9 7-2V6" />
+      <path d="M5 12v6c0 1.1 3.1 2 7 2s7-.9 7-2v-6" />
+    </IconBase>
+  ),
+  storeRouteMaster: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M6 17H4V7h10v10H9" />
+      <path d="M14 11h3l3 3v3h-2" />
+      <path d="M9 17a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0" />
+      <path d="M18 17a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0" />
+    </IconBase>
+  ),
+  audit: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M12 8v5l3 2" />
+      <path d="M4 12a8 8 0 1 0 2.3-5.65" />
+      <path d="M4 4v4h4" />
+    </IconBase>
+  ),
+};

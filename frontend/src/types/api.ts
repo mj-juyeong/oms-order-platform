@@ -4,9 +4,10 @@ export interface ApiMeta {
 }
 
 export interface ApiErrorDetail {
-  code: string;
   message: string;
+  code?: string;
   field?: string;
+  rejectedValue?: string;
   sheetName?: string;
   rowNo?: number;
   columnName?: string;
@@ -29,6 +30,6 @@ export interface PageResponse<TItem> {
   items: TItem[];
   page: number;
   size: number;
-  total: number;
+  totalElements: number;
   totalPages: number;
 }

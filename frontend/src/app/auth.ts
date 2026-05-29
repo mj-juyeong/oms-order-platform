@@ -5,6 +5,8 @@ export const fakeCurrentUser: CurrentUser = {
   loginId: 'ops01',
   name: '운영자01',
   userScopeType: 'TENANT',
+  tenantId: 1,
+  clientId: 1,
   tenantName: '샘플 물류사',
   clientName: '웰스토리',
   roles: ['ADMIN', 'OPERATOR', 'VIEWER'],
