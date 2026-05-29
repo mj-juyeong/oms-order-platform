@@ -91,12 +91,12 @@
 | 항목 | 내용 |
 |---|---|
 | 목표 | 확정된 주문/PL/Label/Scan 데이터를 조회, 외부 API 제공, 라벨 엑셀 다운로드를 제공한다. |
-| 작업 목록 | PL 기반 `order_lines` 생성, 주문 조회, Scan 조회, PL 조회, Label 조회, WOS Scan API, PL API, 라벨 다운로드, 다운로드 로그 |
-| 완료 기준 | CONFIRMED 배치만 외부 API와 다운로드 대상으로 노출된다. 차수별 주문 조회와 차수별 다운로드는 구현하지 않고 추후 구현 항목으로 남긴다. |
-| 산출물 | Order/Scan/PL/Label API, label download API, 조회 화면 |
+| 작업 목록 | PL 기반 `order_lines` 생성, 주문 조회, Scan 조회, PL 조회, Label 조회, WOS Scan API, PL API, API 제공 현황 화면, 라벨 다운로드, 다운로드 로그 |
+| 완료 기준 | CONFIRMED 배치만 WOS/PL 외부 API와 라벨 다운로드 대상으로 노출된다. 운영자는 API 제공 현황 화면에서 WOS는 `Scan_upload_*`, PL은 `PL_EA`/`PL_Box` 기준 제공 가능 배치와 제외 사유, 최근 호출 상태를 확인할 수 있다. 차수별 주문 조회와 차수별 다운로드는 구현하지 않고 추후 구현 항목으로 남긴다. |
+| 산출물 | Order/Scan/PL/Label API, WOS/PL external API, API 제공 현황 화면, label download API, 조회 화면 |
 | 우선순위 | P0 |
 | 선행 조건 | Phase 6 |
-| 확인 필요 사항 | 라벨 다운로드 컬럼 순서, 외부 API 최신 배치 선택 정책 |
+| 확인 필요 사항 | 라벨 다운로드 컬럼 순서, 외부 API 최신 배치 선택 정책, WOS/PL 외부 API 응답 포맷과 필수 query, API Key 운영 정책 |
 
 ## Phase 8: 권한 / 로그 / 운영 안정화
 

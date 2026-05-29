@@ -414,7 +414,7 @@
 |---|---|---:|---|
 | `id` | BIGINT | NN | API Key ID |
 | `tenant_id` | BIGINT | NN | 소속 물류사 |
-| `client_id` | BIGINT | NULL | 특정 고객사 제한 시 사용 |
+| `client_id` | BIGINT | NULL | 1차 MVP 외부 API Key는 고객사별 발급이므로 운영상 필수. 추후 tenant-level key 확장을 위해 DB는 NULL 허용 |
 | `name` | VARCHAR(100) | NN | 키 이름 |
 | `key_hash` | VARCHAR(255) | NN | API Key 해시 |
 | `status` | VARCHAR(32) | NN | `ACTIVE`, `REVOKED` 등 |
@@ -424,7 +424,10 @@
 
 - UK: `uk_api_keys_tenant_hash(tenant_id, key_hash)`
 - Index: `idx_api_keys_tenant_status`, `idx_api_keys_client`, `idx_api_keys_expires_at`
+- 1차 MVP의 외부 API Key는 `tenant_id + client_id` 단위로 발급한다.
+- 외부 API 요청자는 `tenantId`, `clientId`를 보내지 않으며, 서버는 API Key에 연결된 고객사 범위로만 조회한다.
 - API Key 원문은 생성 응답에서 한 번만 반환하고 DB에는 hash만 저장한다.
+- 추후 다고객사 외부 연동이 필요하면 `api_keys.client_id = NULL`인 tenant-level key와 `api_key_client_scopes(api_key_id, client_id)` 테이블을 추가한다.
 
 ## 5. Tenant / Client 스코프 정책
 

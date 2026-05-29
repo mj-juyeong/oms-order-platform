@@ -2,7 +2,7 @@
 
 OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 저장, 검증, 조회, 외부 API 제공, 엑셀 다운로드를 수행하기 위한 물류 운영 OMS 저장소이다.
 
-현재 Backend는 Phase 2 기반 구조와 DB migration 기반 준비까지 되어 있다. Spring Boot Kotlin 애플리케이션은 DB 없이 기본 프로필로 실행 가능하며, 공통 응답, 공통 예외, requestId, 인증/인가 skeleton, 파일 저장 skeleton, audit logging skeleton, JPA/Flyway/MySQL 설정과 초기 schema migration이 포함되어 있다.
+현재 Backend는 MVP 핵심 흐름의 기반 구현이 진행되어 있다. 기본 프로필은 DB 없이 실행 가능하며, local 프로필에서는 MySQL/Flyway/JPA 기반으로 마스터 upsert, OIS 엑셀 업로드/파싱, 검증/확정, 조회/외부 API/라벨 다운로드, 사용자/API Key/감사 로그 API를 사용할 수 있다.
 
 ## 기준 문서
 
@@ -55,7 +55,7 @@ OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 저장, 검증, 
 
 ## Frontend 로컬 실행
 
-Phase 3 Frontend 기반 구조는 실제 API 호출 없이 `frontend/src/api/mock`의 mock data만 사용한다.
+Frontend는 운영 화면 골격과 mock 기반 화면을 포함한다. `frontend/src/api/oms.ts`에는 Backend API 호출 함수가 준비되어 있으며, `/uploads` 화면은 local Backend의 OIS 엑셀 업로드와 배치 검증 API에 연결되어 있다. 나머지 화면의 실제 API 연결은 단계적으로 진행한다.
 
 ```powershell
 cd frontend
@@ -78,7 +78,7 @@ npm.cmd run lint
 | `/` | `/dashboard` redirect |
 | `/login` | 로그인 skeleton |
 | `/dashboard` | mock 대시보드 |
-| `/uploads` | OIS 엑셀 업로드 skeleton |
+| `/uploads` | OIS 엑셀 업로드/배치 검증 Backend API 연결 |
 | `/batches` | 업로드 배치 목록 mock table |
 | `/batches/BATCH-20260528-001` | 배치 상세 skeleton |
 | `/batches/BATCH-20260528-001/validation` | 검증 결과 mock table |
@@ -93,9 +93,10 @@ npm.cmd run lint
 
 주의:
 
-- 실제 로그인/JWT/Session 연동은 구현하지 않았다.
-- 실제 Backend API 호출은 하지 않는다.
-- 실제 파일 업로드, 배치 검증, 배치 확정, 다운로드는 구현하지 않았다.
+- 실제 로그인/JWT/Session 연동은 구현하지 않았다. local profile 보호 API는 개발 편의를 위해 `X-User-Id` header를 사용한다.
+- 외부 API는 고객사별 `X-Api-Key` header 검증을 사용한다. 외부 호출자는 `tenantId`, `clientId`를 보내지 않으며, 서버가 API Key에 연결된 고객사 범위로 조회한다.
+- `/uploads`는 실제 파일 업로드와 배치 검증 API를 호출한다. 그 외 화면은 아직 대부분 mock data를 표시한다.
+- 배치 확정, 다운로드 화면의 실제 호출 연결은 아직 구현하지 않았다.
 - 차수별 주문 조회(`/orders/by-round`)와 차수별 다운로드는 MVP 필수 route로 만들지 않았다.
 
 ## 현재 저장소 구조
@@ -124,7 +125,7 @@ oms-platform/
   .gitignore
 ```
 
-`backend/`는 Spring Boot Kotlin 프로젝트로 생성되어 있으며, 기본 health check와 system ping API가 동작한다. 기본 프로필은 DB 없이 실행되고, `local` 프로필은 MySQL과 Flyway migration을 사용한다. `frontend/`는 Vite React TypeScript 기반 프로젝트로 준비되어 있다.
+`backend/`는 Spring Boot Kotlin 프로젝트이며 기본 health check와 system ping API가 동작한다. 기본 프로필은 DB 없이 실행되고, `local` 프로필은 MySQL과 Flyway migration을 사용한다. `frontend/`는 Vite React TypeScript 기반 프로젝트이며 mock 화면과 Backend API client 기반을 포함한다.
 
 ## Backend 로컬 실행
 
@@ -165,6 +166,12 @@ Invoke-RestMethod http://localhost:8080/api/v1/system/error-sample
 
 요청에 `X-Request-Id` header가 있으면 해당 값을 응답 header와 body `meta.requestId`에 반영한다. 없으면 서버가 생성한다.
 
+local profile의 관리자/로그/API Key API는 `X-User-Id` header가 필요하다.
+
+```powershell
+Invoke-RestMethod http://localhost:8080/api/v1/auth/me -Headers @{ "X-User-Id" = "1" }
+```
+
 ## Backend 테스트
 
 ```powershell
@@ -198,7 +205,7 @@ cd backend
 ## 확인 필요
 
 - MySQL 8.4 LTS 사용 가능 여부 또는 회사 운영 MySQL 버전
-- JWT/API Key 상세 정책
+- JWT/Session 상세 정책
 - 업로드 파일 보관 위치와 보관 기간
 - 업로드 파일 최대 크기 운영 기준
 - JPA Entity/Repository 구현 범위와 순서

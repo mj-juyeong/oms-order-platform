@@ -51,7 +51,7 @@ erDiagram
   upload_batches ||--o{ pl_lines : has
   upload_batches ||--o{ label_lines : has
   upload_batches ||--o{ order_lines : rebuilds
-  pl_lines ||--o{ order_lines : source
+  pl_lines ||--o| order_lines : source
 
   tenants ||--o{ master_upload_batches : uploads_master
   tenants ||--o{ product_master_items : owns
@@ -424,10 +424,11 @@ tenants 1:N master_upload_batches
 ### Order Lines
 
 ```text
-pl_lines 1:1 또는 1:N order_lines
+pl_lines 1:0..1 order_lines
 ```
 
 `order_lines`는 원본 주문이 아니라 `PL_EA`, `PL_Box`에서 재구성한 OMS 조회용 주문 요약 데이터다.
+현재 물리 DB는 `order_lines.source_pl_line_id`에 unique 제약을 두므로 PL 원천 행 1건은 최대 1개의 주문 조회용 행으로 재구성된다.
 
 ### Logs
 

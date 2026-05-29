@@ -18,7 +18,8 @@
 - `CLIENT` 사용자는 특정 고객사/화주사 소속이다. 고객사 직접 로그인은 1차 필수 구현이 아니며 추후 기능으로 둔다.
 - 내부 운영 API는 기본적으로 로그인 사용자의 `tenant_id`를 기준으로 동작한다. `SYSTEM` 사용자의 tenant 선택/전환 정책은 추후 관리자 기능에서 확정한다.
 - 주문/업로드 관련 API는 `clientId`를 받아 특정 고객사/화주사 범위를 명확히 한다.
-- 외부 API Key는 `tenant_id`에 소속되며, 필요 시 `client_id`로 접근 범위를 제한한다.
+- 1차 MVP 외부 API Key는 `tenant_id + client_id`에 소속된다. 외부 호출자는 `tenantId`, `clientId`를 보내지 않고, 서버는 `X-Api-Key`에 연결된 고객사 범위로만 데이터를 조회한다.
+- 추후 한 외부 시스템이 여러 고객사를 조회해야 하면 tenant-level key와 `api_key_client_scopes` 같은 허용 고객사 목록 구조로 확장한다.
 - 1차 MVP의 마스터 매칭은 고객사 코드 매핑 없이 `product_code -> ezadmin_code`, `store_code/orderBusinessSiteCode -> baljugo_code` 직접 매칭을 사용한다.
 - 고객사별 코드 매핑 API는 1차 MVP 필수 API가 아니며 추후 확장으로 둔다.
 
@@ -135,14 +136,31 @@
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
 | GET | `/api/v1/scan-lines` | 내부 Scan 데이터 조회 | VIEWER | Query: `batchId`, `deliveryDate`, `scanCenter`, `storeCode`, `productCode`, `barcode`, `page`, `size` | `{ "items": [{ "barcode": "B001", "scanCenter": "장지", "productCode": "P001" }] }` | `INVALID_QUERY` |
-| GET | `/external/v1/wos/scan-upload` | WOS 제공용 확정 Scan 데이터 | API_KEY | Query: `batchId`, `deliveryDate`, `scanCenter`, `storeCode`, `productCode`, `page`, `size` | `{ "items": [{ "deliveryDate": "2025-12-15", "barcode": "B001", "orderBusinessSiteCode": "S001", "productCode": "P001" }] }` | `INVALID_API_KEY`, `NO_CONFIRMED_BATCH`, `INVALID_QUERY` |
+| GET | `/external/v1/wos/scan-upload` | WOS 제공용 확정 Scan 데이터 | API_KEY(`WOS_SCAN_READ`) | Header: `X-Api-Key`; Query: `batchId`, `deliveryDate`, `scanCenter`, `storeCode`, `productCode`, `barcode`, `page`, `size` | `{ "items": [{ "deliveryDate": "2025-12-15", "barcode": "B001", "orderBusinessSiteCode": "S001", "productCode": "P001" }] }` | `INVALID_API_KEY`, `FORBIDDEN`, `NO_CONFIRMED_BATCH`, `BATCH_NOT_CONFIRMED`, `INVALID_QUERY` |
 
 ## 11. PL API
 
 | Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
 |---|---|---|---|---|---|---|
 | GET | `/api/v1/pl-lines` | 내부 PL 데이터 조회 | VIEWER | Query: `batchId`, `plType`, `dueDate`, `vehicleName`, `storeCode`, `productCode`, `orderNo`, `page`, `size` | `{ "items": [{ "plType": "EA", "orderNo": "O001", "productCode": "P001", "orderQty": 5 }] }` | `INVALID_QUERY` |
-| GET | `/external/v1/pl/picking-list` | PL 시스템 제공용 확정 Picking List 데이터 | API_KEY | Query: `batchId`, `deliveryDate`, `plType`, `vehicleName`, `deliveryRound`, `storeCode`, `page`, `size` | `{ "items": [{ "plType": "BOX", "orderNo": "O002", "storeCode": "S001", "vehicleName": "차량1" }] }` | `INVALID_API_KEY`, `NO_CONFIRMED_BATCH`, `INVALID_QUERY` |
+| GET | `/external/v1/pl/picking-list` | PL 시스템 제공용 확정 Picking List 데이터 | API_KEY(`PL_READ`) | Header: `X-Api-Key`; Query: `batchId`, `deliveryDate`, `plType`, `vehicleName`, `storeCode`, `productCode`, `orderNo`, `page`, `size` | `{ "items": [{ "plType": "BOX", "orderNo": "O002", "storeCode": "S001", "vehicleName": "차량1" }] }` | `INVALID_API_KEY`, `FORBIDDEN`, `NO_CONFIRMED_BATCH`, `BATCH_NOT_CONFIRMED`, `INVALID_QUERY` |
+
+## 11-1. External API 제공 현황 운영 API
+
+이 API는 외부 시스템이 호출하는 `/external/v1` API가 아니라, OMS 운영자가 WOS/PL 제공 가능 상태를 확인하기 위한 내부 운영 API다.
+
+| Method | Path | 설명 | 권한 | Request Body 또는 Query Parameter | Response Body 예시 | Error Case |
+|---|---|---|---|---|---|---|
+| GET | `/api/v1/external-api/status` | WOS/PL API 제공 현황 조회 | VIEWER | Query: `channel(WOS_SCAN, PL)`, `clientId`, `batchId`, `deliveryDate`, `status`, `page`, `size` | `{ "items": [{ "channel": "WOS_SCAN", "batchId": 1001, "sourceSheets": ["Scan_upload_장지"], "providable": true, "providedRowCount": 436, "endpoint": "/external/v1/wos/scan-upload", "lastCalledAt": "2026-05-28T13:00:00+09:00", "lastStatusCode": 200 }] }` | `INVALID_QUERY`, `FORBIDDEN` |
+
+### 제공 현황 정책
+
+- `channel = WOS_SCAN`은 `Scan_upload_*` 데이터를 기준으로 한다.
+- `channel = PL`은 `PL_EA`, `PL_Box` 데이터를 기준으로 한다.
+- 라벨은 외부 API가 아니라 엑셀 다운로드 제공 대상이므로 이 API의 channel에 포함하지 않는다.
+- `CONFIRMED` 배치만 `providable = true`로 응답한다.
+- 미확정, 검증 실패, 취소, 롤백 배치는 `providable = false`와 `excludedReason`을 함께 응답한다.
+- `lastCalledAt`, `lastStatusCode`, `lastRequestId`는 `api_call_logs` 기준으로 채운다.
 
 ## 12. Label
 
@@ -180,10 +198,14 @@
 
 - 외부 API는 CONFIRMED 배치만 응답한다.
 - `batchId`가 없으면 조건에 맞는 최신 CONFIRMED 배치를 선택하는 정책을 검토한다.
+- API 제공 현황 내부 운영 API는 WOS/PL 제공 가능 상태를 보여주는 관제용이며, 실제 외부 데이터 제공은 `/external/v1/wos/scan-upload`, `/external/v1/pl/picking-list`가 담당한다.
+- 라벨은 API 제공 현황이 아니라 `GET /api/v1/downloads/labels` 기반 엑셀 다운로드 대상으로 관리한다.
 - Error 검증 오류가 있으면 배치를 확정할 수 없다.
 - 다운로드는 CONFIRMED 배치 기준을 기본으로 한다.
 - 차수별 주문 조회와 차수별 다운로드는 1차 MVP 필수 API가 아니며 추후 구현으로 둔다.
+- 1차 MVP의 API Key는 고객사별 key로 관리한다. `api_keys.client_id`를 필수 운영값으로 보고, 외부 API 요청에서는 `tenantId`, `clientId` query를 받지 않는다.
 - API Key 원문은 생성 응답에서 한 번만 반환하고 DB에는 hash만 저장한다.
+- 추후 다고객사 연동이 필요하면 `api_keys.client_id = null`인 tenant-level key와 `api_key_client_scopes(api_key_id, client_id)` 구조로 확장한다.
 - 마스터 업로드는 version 생성이 아니라 tenant별 현재 마스터 upsert로 처리한다.
 - 마스터 업로드 이력은 파일 단위 요약 건수만 1차 MVP에 포함하고, row 단위 변경 이력은 추후 구현으로 둔다.
 
@@ -195,7 +217,7 @@
 |---|---|
 | Endpoint와 테이블명 | API는 업무 리소스명(`/order-excel-batches`)을 사용하고 DB는 `upload_batches`를 사용한다. 충돌 없음. |
 | 배치 상태명 | DB enum은 `UPLOADED`, `VALIDATING`, `VALIDATION_FAILED`, `READY_TO_CONFIRM`, `CONFIRMED`, `CANCELLED`, `ROLLED_BACK`만 사용한다. `VALIDATED` 표현은 사용하지 않는다. |
-| 외부 API 노출 기준 | `/external/v1/wos/scan-upload`, `/external/v1/pl/picking-list`는 반드시 `CONFIRMED` 배치만 응답해야 한다. |
+| 외부 API 노출 기준 | `/external/v1/wos/scan-upload`, `/external/v1/pl/picking-list`는 반드시 `CONFIRMED` 배치만 응답해야 한다. 외부 요청의 tenant/client 범위는 `X-Api-Key`에 연결된 `tenant_id + client_id`에서 결정한다. |
 | 차수별 API | `/api/v1/orders/by-round`, `/api/v1/downloads/orders/by-round`는 추후 구현 후보이며 1차 MVP 필수 구현이 아니다. |
 | tenant/client | 내부 API는 로그인 사용자의 `tenant_id`를 사용하고, 업로드/운영 데이터 API는 `clientId`를 명시해야 한다. 응답에 `tenantId` 노출 필요 여부는 확인 필요. |
 | user scope | `SYSTEM`, `TENANT`, `CLIENT` 스코프를 응답에 포함한다. 고객사 직접 로그인과 SYSTEM 사용자의 tenant 선택 정책은 추후 상세화한다. |

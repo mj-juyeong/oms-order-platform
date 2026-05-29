@@ -30,6 +30,7 @@ MVP 구현 범위는 다음 화면을 포함한다.
 - Scan 조회
 - PL 조회
 - Label 조회
+- API 제공 현황
 - 라벨 다운로드
 - 상품 마스터
 - 배송지/차량 마스터
@@ -46,13 +47,15 @@ MVP 구현 범위는 다음 화면을 포함한다.
 | 1 | `AGENTS.md` | 프로젝트 최상위 규칙, 금지사항, 도메인 정의 |
 | 2 | `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 업무 요구사항의 최상위 기준 |
 | 3 | `docs/UI_DESIGN_BRIEF.md` | UI/UX 원칙, 화면 목록, 컴포넌트 기준 |
-| 4 | `design-handoff/stitch/STITCH_DESIGN_REVIEW.md` | Stitch 시안에서 유지/수정해야 할 UX 체크리스트 |
-| 5 | `design-handoff/stitch_oms/screenshots/*`, `design-handoff/stitch_oms/*/code.html` | 레이아웃, 정보 배치, 밀도, 톤 참고용 |
-| 6 | `docs/API_DESIGN_DRAFT.md` | API 경로, 권한, 응답 필드 예상 기준 |
-| 7 | `docs/ERD_DESIGN.md` | 화면에 노출할 데이터 관계와 도메인 구조 확인 |
-| 8 | `docs/IMPLEMENTATION_PLAN.md` | 전체 프로젝트 단계와 선후관계 확인 |
+| 4 | `docs/DESIGN_HANDOFF_PAGE_MAPPING.md` | `design-handoff/stitch_oms` 폴더명과 실제 OMS 화면 매핑 |
+| 5 | `design-handoff/stitch/STITCH_DESIGN_REVIEW.md` | Stitch 시안에서 유지/수정해야 할 UX 체크리스트 |
+| 6 | `design-handoff/stitch_oms/screenshots/*`, `design-handoff/stitch_oms/*/code.html` | 레이아웃, 정보 배치, 밀도, 톤 참고용 |
+| 7 | `docs/API_DESIGN_DRAFT.md` | API 경로, 권한, 응답 필드 예상 기준 |
+| 8 | `docs/ERD_DESIGN.md` | 화면에 노출할 데이터 관계와 도메인 구조 확인 |
+| 9 | `docs/IMPLEMENTATION_PLAN.md` | 전체 프로젝트 단계와 선후관계 확인 |
 
 Stitch 산출물은 production 코드가 아니다. 실제 구현에서는 현재 `frontend/src/components`, `frontend/src/pages`, `frontend/src/routes`, `frontend/src/types`, `frontend/src/api` 구조를 우선한다.
+페이지 구현 또는 디자인 반영 작업 전에는 `docs/DESIGN_HANDOFF_PAGE_MAPPING.md`에서 해당 화면의 디자인 폴더를 먼저 확인한다.
 
 ## 3. 화면 구현 우선순위
 
@@ -66,10 +69,11 @@ Stitch 산출물은 production 코드가 아니다. 실제 구현에서는 현�
 | Phase 6 | 대시보드 | 오늘 막힌 업무와 운영 지표 요약 구현 | Error/Warning, 확정 대기, 외부 제공 제외, 마스터 상태가 보임 |
 | Phase 7 | 주문 조회 | PL 기반 OMS 주문 요약 조회 구현 | 원본 주문 생성/수정처럼 보이지 않음 |
 | Phase 8 | Scan / PL / Label 조회 | 저장된 원천 데이터 조회 화면 구현 | 코드성 값이 CodeCell로 표시되고 EA/BOX, Scan suffix가 보존됨 |
-| Phase 9 | 라벨 다운로드 | 확정 배치만 다운로드 가능한 UX 구현 | 미확정 배치 다운로드 불가 사유가 명확함 |
+| Phase 9 | API 제공 현황 | WOS/PL 외부 API 제공 가능 상태 관제 | WOS는 Scan, PL은 PL_EA/PL_Box 기준으로 CONFIRMED 배치만 제공 가능함이 보임 |
 | Phase 10 | 상품 마스터 | 현재 상품 마스터 조회와 CSV upsert 업로드 구현 | 버전 활성화가 아닌 upsert 요약/이력 중심 |
 | Phase 11 | 배송지/차량 마스터 | 현재 배송지/차량 마스터 조회와 XLSX upsert 업로드 구현 | 상품 마스터와 별도 화면으로 유지 |
-| Phase 12 | 이력/로그 조회 | 배치, 다운로드, 외부 API 호출 로그 조회 구현 | requestId, actor, action, 상태 전후가 추적 가능함 |
+| Phase 12 | 라벨 다운로드 | 확정 배치만 다운로드 가능한 UX 구현 | 미확정 배치 다운로드 불가 사유가 명확함 |
+| Phase 13 | 이력/로그 조회 | 배치, 다운로드, 외부 API 호출 로그 조회 구현 | requestId, actor, action, 상태 전후가 추적 가능함 |
 
 Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 화면을 확장하는 것을 권장한다.
 
@@ -168,14 +172,14 @@ Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 
 | 항목 | 내용 |
 |---|---|
 | 목적 | OIS 업로드 배치의 상태와 후속 처리 가능 여부 조회 |
-| 주요 UI 영역 | PageHeader, BatchFilterBar, BatchListTable, Pagination |
+| 주요 UI 영역 | PageHeader, collapsed BatchFilterPanel, BatchList, Pagination |
 | 주요 액션 | 새 업로드, 배치 상세, 검증 결과 보기 |
-| 상태별 정책 | 미확정 배치는 API/라벨 다운로드 `불가` 표시 |
-| 주요 테이블 컬럼 | 배치번호, 고객사, 원본 파일명, 배송일/납기일, 상태, E/W/I, 시트 수, 총 행 수, API 제공, 라벨 다운로드, 업로드자, 업로드시각, 확정시각 |
+| 상태별 정책 | 목록은 상태와 다음 작업 중심으로 표시하고, API 제공/라벨 다운로드 가능 여부는 배치 상세와 라벨 다운로드 화면에서 확인 |
+| 주요 목록 정보 | 배치번호+원본 파일명, 고객사+배송일/납기일, 상태+E/W/I, 다음 작업, 업로드자+업로드시각, 확정시각 |
 | 빈 상태 | 검색 결과 없음, 필터 초기화 제공 |
 | 오류 상태 | 목록 조회 실패, 권한 없음 |
 | API 연동 예상 지점 | `GET /api/v1/order-excel-batches` |
-| Stitch 참고 | 필터 카드, 상태 chip, pagination, density 선택 |
+| Stitch 참고 | 필터 카드, 상태 chip, pagination, density 선택. 필터는 기본 접힘 상태로 두고 필요 시 펼침 |
 | Stitch 그대로 금지 | 의미가 불분명한 `엑셀 다운로드` 버튼, OIS 목록에 CSV 파일명 예시 |
 
 ### 6.5 배치 상세
@@ -268,7 +272,28 @@ Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 
 | Stitch 참고 | 라벨 데이터 조회 패턴 |
 | Stitch 그대로 금지 | `출고라벨/입고라벨`처럼 요구사항과 다른 유형명 고정 |
 
-### 6.11 라벨 다운로드
+### 6.11 API 제공 현황
+
+| 항목 | 내용 |
+|---|---|
+| 목적 | OMS가 외부 시스템에 제공하는 WOS/PL API의 제공 가능 상태와 최근 호출 상태를 운영자가 확인 |
+| 주요 UI 영역 | Channel tabs(WOS/PL), ExternalApiStatusSummary, ProvideableBatchTable, EndpointInfoPanel, RecentApiCallLogTable |
+| 주요 액션 | WOS/PL 탭 전환, 배치 상세 이동, 원천 데이터 조회 이동, API 호출 로그 이동, endpoint 복사 |
+| 상태별 정책 | `CONFIRMED` 배치만 `제공 가능`으로 표시한다. `VALIDATION_FAILED`, `READY_TO_CONFIRM`, `UPLOADED`, `CANCELLED`, `ROLLED_BACK` 배치는 제공 제외 사유를 함께 표시한다. |
+| WOS 기준 | `Scan_upload_*` 데이터 기반. 배송일, Scan 센터, 거래처/배송지 코드, 상품코드, 바코드, 제공 행 수를 보여준다. |
+| PL 기준 | `PL_EA`, `PL_Box` 데이터 기반. EA/BOX 구분, 납기일, 거래처코드, 품목코드, 차량명, 주문량, 제공 행 수를 보여준다. |
+| 주요 테이블 컬럼 | 채널, 배치번호, 고객사, 기준일, 상태, 제공 가능 여부, 제공 행 수, endpoint, 최근 호출시각, 최근 응답, 제외 사유 |
+| 빈 상태 | 제공 가능한 확정 배치 없음. 업로드/검증/확정 동선 안내 |
+| 오류 상태 | API 제공 현황 조회 실패, 권한 없음, API Key 없음, 최근 호출 실패 |
+| API 연동 예상 지점 | `GET /api/v1/external-api/status`, `GET /api/v1/audit/api-calls`, `GET /api/v1/order-excel-batches` |
+| Stitch 참고 | 별도 Stitch 전용 화면은 없으므로 대시보드의 API 제공 가능 카드, 배치 목록의 상태 chip, 이력/로그의 API 호출 로그 패턴을 조합 |
+| Stitch 그대로 금지 | 조회 화면을 외부 시스템 데이터 수정 화면처럼 보이게 하거나, 미확정 배치를 제공 가능하게 보이게 하는 표현 |
+
+이 화면은 `Scan 조회`, `PL 조회`와 다르다. Scan/PL 조회는 OMS 내부 원천 데이터 확인 화면이고, `API 제공 현황`은 WOS/PL 외부 시스템이 현재 어떤 데이터를 받을 수 있는지 보여주는 관제 화면이다.
+
+라벨은 요구사항상 API가 아니라 엑셀 다운로드 형태로 제공하므로 이 화면에서는 WOS/PL API만 다룬다. 라벨 제공 상태는 `라벨 다운로드` 화면에서 다룬다.
+
+### 6.12 라벨 다운로드
 
 | 항목 | 내용 |
 |---|---|
@@ -283,7 +308,7 @@ Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 
 | Stitch 참고 | 확정 배치만 다운로드 가능 Alert |
 | Stitch 그대로 금지 | 차수별 주문 다운로드를 핵심 CTA처럼 강조 |
 
-### 6.12 상품 마스터
+### 6.13 상품 마스터
 
 | 항목 | 내용 |
 |---|---|
@@ -298,7 +323,7 @@ Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 
 | Stitch 참고 | 현재 마스터 요약과 업로드 이력 패널 |
 | Stitch 그대로 금지 | `버전 선택`, `버전 활성화`, 화면 직접 수정 중심 UX |
 
-### 6.13 배송지/차량 마스터
+### 6.14 배송지/차량 마스터
 
 | 항목 | 내용 |
 |---|---|
@@ -313,7 +338,7 @@ Phase 1과 Phase 2를 먼저 작게 완료한 뒤 같은 패턴으로 목록형 
 | Stitch 참고 | 상품 마스터와 같은 학습 패턴 |
 | Stitch 그대로 금지 | 상품 마스터와 통합하거나 `마스터 버전 활성화`로 표현 |
 
-### 6.14 이력/로그 조회
+### 6.15 이력/로그 조회
 
 | 항목 | 내용 |
 |---|---|
@@ -379,7 +404,7 @@ OIS 업로드와 검증 화면에서는 “선택한 마스터 버전” 대신 
 
 ## 8. 라우팅 계획
 
-현재 repo에는 대부분의 route와 page component가 이미 존재한다. 이후 구현은 아래 표를 기준으로 화면별 깊이를 채운다.
+현재 repo에는 대부분의 route와 page component가 이미 존재한다. 신규 `API 제공 현황`은 `/external-api/status` route와 page component를 추가한 뒤 아래 표를 기준으로 화면 깊이를 채운다.
 
 | Route path | Page component | 목적 | 현재 상태/메모 |
 |---|---|---|---|
@@ -393,6 +418,7 @@ OIS 업로드와 검증 화면에서는 “선택한 마스터 버전” 대신 
 | `/scan-lines` | `ScanLinesPage` | Scan 조회 | 0건 정상 시트 표현 필요 |
 | `/pl-lines` | `PlLinesPage` | PL 조회 | 인쇄/신규 액션 금지 |
 | `/label-lines` | `LabelLinesPage` | Label 조회 | Label_EA/Label_Box 용어 정리 |
+| `/external-api/status` | `ExternalApiStatusPage` | WOS/PL API 제공 현황 | CONFIRMED 배치만 제공 가능, 최근 API 호출 상태 표시 |
 | `/downloads/labels` | `LabelDownloadsPage` | 라벨 다운로드 | CONFIRMED 배치만 가능 |
 | `/masters/products` | `ProductMasterPage` | 상품 마스터 | upsert 구조로 정리 |
 | `/masters/store-routes` | `StoreRouteMasterPage` | 배송지/차량 마스터 | upsert 구조로 정리 |
@@ -427,6 +453,8 @@ OIS 업로드와 검증 화면에서는 “선택한 마스터 버전” 대신 
 | PL | `src/api/pl.ts` | `GET /api/v1/pl-lines` | `['plLines', filters]` | PL 조회 |
 | Label | `src/api/labels.ts` | `GET /api/v1/label-lines` | `['labelLines', filters]` | Label 조회 |
 | Label | `src/api/labels.ts` | `GET /api/v1/label-lines/{labelLineId}` | `['labelLine', labelLineId]` | Label 상세 Drawer |
+| External API | `src/api/externalApi.ts` | `GET /api/v1/external-api/status` | `['externalApiStatus', filters]` | API 제공 현황 |
+| External API | `src/api/externalApi.ts` | `GET /api/v1/audit/api-calls` | `['apiCallLogs', filters]` | API 제공 현황, 이력/로그 |
 | Download | `src/api/downloads.ts` | `GET /api/v1/downloads/labels` | `downloadLabelsMutation` | 라벨 다운로드 |
 | Product Master | `src/api/masters.ts` | `POST /api/v1/masters/products/uploads` | `uploadProductMasterMutation` | 상품 마스터 |
 | Product Master | `src/api/masters.ts` | `GET /api/v1/masters/products/uploads` | `['productMasterUploads', filters]` | 상품 마스터 이력 |
@@ -449,6 +477,9 @@ API 응답 타입은 `src/types`에 도메인별로 둔다. Backend 공통 응�
 - [ ] Error가 1건 이상이면 `배치 확정`은 disabled 또는 숨김 처리하고 사유를 표시한다.
 - [ ] 검증 대기 상태에서는 `배치 확정`이 가능해 보이지 않게 한다.
 - [ ] 확정되지 않은 배치는 API 제공/라벨 다운로드가 불가능하다는 상태를 표시한다.
+- [ ] API 제공 현황 화면은 WOS/PL만 다루고, WOS는 `Scan_upload_*`, PL은 `PL_EA`/`PL_Box` 기반임을 명확히 표시한다.
+- [ ] API 제공 현황 화면에서 `CONFIRMED`가 아닌 배치는 제공 제외 사유를 표시한다.
+- [ ] 라벨은 API 제공 현황에 섞지 않고 라벨 다운로드 화면에서 엑셀 다운로드 대상으로 표시한다.
 - [ ] 주문번호, 거래처코드, 품목코드, 바코드, QR코드는 `CodeCell`로 문자열 보존/복사 가능하게 표시한다.
 - [ ] Error/Warning/Info는 색상과 텍스트 라벨을 함께 사용한다.
 - [ ] 주문 조회는 PL 기반 OMS 주문 요약 조회임을 화면 설명에 남긴다.
@@ -482,6 +513,8 @@ API 응답 타입은 `src/types`에 도메인별로 둔다. Backend 공통 응�
 | Warning 확정 허용 여부 미확정 | 확정 버튼 정책에 영향 | Error는 확정 차단으로 확정, Warning은 확인 필요 문구와 정책 주입 가능 구조로 구현 |
 | 대표 배송일/납기일 기준 미확정 | 필터와 컬럼명이 화면별로 혼재될 수 있음 | Scan은 배송일, PL/Label/Order는 납기일 또는 dueDate 기준을 문서화 |
 | 외부 API 최신 배치 선택 정책 미확정 | 대시보드/API 제공 가능 지표에 영향 | MVP UI는 CONFIRMED 여부 중심으로 표시하고 최신 선택 정책은 확인 필요로 둠 |
+| API 제공 현황과 조회 화면의 역할 혼동 | Scan/PL 조회 화면이 외부 제공 관제 화면처럼 비칠 수 있음 | `/scan-lines`, `/pl-lines`는 내부 원천 데이터 확인, `/external-api/status`는 WOS/PL 제공 현황으로 분리 |
+| WOS/PL 외부 endpoint 응답 포맷 미확정 | API 제공 현황의 endpoint 설명과 호출 예시 영향 | endpoint, 필수 query, 최신 배치 선택 정책은 확인 필요로 두고, MVP는 제공 가능 여부와 최근 호출 로그 중심 |
 | 라벨 다운로드 포맷 미확정 | 다운로드 UI와 로그 컬럼 영향 | 포맷 상세는 후속, MVP는 확정 배치/Label type 기준으로 제한 |
 
 ## 11. 구현하지 말아야 할 것

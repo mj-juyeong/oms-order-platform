@@ -103,7 +103,8 @@ OMS는 OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 DB에 저
 - Kotlin JPA Entity는 `kotlin-jpa` plugin 또는 `open class` 정책을 명확히 적용한다.
 
 ## 6. Frontend 작업 규칙
-
+- Frontend 구현 작업 전에는 `frontend/FRONTEND_IMPLEMENTATION_PLAN.md`가 존재하는 경우 함께 확인한다.
+- 페이지 구현 또는 디자인 시안 반영 전에는 `docs/DESIGN_HANDOFF_PAGE_MAPPING.md`를 먼저 확인해 `design-handoff/stitch_oms`의 폴더명과 실제 OMS 화면 매핑을 확인한다.
 - API 응답 타입은 TypeScript 타입으로 정의한다.
 - API 호출은 `src/api`, 화면은 `src/pages`, 공통 UI는 `src/components`, 도메인 타입은 `src/types`에 둔다.
 - 운영자가 대량 표 데이터를 다루므로 테이블 가독성, 필터, 정렬, 페이징, 고정 헤더, 가로 스크롤을 우선 고려한다.
