@@ -4,6 +4,7 @@ import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
 import com.company.oms.common.response.PageResponse
 import com.company.oms.common.response.toPageResponse
+import com.company.oms.common.scope.ClientRepository
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -13,40 +14,49 @@ import java.time.LocalDateTime
 @Service
 @Profile("local")
 class ApiKeyService(
-	private val authGuard: AuthGuard,
+	private val accessScopeService: AccessScopeService,
 	private val apiKeyRepository: ApiKeyRepository,
+	private val clientRepository: ClientRepository,
 ) {
 	private val allowedScopes = setOf("WOS_SCAN_READ", "PL_READ")
 
 	@Transactional(readOnly = true)
 	fun listApiKeys(
 		tenantId: Long,
+		clientId: Long?,
 		status: String?,
 		page: Int,
 		size: Int,
 	): PageResponse<ApiKeyResponse> {
-		authGuard.requireAdmin()
+		accessScopeService.requireTenantAdmin()
+		val resolvedTenantId = accessScopeService.requireTenantAccess(tenantId)
+		if (clientId != null) {
+			accessScopeService.requireClientAccess(resolvedTenantId, clientId)
+		}
 		val rows =
 			if (status == null) {
-				apiKeyRepository.findAllByTenantId(tenantId)
+				apiKeyRepository.findAllByTenantId(resolvedTenantId)
 			} else {
-				apiKeyRepository.findAllByTenantIdAndStatus(tenantId, status)
+				apiKeyRepository.findAllByTenantIdAndStatus(resolvedTenantId, status)
 			}
 		return rows
+			.filter { clientId == null || it.clientId == clientId }
 			.sortedBy { it.id ?: 0 }
-			.map { it.toResponse() }
+			.map { it.toResponse(clientName(it.clientId)) }
 			.toPageResponse(page, size)
 	}
 
 	@Transactional
 	fun createApiKey(request: CreateApiKeyRequest): CreateApiKeyResponse {
-		val currentUser = authGuard.requireAdmin()
+		val currentUser = accessScopeService.requireTenantAdmin()
 		if (request.clientId == null) {
 			throw OmsException(
 				errorCode = ErrorCode.INVALID_REQUEST,
 				message = "1차 MVP의 외부 API Key는 고객사(clientId) 단위로 발급해야 합니다.",
 			)
 		}
+		val resolvedTenantId = accessScopeService.requireTenantAccess(request.tenantId)
+		accessScopeService.requireClientAccess(resolvedTenantId, request.clientId)
 		validateScopes(request.allowedScope)
 		validateExpiresAt(request.expiresAt)
 
@@ -54,7 +64,7 @@ class ApiKeyService(
 		val entity =
 			apiKeyRepository.save(
 				ApiKeyEntity(
-					tenantId = request.tenantId,
+					tenantId = resolvedTenantId,
 					clientId = request.clientId,
 					name = request.name,
 					keyHash = ApiKeyHash.sha256Hex(plainKey),
@@ -76,8 +86,11 @@ class ApiKeyService(
 		apiKeyId: Long,
 		request: UpdateApiKeyRequest,
 	): ApiKeyMutationResponse {
-		authGuard.requireAdmin()
+		val currentUser = accessScopeService.requireTenantAdmin()
 		val apiKey = findApiKey(apiKeyId)
+		if (apiKey.tenantId != currentUser.tenantId) {
+			throw OmsException(ErrorCode.FORBIDDEN, status = HttpStatus.FORBIDDEN)
+		}
 		request.name?.let { apiKey.name = it }
 		request.status?.let { apiKey.status = it }
 		request.allowedScope?.let {
@@ -96,8 +109,11 @@ class ApiKeyService(
 		apiKeyId: Long,
 		request: RevokeApiKeyRequest,
 	): ApiKeyMutationResponse {
-		authGuard.requireAdmin()
+		val currentUser = accessScopeService.requireTenantAdmin()
 		val apiKey = findApiKey(apiKeyId)
+		if (apiKey.tenantId != currentUser.tenantId) {
+			throw OmsException(ErrorCode.FORBIDDEN, status = HttpStatus.FORBIDDEN)
+		}
 		apiKey.status = "REVOKED"
 		return ApiKeyMutationResponse(id = apiKeyId, status = apiKey.status)
 	}
@@ -122,11 +138,15 @@ class ApiKeyService(
 	private fun scopesToJson(scopes: Set<String>): String =
 		scopes.joinToString(prefix = "[", postfix = "]") { "\"$it\"" }
 
-	private fun ApiKeyEntity.toResponse(): ApiKeyResponse =
+	private fun clientName(clientId: Long?): String? =
+		clientId?.let { id -> clientRepository.findById(id).orElse(null)?.name }
+
+	private fun ApiKeyEntity.toResponse(clientName: String?): ApiKeyResponse =
 		ApiKeyResponse(
 			id = requireNotNull(id),
 			tenantId = tenantId,
 			clientId = clientId,
+			clientName = clientName,
 			name = name,
 			status = status,
 			allowedScope = parseScopes(allowedScope),

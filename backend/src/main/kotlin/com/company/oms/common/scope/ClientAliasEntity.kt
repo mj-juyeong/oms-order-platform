@@ -9,22 +9,25 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "clients")
-class ClientEntity(
+@Table(name = "client_aliases")
+class ClientAliasEntity(
 	@Column(name = "tenant_id", nullable = false)
 	var tenantId: Long = 0,
 
-	@Column(name = "code", nullable = false, length = 64)
-	var code: String = "",
+	@Column(name = "client_id", nullable = false)
+	var clientId: Long = 0,
 
-	@Column(name = "name", nullable = false, length = 255)
-	var name: String = "",
+	@Column(name = "alias_name", nullable = false, length = 255)
+	var aliasName: String = "",
 
-	@Column(name = "external_code", length = 128)
-	var externalCode: String? = null,
+	@Column(name = "normalized_alias", nullable = false, length = 255)
+	var normalizedAlias: String = "",
 
-	@Column(name = "status", nullable = false, length = 32)
-	var status: String = "ACTIVE",
+	@Column(name = "source", nullable = false, length = 32)
+	var source: String = "ADMIN",
+
+	@Column(name = "active_yn", nullable = false)
+	var activeYn: Boolean = true,
 ) : BaseTimeEntity() {
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)

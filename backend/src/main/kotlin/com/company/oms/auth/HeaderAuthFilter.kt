@@ -1,6 +1,5 @@
 package com.company.oms.auth
 
-import com.company.oms.common.persistence.UserScopeType
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest
 import jakarta.servlet.http.HttpServletResponse
@@ -11,9 +10,8 @@ import org.springframework.web.filter.OncePerRequestFilter
 @Component
 @Profile("local")
 class HeaderAuthFilter(
-	private val userRepository: UserRepository,
-	private val userRoleRepository: UserRoleRepository,
-	private val roleRepository: RoleRepository,
+	private val tokenProvider: TokenProvider,
+	private val authUserFactory: AuthUserFactory,
 ) : OncePerRequestFilter() {
 
 	override fun doFilterInternal(
@@ -30,25 +28,21 @@ class HeaderAuthFilter(
 	}
 
 	private fun resolveCurrentUser(request: HttpServletRequest): CurrentUser? {
+		bearerToken(request)?.let { token ->
+			tokenProvider.parseToken(token)?.userId?.let { userId ->
+				return authUserFactory.activeUserFromId(userId)
+			}
+		}
+
 		val userId = request.getHeader("X-User-Id")?.toLongOrNull() ?: return null
-		val user = userRepository.findById(userId).orElse(null) ?: return null
-		if (user.status != "ACTIVE") {
+		return authUserFactory.activeUserFromId(userId)
+	}
+
+	private fun bearerToken(request: HttpServletRequest): String? {
+		val authorization = request.getHeader("Authorization") ?: return null
+		if (!authorization.startsWith("Bearer ", ignoreCase = true)) {
 			return null
 		}
-		val roleIds = userRoleRepository.findAllById_UserId(userId).map { it.id.roleId }.toSet()
-		val roles =
-			roleIds
-				.mapNotNull { roleRepository.findById(it).orElse(null)?.code }
-				.mapNotNull { runCatching { UserRole.valueOf(it) }.getOrNull() }
-				.toSet()
-
-		return CurrentUser(
-			userId = user.id,
-			tenantId = user.tenantId,
-			clientId = user.clientId,
-			loginId = user.loginId,
-			userScopeType = user.userScopeType.takeIf { it in UserScopeType.entries },
-			roles = roles,
-		)
+		return authorization.substringAfter(" ").trim().takeIf { it.isNotBlank() }
 	}
 }

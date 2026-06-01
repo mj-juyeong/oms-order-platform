@@ -6,6 +6,7 @@ data class ApiKeyResponse(
 	val id: Long,
 	val tenantId: Long,
 	val clientId: Long?,
+	val clientName: String?,
 	val name: String,
 	val status: String,
 	val allowedScope: Set<String>,

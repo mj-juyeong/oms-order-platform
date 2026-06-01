@@ -15,6 +15,10 @@ oms:
   timezone: ${OMS_TIMEZONE:Asia/Seoul}
   file-storage:
     root-path: ${OMS_FILE_STORAGE_PATH:./.local/uploads}
+  auth:
+    jwt:
+      secret: ${OMS_JWT_SECRET:oms-local-development-jwt-secret-change-me}
+      expiration-seconds: ${OMS_JWT_EXPIRATION_SECONDS:7200}
 
 ---
 spring:

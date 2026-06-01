@@ -3,6 +3,22 @@ package com.company.oms.auth
 import com.company.oms.common.persistence.UserScopeType
 import java.time.LocalDateTime
 
+data class LoginRequest(
+	val loginId: String,
+	val password: String,
+)
+
+data class LoginResponse(
+	val accessToken: String,
+	val tokenType: String = "Bearer",
+	val expiresInSeconds: Long,
+	val user: CurrentUserResponse,
+)
+
+data class LogoutResponse(
+	val loggedOut: Boolean,
+)
+
 data class CurrentUserResponse(
 	val id: Long?,
 	val loginId: String?,
@@ -20,7 +36,9 @@ data class UserResponse(
 	val email: String?,
 	val userScopeType: UserScopeType,
 	val tenantId: Long?,
+	val tenantName: String?,
 	val clientId: Long?,
+	val clientName: String?,
 	val status: String,
 	val roles: Set<String>,
 	val lastLoginAt: LocalDateTime?,

@@ -21,12 +21,14 @@ class ApiKeyController(
 	@GetMapping
 	fun listApiKeys(
 		@RequestParam tenantId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) status: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
 	): PageResponse<ApiKeyResponse> =
 		apiKeyService.listApiKeys(
 			tenantId = tenantId,
+			clientId = clientId,
 			status = status,
 			page = page,
 			size = size,

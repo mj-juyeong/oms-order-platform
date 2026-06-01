@@ -34,4 +34,6 @@ enum class ErrorCode(
     VALIDATION_ERROR_EXISTS("Error 등급 검증 오류가 존재합니다."),
     CLIENT_NOT_FOUND("고객사 또는 화주사를 찾을 수 없습니다."),
     MASTER_VERSION_NOT_FOUND("마스터 버전을 찾을 수 없습니다."),
+    INVALID_CREDENTIALS("Login ID or password is invalid."),
+    USER_DISABLED("User is disabled."),
 }
