@@ -1,10 +1,19 @@
+import type { UserRole, UserScopeType } from '../types/auth';
+
+export interface RouteAction {
+  label: string;
+  to: string;
+  roles?: UserRole[];
+  scopes?: UserScopeType[];
+}
+
 interface RouteMeta {
   title: string;
   description: string;
   breadcrumbs: Array<{ label: string; path?: string }>;
   notice?: string;
-  primaryAction?: { label: string; to: string };
-  secondaryActions?: Array<{ label: string; to: string }>;
+  primaryAction?: RouteAction;
+  secondaryActions?: RouteAction[];
 }
 
 export const routeMetaByPath: Record<string, RouteMeta> = {
@@ -12,7 +21,7 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     title: '대시보드',
     description: '오늘의 업로드, 검증 오류, 확정 가능 배치를 한눈에 확인합니다.',
     breadcrumbs: [{ label: '대시보드' }],
-    primaryAction: { label: 'OIS 업로드', to: '/uploads' },
+    primaryAction: { label: 'OIS 업로드', roles: ['OPERATOR', 'ADMIN'], scopes: ['TENANT'], to: '/uploads' },
   },
   '/uploads': {
     title: 'OIS 엑셀 업로드',
@@ -24,7 +33,7 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     title: '배치 목록',
     description: 'OIS 엑셀 업로드 배치의 검증 상태, 확정 여부, 후속 처리 가능 여부를 조회합니다.',
     breadcrumbs: [{ label: '업로드/배치' }, { label: '배치 목록' }],
-    primaryAction: { label: 'OIS 업로드', to: '/uploads' },
+    primaryAction: { label: 'OIS 업로드', roles: ['OPERATOR', 'ADMIN'], scopes: ['TENANT'], to: '/uploads' },
   },
   '/batches/:batchId': {
     title: '배치 상세',
@@ -55,15 +64,14 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     breadcrumbs: [{ label: '조회' }, { label: 'PL 조회' }],
   },
   '/label-lines': {
-    title: 'Label 조회',
-    description: '라벨 데이터를 조회합니다.',
-    breadcrumbs: [{ label: '조회' }, { label: 'Label 조회' }],
-    primaryAction: { label: '라벨 다운로드', to: '/downloads/labels' },
+    title: 'Label 조회/다운로드',
+    description: 'Label 데이터를 조회하고 확정 배치의 라벨 파일을 다운로드합니다.',
+    breadcrumbs: [{ label: '데이터 조회/다운로드' }, { label: 'Label 조회/다운로드' }],
   },
   '/downloads/labels': {
-    title: '라벨 다운로드',
-    description: '확정 완료된 배치의 Label 데이터를 엑셀로 다운로드합니다.',
-    breadcrumbs: [{ label: '다운로드' }, { label: '라벨 다운로드' }],
+    title: 'Label 조회/다운로드',
+    description: 'Label 데이터를 조회하고 확정 배치의 라벨 파일을 다운로드합니다.',
+    breadcrumbs: [{ label: '데이터 조회/다운로드' }, { label: 'Label 조회/다운로드' }],
     notice: '확정되지 않은 배치는 라벨 다운로드 대상이 아닙니다.',
   },
   '/external-api/status': {
@@ -93,6 +101,11 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     title: '배송지/차량 마스터',
     description: '배송지/차량 마스터를 조회하고 XLSX 파일을 업로드합니다.',
     breadcrumbs: [{ label: '마스터' }, { label: '배송지/차량 마스터' }],
+  },
+  '/users': {
+    title: '사용자 관리',
+    description: '관리자가 OMS 사용자 계정, 역할, 접근 스코프, 활성 상태를 관리합니다.',
+    breadcrumbs: [{ label: '관리' }, { label: '사용자 관리' }],
   },
   '/audit': {
     title: '이력/로그',

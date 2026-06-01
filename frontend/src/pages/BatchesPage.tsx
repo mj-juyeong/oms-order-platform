@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchSummary } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import {
   Badge,
   Button,
@@ -15,7 +16,7 @@ import { Pagination } from '../components/data';
 import { BatchStatusBadge } from '../components/domain';
 import type { BatchStatus } from '../types/batch';
 import type { PageResponse } from '../types/api';
-import { formatDateRangeFilterLabel, isDateInRange, type DateRangeValue } from '../utils/dateRange';
+import { formatDateRangeFilterLabel, type DateRangeValue } from '../utils/dateRange';
 
 interface BatchFilters {
   keyword: string;
@@ -42,10 +43,9 @@ const statusOptions: Array<{ label: string; value: BatchFilters['status'] }> = [
   { label: '롤백됨', value: 'ROLLED_BACK' },
 ];
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
-const clientId = fakeCurrentUser.clientId ?? 1;
-
 export function BatchesPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId, scopeLabel } = useClientScope();
   const [filters, setFilters] = useState<BatchFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
@@ -61,12 +61,20 @@ export function BatchesPage() {
       setLoading(true);
       setErrorMessage(null);
       try {
+        if (!tenantId) {
+          setResponse({ items: [], page, size: 50, totalElements: 0, totalPages: 0 });
+          return;
+        }
         const result = await omsApi.batches.list({
           tenantId,
           clientId,
           page,
           size: 50,
           status: filters.status === 'ALL' ? undefined : filters.status,
+          keyword: filters.keyword.trim() || undefined,
+          deliveryDateFrom: filters.dateRange.from || undefined,
+          deliveryDateTo: filters.dateRange.to || undefined,
+          errorOnly: filters.errorOnly || undefined,
         });
         if (!ignore) {
           setResponse(result);
@@ -86,17 +94,15 @@ export function BatchesPage() {
     return () => {
       ignore = true;
     };
-  }, [filters.status, page, reloadSeq]);
+  }, [clientId, filters.dateRange, filters.errorOnly, filters.keyword, filters.status, page, reloadSeq, tenantId]);
 
-  const filteredBatches = useMemo(() => filterBatches(response?.items ?? [], filters), [filters, response]);
+  const batches = response?.items ?? [];
   const summary = useMemo(() => createBatchSummary(response?.items ?? []), [response]);
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
   function updateFilter<TKey extends keyof BatchFilters>(key: TKey, value: BatchFilters[TKey]) {
+    setPage(0);
     setFilters((current) => ({ ...current, [key]: value }));
-    if (key === 'status') {
-      setPage(0);
-    }
   }
 
   function resetFilters() {
@@ -124,7 +130,7 @@ export function BatchesPage() {
             <p className="text-sm font-semibold text-slate-900">
               총 <span className="text-teal-700">{(response?.totalElements ?? 0).toLocaleString()}</span>건의 배치가 조회되었습니다.
             </p>
-            <p className="mt-1 text-xs text-slate-500">현재 범위: tenant {tenantId} / client {clientId}</p>
+            <p className="mt-1 text-xs text-slate-500">현재 범위: {scopeLabel}</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Badge tone="red">검증 실패 {summary.errorBatches}</Badge>
@@ -135,8 +141,8 @@ export function BatchesPage() {
       </Card>
 
       {errorMessage ? <ApiErrorCard message={errorMessage} onRetry={() => setReloadSeq((current) => current + 1)} /> : null}
-      {loading ? <LoadingCard message="배치 목록을 불러오는 중입니다." /> : <BatchList items={filteredBatches} />}
-      <Pagination page={(response?.page ?? page) + 1} total={response?.totalElements ?? filteredBatches.length} totalPages={Math.max(1, response?.totalPages ?? 1)} />
+      {loading ? <LoadingCard message="배치 목록을 불러오는 중입니다." /> : <BatchList items={batches} />}
+      <Pagination page={(response?.page ?? page) + 1} total={response?.totalElements ?? batches.length} totalPages={Math.max(1, response?.totalPages ?? 1)} />
     </div>
   );
 }
@@ -308,7 +314,10 @@ function BatchList({ items }: { items: BackendBatchSummary[] }) {
 function BatchActionCell({ item }: { item: BackendBatchSummary }) {
   const primaryHref = item.errorCount > 0 ? `/batches/${item.id}/validation` : `/batches/${item.id}`;
   const primaryAction = item.errorCount > 0 ? '오류 확인' : item.status === 'CONFIRMED' ? '상세 보기' : '상세/후속';
-  const validationLabel = item.errorCount === 0 && (item.status === 'READY_TO_CONFIRM' || item.warningCount > 0 || item.infoCount > 0) ? '검증 결과' : null;
+  const validationLabel =
+    item.status !== 'CONFIRMED' && item.errorCount === 0 && (item.status === 'READY_TO_CONFIRM' || item.warningCount > 0 || item.infoCount > 0)
+      ? '검증 결과'
+      : null;
 
   return (
     <div className="flex flex-wrap justify-start gap-2 lg:justify-center">
@@ -352,19 +361,6 @@ function createFilterSummary(filters: BatchFilters) {
   ].filter(Boolean);
 
   return summary.length > 0 ? summary.join(' · ') : '기본 조건으로 배치를 표시합니다.';
-}
-
-function filterBatches(items: BackendBatchSummary[], filters: BatchFilters) {
-  return items.filter((item) => {
-    const keyword = filters.keyword.trim().toLowerCase();
-    const deliveryDate = item.deliveryDate ?? '';
-    const matchesKeyword =
-      !keyword || item.batchNo.toLowerCase().includes(keyword) || String(item.id).includes(keyword) || item.memo?.toLowerCase().includes(keyword);
-    const matchesError = !filters.errorOnly || item.errorCount > 0 || item.status === 'VALIDATION_FAILED';
-    const matchesDate = isDateInRange(deliveryDate, filters.dateRange);
-
-    return matchesKeyword && matchesError && matchesDate;
-  });
 }
 
 function createBatchSummary(items: BackendBatchSummary[]) {

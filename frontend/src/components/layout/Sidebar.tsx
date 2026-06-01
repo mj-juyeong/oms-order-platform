@@ -1,60 +1,136 @@
 import { Link, useLocation } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
-import { fakeCurrentUser, hasAnyRole } from '../../app/auth';
+import { fakeCurrentUser, hasAnyRole, hasAnyScope } from '../../app/auth';
 import { navigationGroups, navigationItems } from '../../app/navigation';
 import type { NavigationIconName } from '../../app/navigation';
 
-export function Sidebar() {
+interface SidebarProps {
+  mobileOpen: boolean;
+  onClose: () => void;
+}
+
+export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const location = useLocation();
-  const visibleItems = navigationItems.filter((item) => !item.roles || hasAnyRole(fakeCurrentUser.roles, item.roles));
-  const groupedItems = Object.entries(navigationGroups).map(([group, label]) => ({
-    group,
-    label,
-    items: visibleItems.filter((item) => item.group === group),
-  })).filter((group) => group.items.length > 0);
+  const visibleItems = useMemo(
+    () =>
+      navigationItems.filter(
+        (item) =>
+          (!item.roles || hasAnyRole(fakeCurrentUser.roles, item.roles)) &&
+          (!item.scopes || hasAnyScope(fakeCurrentUser.userScopeType, item.scopes)),
+      ),
+    [],
+  );
+  const groupedItems = useMemo(
+    () =>
+      Object.entries(navigationGroups)
+        .map(([group, label]) => ({
+          group,
+          label,
+          items: visibleItems.filter((item) => item.group === group),
+        }))
+        .filter((group) => group.items.length > 0),
+    [visibleItems],
+  );
+  const activeGroup = groupedItems.find((group) => group.items.some((item) => isActiveItem(location.pathname, item.path, item.matchPaths)))?.group;
+  const [openGroups, setOpenGroups] = useState<string[]>(() => (activeGroup ? [activeGroup] : ['dashboard']));
+
+  useEffect(() => {
+    if (!activeGroup) {
+      return;
+    }
+
+    setOpenGroups((current) => (current.includes(activeGroup) ? current : [...current, activeGroup]));
+  }, [activeGroup]);
+
+  function toggleGroup(group: string) {
+    setOpenGroups((current) => (current.includes(group) ? current.filter((item) => item !== group) : [...current, group]));
+  }
 
   return (
-    <aside className="border-r border-[#c5c5d3] bg-[#0d1c2f] text-[#d5e3fd] lg:fixed lg:inset-y-0 lg:left-0 lg:z-30 lg:w-[260px]">
-      <div className="flex min-h-full flex-col lg:h-full">
-        <div className="border-b border-[#d5e3fd]/15 px-5 py-5">
-          <Link className="block" to="/dashboard">
-            <p className="text-lg font-bold text-white">OMS Admin</p>
-            <p className="mt-1 text-xs text-[#b6c4ff]">물류 운영 관리 시스템</p>
-          </Link>
-        </div>
-        <nav className="flex-1 space-y-5 overflow-y-auto py-4">
-          {groupedItems.map((group) => (
-            <div key={group.group}>
-              <p className="px-5 text-xs font-semibold text-[#90a8ff]">{group.label}</p>
-              <div className="mt-2 space-y-1">
-                {group.items.map((item) => {
-                  const active = isActiveItem(location.pathname, item.path, item.matchPaths);
+    <>
+      {mobileOpen ? <button aria-label="사이드바 닫기" className="fixed inset-0 z-40 bg-slate-950/45 lg:hidden" onClick={onClose} type="button" /> : null}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[#c5c5d3] bg-[#0d1c2f] text-[#d5e3fd] shadow-2xl transition-transform duration-200 lg:z-30 lg:w-[260px] lg:translate-x-0 lg:shadow-none ${
+          mobileOpen ? 'translate-x-0' : '-translate-x-full'
+        }`}
+      >
+        <div className="flex min-h-full flex-col lg:h-full">
+          <div className="flex items-start justify-between gap-3 border-b border-[#d5e3fd]/15 px-5 py-5">
+            <Link className="block min-w-0" onClick={onClose} to="/dashboard">
+              <p className="text-lg font-bold text-white">OMS Admin</p>
+              <p className="mt-1 text-xs text-[#b6c4ff]">물류 운영 관리 시스템</p>
+            </Link>
+            <button
+              aria-label="사이드바 닫기"
+              className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-[#d5e3fd] transition hover:bg-white/10 hover:text-white lg:hidden"
+              onClick={onClose}
+              type="button"
+            >
+              <CloseIcon className="h-5 w-5" />
+            </button>
+          </div>
+          <nav className="flex-1 space-y-2 overflow-y-auto py-4">
+            {groupedItems.map((group) => {
+              const groupOpen = openGroups.includes(group.group);
+              const groupActive = activeGroup === group.group;
+              const contentId = `sidebar-group-${group.group}`;
 
-                  return (
-                    <Link
-                      aria-current={active ? 'page' : undefined}
-                      className={`flex min-h-11 items-center gap-3 border-l-4 px-4 py-2.5 text-sm font-semibold transition ${
-                        active
-                          ? 'border-[#dce1ff] bg-[#1e3a8a] text-[#dce1ff]'
-                          : 'border-transparent text-[#d5e3fd] hover:bg-[#3d4143] hover:text-white'
-                      }`}
-                      key={item.path}
-                      to={item.path}
-                    >
-                      <SidebarIcon className="h-5 w-5 shrink-0" name={item.icon} />
-                      <span className="truncate">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
-        <div className="border-t border-[#d5e3fd]/15 px-5 py-4">
-          <p className="text-xs font-semibold text-white">{fakeCurrentUser.name}</p>
+              return (
+                <div key={group.group}>
+                  <button
+                    aria-controls={contentId}
+                    aria-expanded={groupOpen}
+                    className={`flex min-h-10 w-full items-center justify-between gap-3 px-5 py-2.5 text-left text-sm font-semibold transition ${
+                      groupActive ? 'text-[#dce1ff]' : 'text-[#90a8ff] hover:text-white'
+                    }`}
+                    onClick={() => toggleGroup(group.group)}
+                    type="button"
+                  >
+                    <span className="truncate">{group.label}</span>
+                    <ChevronIcon className={`h-4 w-4 shrink-0 transition-transform ${groupOpen ? 'rotate-180' : ''}`} />
+                  </button>
+                  <div
+                    className={`grid transition-[grid-template-rows,opacity] duration-200 ease-out ${
+                      groupOpen ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'
+                    }`}
+                    id={contentId}
+                  >
+                    <div className="min-h-0 overflow-hidden">
+                      <div className="mt-1 space-y-1">
+                        {group.items.map((item) => {
+                          const active = isActiveItem(location.pathname, item.path, item.matchPaths);
+
+                          return (
+                            <Link
+                              aria-current={active ? 'page' : undefined}
+                              className={`flex min-h-11 items-center gap-3 border-l-4 px-4 py-2.5 text-sm font-semibold transition ${
+                                active
+                                  ? 'border-[#dce1ff] bg-[#1e3a8a] text-[#dce1ff]'
+                                  : 'border-transparent text-[#d5e3fd] hover:bg-[#3d4143] hover:text-white'
+                              }`}
+                              key={item.path}
+                              onClick={onClose}
+                              to={item.path}
+                            >
+                              <SidebarIcon className="h-5 w-5 shrink-0" name={item.icon} />
+                              <span className="truncate">{item.label}</span>
+                            </Link>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </nav>
+          <div className="border-t border-[#d5e3fd]/15 px-5 py-4">
+            <p className="truncate text-xs font-semibold text-white">{fakeCurrentUser.name ?? fakeCurrentUser.loginId}</p>
+          </div>
         </div>
-      </div>
-    </aside>
+      </aside>
+    </>
   );
 }
 
@@ -75,6 +151,23 @@ type IconComponent = (props: IconProps) => JSX.Element;
 function SidebarIcon({ className, name }: IconProps & { name: NavigationIconName }) {
   const Icon = sidebarIcons[name];
   return <Icon className={className} />;
+}
+
+function ChevronIcon({ className }: IconProps) {
+  return (
+    <svg aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function CloseIcon({ className }: IconProps) {
+  return (
+    <svg aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
 }
 
 function IconBase({ children, className }: IconProps & { children: ReactNode }) {
@@ -171,6 +264,14 @@ const sidebarIcons: Record<NavigationIconName, IconComponent> = {
       <path d="M14 11h3l3 3v3h-2" />
       <path d="M9 17a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0" />
       <path d="M18 17a1.5 1.5 0 1 1-3 0 1.5 1.5 0 0 1 3 0" />
+    </IconBase>
+  ),
+  users: ({ className }) => (
+    <IconBase className={className}>
+      <path d="M16 19v-1.5A3.5 3.5 0 0 0 12.5 14h-5A3.5 3.5 0 0 0 4 17.5V19" />
+      <path d="M10 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6" />
+      <path d="M20 19v-1.5a3.5 3.5 0 0 0-2.5-3.35" />
+      <path d="M16 5.2a3 3 0 0 1 0 5.6" />
     </IconBase>
   ),
   audit: ({ className }) => (

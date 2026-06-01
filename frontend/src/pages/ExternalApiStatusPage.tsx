@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
-import { omsApi } from '../api/oms';
-import { mockExternalApiStatuses } from '../api/mock';
+import { Link, useSearchParams } from 'react-router-dom';
+import { omsApi, type ClientSummary } from '../api/oms';
+import { fakeCurrentUser } from '../app/auth';
+import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelection, useClientScope } from '../app/clientContext';
 import {
   Badge,
   Button,
@@ -17,6 +18,7 @@ import type { ExternalApiChannel, ExternalApiStatusRow } from '../types/external
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
 
 interface StatusFilters {
+  batchId: string;
   channel: 'ALL' | ExternalApiChannel;
   deliveryDateRange: DateRangeValue;
   keyword: string;
@@ -24,6 +26,7 @@ interface StatusFilters {
 }
 
 const initialFilters: StatusFilters = {
+  batchId: '',
   channel: 'ALL',
   deliveryDateRange: { preset: 'ALL', from: '', to: '' },
   keyword: '',
@@ -36,27 +39,76 @@ const channelLabels: Record<ExternalApiChannel, string> = {
 };
 
 export function ExternalApiStatusPage() {
-  const [filters, setFilters] = useState<StatusFilters>(initialFilters);
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId, selection } = useClientScope();
+  const selectedClientId = clientId ?? fakeCurrentUser.clientId ?? null;
+  const [searchParams] = useSearchParams();
+  const requestedBatchId = searchParams.get('batchId') ?? '';
+  const [clients, setClients] = useState<ClientSummary[]>([]);
+  const [filters, setFilters] = useState<StatusFilters>(() => ({ ...initialFilters, batchId: requestedBatchId }));
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [rows, setRows] = useState<ExternalApiStatusRow[]>(mockExternalApiStatuses);
+  const [rows, setRows] = useState<ExternalApiStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
-  const [usingFallback, setUsingFallback] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedRow, setSelectedRow] = useState<ExternalApiStatusRow | null>(null);
 
   useEffect(() => {
+    if (!tenantId || fakeCurrentUser.userScopeType === 'CLIENT') {
+      setClients([]);
+      return;
+    }
+
+    let ignore = false;
+    omsApi.clients.list({ tenantId })
+      .then((items) => {
+        if (ignore) return;
+        setClients(items);
+        if (selection.mode === 'client' && !items.some((client) => client.id === selection.clientId)) {
+          saveClientContextSelection({ mode: 'all' });
+        }
+      })
+      .catch(() => {
+        if (!ignore) setClients([]);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [selection, tenantId]);
+
+  const clientOptions = useMemo(
+    () => [
+      { label: '고객사를 선택해 주세요', value: 'all' },
+      ...clients.map((client) => ({ label: client.name, value: String(client.id) })),
+    ],
+    [clients],
+  );
+  const selectedClient = clients.find((client) => client.id === selectedClientId);
+
+  useEffect(() => {
     let ignore = false;
     setLoading(true);
+    setLoadError(null);
+
+    if (!tenantId || !selectedClientId) {
+      setRows([]);
+      setSelectedRow(null);
+      setLoading(false);
+      return () => {
+        ignore = true;
+      };
+    }
 
     omsApi.externalApi.status({
-      tenantId: 1,
-      clientId: 1,
+      tenantId,
+      clientId: selectedClientId,
+      batchId: /^\d+$/.test(filters.batchId.trim()) ? Number(filters.batchId.trim()) : undefined,
       channel: filters.channel === 'ALL' ? undefined : filters.channel,
       deliveryDate:
         filters.deliveryDateRange.from && filters.deliveryDateRange.from === filters.deliveryDateRange.to
           ? filters.deliveryDateRange.from
           : undefined,
-      page: 1,
+      page: 0,
       size: 100,
     })
       .then((response) => {
@@ -64,15 +116,14 @@ export function ExternalApiStatusPage() {
           return;
         }
         setRows(response.items);
-        setUsingFallback(false);
         setLoadError(null);
       })
       .catch((error: unknown) => {
         if (ignore) {
           return;
         }
-        setRows(mockExternalApiStatuses);
-        setUsingFallback(true);
+        setRows([]);
+        setSelectedRow(null);
         setLoadError(error instanceof Error ? error.message : 'API 제공 현황을 불러오지 못했습니다.');
       })
       .finally(() => {
@@ -84,7 +135,11 @@ export function ExternalApiStatusPage() {
     return () => {
       ignore = true;
     };
-  }, [filters.channel, filters.deliveryDateRange.from, filters.deliveryDateRange.to]);
+  }, [filters.batchId, filters.channel, filters.deliveryDateRange.from, filters.deliveryDateRange.to, selectedClientId, tenantId]);
+
+  useEffect(() => {
+    setFilters((current) => (current.batchId === requestedBatchId ? current : { ...current, batchId: requestedBatchId }));
+  }, [requestedBatchId]);
 
   const filteredRows = useMemo(() => filterRows(rows, filters), [filters, rows]);
   const summary = useMemo(() => createSummary(filteredRows), [filteredRows]);
@@ -100,6 +155,40 @@ export function ExternalApiStatusPage() {
 
   return (
     <div className="space-y-5">
+      <Card className="px-4 py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-slate-900">고객사 기준</p>
+            <p className="mt-1 text-xs leading-5 text-slate-500">
+              외부 API 제공 현황은 API Key와 동일하게 고객사 단위로 확인합니다.
+            </p>
+          </div>
+          {fakeCurrentUser.userScopeType === 'CLIENT' ? (
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
+              {fakeCurrentUser.clientName ?? `고객사 ${selectedClientId ?? '-'}`}
+            </span>
+          ) : (
+            <Select
+              aria-label="external-api-status-client"
+              className="w-full sm:w-64"
+              disabled={!tenantId}
+              onChange={(event) => saveClientContextSelection(clientSelectionFromValue(event.target.value, clients))}
+              options={clientOptions}
+              value={clientSelectionValue(selection)}
+            />
+          )}
+        </div>
+        {selectedClient ? (
+          <p className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-800">
+            현재 <strong>{selectedClient.name}</strong> 고객사의 WOS/PL 제공 가능 상태를 조회합니다.
+          </p>
+        ) : !selectedClientId ? (
+          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
+            제공 현황을 보려면 고객사를 선택해 주세요.
+          </p>
+        ) : null}
+      </Card>
+
       <SummaryCards summary={summary} />
 
       <ExternalApiFilterPanel
@@ -110,7 +199,6 @@ export function ExternalApiStatusPage() {
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
         updateFilter={updateFilter}
-        usingFallback={usingFallback}
       />
 
       <Card className="overflow-hidden">
@@ -134,8 +222,8 @@ export function ExternalApiStatusPage() {
         <DataTable
           columns={createColumns()}
           data={filteredRows}
-          emptyDescription="채널, 제공 상태, 배송일, 검색어 조건을 조정해 주세요."
-          emptyTitle="표시할 API 제공 현황이 없습니다."
+          emptyDescription={loadError ? '백엔드 API 응답을 확인한 뒤 다시 조회해 주세요.' : '채널, 제공 상태, 배송일, 검색어 조건을 조정해 주세요.'}
+          emptyTitle={loadError ? 'API 제공 현황을 불러오지 못했습니다.' : '표시할 API 제공 현황이 없습니다.'}
           getRowClassName={(item) => (rowKey(item) === (selectedRow ? rowKey(selectedRow) : '') ? 'bg-teal-50/80' : '')}
           getRowKey={rowKey}
           onRowClick={setSelectedRow}
@@ -161,7 +249,6 @@ function ExternalApiFilterPanel({
   onToggleOpen,
   open,
   updateFilter,
-  usingFallback,
 }: {
   activeFilterCount: number;
   filters: StatusFilters;
@@ -170,7 +257,6 @@ function ExternalApiFilterPanel({
   onToggleOpen: () => void;
   open: boolean;
   updateFilter: <TKey extends keyof StatusFilters>(key: TKey, value: StatusFilters[TKey]) => void;
-  usingFallback: boolean;
 }) {
   return (
     <Card className="px-4 py-4">
@@ -182,7 +268,7 @@ function ExternalApiFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
-            {usingFallback ? <Badge tone="amber">샘플 데이터</Badge> : <Badge tone="green">API 연결</Badge>}
+            {loadError ? <Badge tone="red">조회 실패</Badge> : <Badge tone="green">API 연결</Badge>}
           </div>
           <p className="mt-1 text-xs text-slate-500">WOS/PL 채널, 제공 상태, 배송일과 endpoint 조건으로 API 제공 대상을 찾습니다.</p>
         </div>
@@ -219,6 +305,12 @@ function ExternalApiFilterPanel({
               ]}
               value={filters.providable}
             />
+            <Input
+              label="배치 ID"
+              onChange={(event) => updateFilter('batchId', event.target.value)}
+              placeholder="예: 12"
+              value={filters.batchId}
+            />
             <DateRangeQuickFilter
               includeTomorrow
               label="배송일"
@@ -231,8 +323,8 @@ function ExternalApiFilterPanel({
       ) : null}
 
       {loadError ? (
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-          백엔드 API 응답을 받지 못해 화면 확인용 샘플 데이터를 표시합니다. {loadError}
+        <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
+          API 제공 현황을 불러오지 못했습니다. {loadError}
         </p>
       ) : null}
     </Card>
@@ -268,6 +360,7 @@ function SummaryCards({ summary }: { summary: ReturnType<typeof createSummary> }
 function createColumns(): DataTableColumn<ExternalApiStatusRow>[] {
   return [
     { key: 'channel', header: '채널', width: '150px', cell: (item) => <ChannelBadge channel={item.channel} /> },
+    { key: 'client', header: '고객사', width: '140px', cell: (item) => clientDisplayName(item) },
     { key: 'endpoint', header: 'Endpoint', width: '360px', cell: (item) => <EndpointCell row={item} /> },
     { key: 'batch', header: '배치', width: '220px', cell: (item) => <BatchCell row={item} /> },
     { key: 'deliveryDate', header: '배송일', width: '110px', cell: (item) => item.deliveryDate ?? '-' },
@@ -385,6 +478,7 @@ function StatusDetailModal({ onClose, row }: { onClose: () => void; row: Externa
             </DetailSection>
 
             <DetailSection description="외부 API 제공 여부를 결정하는 조건입니다." title="제공 조건">
+              <DetailItem label="고객사" value={clientDisplayName(row)} />
               <DetailItem label="배치 상태" value={<Badge tone={row.batchStatus === 'CONFIRMED' ? 'green' : 'amber'}>{statusLabel(row.batchStatus)}</Badge>} />
               <DetailItem label="제공 행 수" value={`${row.providedRowCount.toLocaleString()}건`} />
               <DetailItem label="활성 API Key" value={`${row.activeApiKeyCount.toLocaleString()}개`} />
@@ -463,9 +557,14 @@ function SmallLinkButton({ children, to }: { children: ReactNode; to: string }) 
 }
 
 function filterRows(rows: ExternalApiStatusRow[], filters: StatusFilters) {
+  const batchId = filters.batchId.trim();
   const keyword = filters.keyword.trim().toLowerCase();
 
   return rows.filter((row) => {
+    if (batchId && String(row.batchId) !== batchId) {
+      return false;
+    }
+
     if (filters.channel !== 'ALL' && row.channel !== filters.channel) {
       return false;
     }
@@ -488,6 +587,8 @@ function filterRows(rows: ExternalApiStatusRow[], filters: StatusFilters) {
 
     return [
       row.batchNo,
+      String(row.batchId),
+      clientDisplayName(row),
       row.endpoint,
       row.requiredScope,
       row.excludedReason ?? '',
@@ -495,6 +596,16 @@ function filterRows(rows: ExternalApiStatusRow[], filters: StatusFilters) {
       row.lastRequestId ?? '',
     ].some((value) => value.toLowerCase().includes(keyword));
   });
+}
+
+function clientDisplayName(row: ExternalApiStatusRow) {
+  if (row.clientName?.trim()) {
+    return row.clientName;
+  }
+  if (!row.clientId) {
+    return '-';
+  }
+  return `고객사 ${row.clientId}`;
 }
 
 function createSummary(rows: ExternalApiStatusRow[]) {
@@ -520,6 +631,7 @@ function createSummary(rows: ExternalApiStatusRow[]) {
 
 function countActiveFilters(filters: StatusFilters) {
   return [
+    filters.batchId.trim() !== '',
     filters.channel !== 'ALL',
     filters.deliveryDateRange.preset !== 'ALL',
     filters.keyword.trim() !== '',

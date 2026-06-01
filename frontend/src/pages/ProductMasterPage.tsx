@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi } from '../api/oms';
-import { fakeCurrentUser } from '../app/auth';
+import { canManageMasters, fakeCurrentUser } from '../app/auth';
 import { Badge, Button, Card, FullScreenLoadingOverlay, Input, Modal, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell, FileUploadDropzone } from '../components/domain';
+import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel } from '../components/domain';
 import type { PageResponse } from '../types/api';
-import type { MasterUploadStatus, ProductMasterItem, ProductMasterUploadHistory, ProductMasterUploadResult } from '../types/master';
+import type { MasterUploadPreviewResult, MasterUploadStatus, ProductMasterItem, ProductMasterUploadHistory, ProductMasterUploadResult } from '../types/master';
 
 type ProductOperationStatus = 'ALL' | 'ACTIVE' | 'INACTIVE';
 
@@ -24,7 +25,6 @@ const initialFilters: ProductFilters = {
   storageTemperature: '',
 };
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
 const pageSize = 50;
 const configuredMaxMasterUploadMb = Number(import.meta.env.VITE_MAX_MASTER_UPLOAD_MB ?? 200);
 const maxMasterUploadMb = Number.isFinite(configuredMaxMasterUploadMb) && configuredMaxMasterUploadMb > 0 ? configuredMaxMasterUploadMb : 200;
@@ -66,13 +66,17 @@ const uploadHistoryColumns: DataTableColumn<ProductMasterUploadHistory>[] = [
 ];
 
 export function ProductMasterPage() {
-  const [filters, setFilters] = useState<ProductFilters>(initialFilters);
-  const [filtersOpen, setFiltersOpen] = useState(false);
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const [searchParams] = useSearchParams();
+  const requestedEzadminCode = searchParams.get('ezadminCode') ?? '';
+  const [filters, setFilters] = useState<ProductFilters>(() => ({ ...initialFilters, ezadminCode: requestedEzadminCode }));
+  const [filtersOpen, setFiltersOpen] = useState(Boolean(requestedEzadminCode));
   const [page, setPage] = useState(0);
   const [productResponse, setProductResponse] = useState<PageResponse<ProductMasterItem> | null>(null);
   const [uploadHistoryResponse, setUploadHistoryResponse] = useState<PageResponse<ProductMasterUploadHistory> | null>(null);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadError, setUploadError] = useState('');
+  const [uploadPreview, setUploadPreview] = useState<MasterUploadPreviewResult | null>(null);
   const [uploadResult, setUploadResult] = useState<ProductMasterUploadResult | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
@@ -81,6 +85,15 @@ export function ProductMasterPage() {
   const [uploading, setUploading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const canUploadMaster = canManageMasters();
+
+  useEffect(() => {
+    if (!requestedEzadminCode) return;
+
+    setFilters((current) => (current.ezadminCode === requestedEzadminCode ? current : { ...current, ezadminCode: requestedEzadminCode }));
+    setFiltersOpen(true);
+    setPage(0);
+  }, [requestedEzadminCode]);
 
   useEffect(() => {
     let ignore = false;
@@ -89,6 +102,10 @@ export function ProductMasterPage() {
       setLoadingProducts(true);
       setErrorMessage(null);
       try {
+        if (!tenantId) {
+          setProductResponse({ items: [], page, size: pageSize, totalElements: 0, totalPages: 0 });
+          return;
+        }
         const result = await omsApi.masters.products.list({
           tenantId,
           ezadminCode: filters.ezadminCode.trim() || undefined,
@@ -115,7 +132,7 @@ export function ProductMasterPage() {
     return () => {
       ignore = true;
     };
-  }, [filters.ezadminCode, filters.operationStatus, filters.productName, page, reloadSeq]);
+  }, [filters.ezadminCode, filters.operationStatus, filters.productName, page, reloadSeq, tenantId]);
 
   useEffect(() => {
     let ignore = false;
@@ -123,6 +140,10 @@ export function ProductMasterPage() {
     async function loadUploads() {
       setLoadingUploads(true);
       try {
+        if (!tenantId) {
+          setUploadHistoryResponse({ items: [], page: 0, size: 20, totalElements: 0, totalPages: 0 });
+          return;
+        }
         const result = await omsApi.masters.products.uploads({ tenantId, page: 0, size: 20 });
         if (!ignore) {
           setUploadHistoryResponse(result);
@@ -142,7 +163,7 @@ export function ProductMasterPage() {
     return () => {
       ignore = true;
     };
-  }, [reloadSeq]);
+  }, [reloadSeq, tenantId]);
 
   const activeFilterCount = useMemo(() => countActiveProductFilters(filters), [filters]);
   const products = useMemo(() => {
@@ -157,14 +178,20 @@ export function ProductMasterPage() {
   const latestUpload = uploadResult ?? uploadHistoryResponse?.items[0] ?? null;
 
   function openUploadModal() {
+    if (!canUploadMaster || !tenantId) return;
+
     setSelectedFile(null);
     setUploadError('');
+    setUploadPreview(null);
     setUploadResult(null);
     setIsUploadModalOpen(true);
   }
 
   function handleFileSelect(file: File) {
+    if (!canUploadMaster || !tenantId) return;
+
     setUploadResult(null);
+    setUploadPreview(null);
 
     if (!file.name.toLowerCase().endsWith('.csv')) {
       setSelectedFile(null);
@@ -183,6 +210,8 @@ export function ProductMasterPage() {
   }
 
   async function handleUpload() {
+    if (!canUploadMaster || !tenantId) return;
+
     if (!selectedFile) {
       setUploadError('업로드할 CSV 파일을 먼저 선택해 주세요.');
       return;
@@ -192,10 +221,28 @@ export function ProductMasterPage() {
     setUploadError('');
 
     try {
-      const result = await omsApi.masters.products.uploadCsv({
+      const preview = await omsApi.masters.products.previewCsv({
         tenantId,
         file: selectedFile,
         uploadedBy: fakeCurrentUser.id ?? undefined,
+      });
+
+      const previewWithMeta = {
+        ...preview,
+        fileName: selectedFile.name,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: fakeCurrentUser.name,
+      };
+
+      if (preview.failedCount > 0) {
+        setUploadPreview(previewWithMeta);
+        setReloadSeq((current) => current + 1);
+        return;
+      }
+
+      const result = await omsApi.masters.products.applyUpload({
+        tenantId,
+        uploadId: preview.uploadId,
       });
       setUploadResult({
         ...result,
@@ -203,6 +250,63 @@ export function ProductMasterPage() {
         uploadedAt: new Date().toISOString(),
         uploadedBy: fakeCurrentUser.name,
       });
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setUploadError(formatApiError(error));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleApplyPreview() {
+    if (!canUploadMaster || !tenantId) return;
+
+    if (!uploadPreview) {
+      return;
+    }
+
+    setUploading(true);
+    setUploadError('');
+
+    try {
+      const result = await omsApi.masters.products.applyUpload({
+        tenantId,
+        uploadId: uploadPreview.uploadId,
+      });
+      setUploadResult({
+        ...result,
+        fileName: uploadPreview.fileName,
+        uploadedAt: new Date().toISOString(),
+        uploadedBy: fakeCurrentUser.name,
+      });
+      setUploadPreview(null);
+      setSelectedFile(null);
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setUploadError(formatApiError(error));
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleCancelPreview() {
+    if (!canUploadMaster || !tenantId) return;
+
+    if (!uploadPreview) {
+      return;
+    }
+
+    setUploading(true);
+    setUploadError('');
+
+    try {
+      await omsApi.masters.products.cancelUpload({
+        tenantId,
+        uploadId: uploadPreview.uploadId,
+      });
+      setUploadPreview(null);
+      setSelectedFile(null);
+      setIsUploadModalOpen(false);
       setReloadSeq((current) => current + 1);
     } catch (error) {
       setUploadError(formatApiError(error));
@@ -252,9 +356,11 @@ export function ProductMasterPage() {
             <Button onClick={() => setIsHistoryModalOpen(true)} variant="secondary">
               업로드 이력
             </Button>
-            <Button onClick={openUploadModal} variant="primary">
-              CSV 업로드
-            </Button>
+            {canUploadMaster ? (
+              <Button onClick={openUploadModal} variant="primary">
+                CSV 업로드
+              </Button>
+            ) : null}
           </div>
         </div>
 
@@ -285,52 +391,63 @@ export function ProductMasterPage() {
 
       {uploading ? (
         <FullScreenLoadingOverlay
-          description="상품 기준정보를 현재 마스터에 반영하는 중입니다. 잠시만 기다려 주세요."
+          description={uploadPreview ? '선택한 정상행을 현재 상품 마스터에 반영하는 중입니다.' : '상품 기준정보를 검사하고 현재 마스터 반영 여부를 확인하는 중입니다.'}
           detail={selectedFile?.name}
-          title="상품 마스터를 업로드하고 있습니다"
+          title={uploadPreview ? '상품 마스터를 반영하고 있습니다' : '상품 마스터를 검사하고 있습니다'}
         />
       ) : null}
 
-      <Modal open={isUploadModalOpen} title="상품 마스터 CSV 업로드" onClose={() => setIsUploadModalOpen(false)}>
-        {uploadResult ? (
-          <MasterUploadCompleteView
-            onClose={() => setIsUploadModalOpen(false)}
-            onUploadAnother={openUploadModal}
-            result={uploadResult}
-          />
-        ) : (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <p className="text-sm text-slate-500">선택한 CSV를 현재 상품 기준정보에 반영합니다.</p>
-              <Badge tone="teal">ADMIN</Badge>
-            </div>
-            <FileUploadDropzone
-              accept=".csv"
-              acceptLabel="CSV"
-              description="상품명, 운영여부, 거래처 상품코드, 박스입수량, 출고단위, 보관온도, CBM 컬럼을 포함한 상품 마스터 CSV 파일"
-              disabled={uploading}
-              onFileRemove={() => {
-                setSelectedFile(null);
-                setUploadError('');
-              }}
-              onFileSelect={handleFileSelect}
-              selectedFileName={selectedFile?.name}
-              title="상품 마스터 CSV 선택"
+      {canUploadMaster ? (
+        <Modal open={isUploadModalOpen} title="상품 마스터 CSV 업로드" onClose={() => setIsUploadModalOpen(false)}>
+          {uploadPreview ? (
+            <MasterUploadReviewPanel
+              loading={uploading}
+              masterLabel="상품 마스터"
+              onCancel={handleCancelPreview}
+              onConfirm={handleApplyPreview}
+              preview={uploadPreview}
+              target="product"
             />
+          ) : uploadResult ? (
+            <MasterUploadCompleteView
+              onClose={() => setIsUploadModalOpen(false)}
+              onUploadAnother={openUploadModal}
+              result={uploadResult}
+            />
+          ) : (
+            <div className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm text-slate-500">선택한 CSV를 먼저 검사한 뒤 현재 상품 기준정보 반영 여부를 결정합니다.</p>
+                <Badge tone="teal">ADMIN</Badge>
+              </div>
+              <FileUploadDropzone
+                accept=".csv"
+                acceptLabel="CSV"
+                description="상품명, 운영여부, 거래처 상품코드, 박스입수량, 출고단위, 보관온도, CBM 컬럼을 포함한 상품 마스터 CSV 파일"
+                disabled={uploading}
+                onFileRemove={() => {
+                  setSelectedFile(null);
+                  setUploadError('');
+                }}
+                onFileSelect={handleFileSelect}
+                selectedFileName={selectedFile?.name}
+                title="상품 마스터 CSV 선택"
+              />
 
-            {uploadError ? <ErrorMessage message={uploadError} /> : null}
+              {uploadError ? <ErrorMessage message={uploadError} /> : null}
 
-            <div className="flex justify-end gap-2">
-              <Button disabled={uploading} onClick={() => setIsUploadModalOpen(false)} variant="ghost">
-                닫기
-              </Button>
-              <Button disabled={!selectedFile || uploading} onClick={handleUpload} variant="primary">
-                {uploading ? '업로드 중' : '업로드 실행'}
-              </Button>
+              <div className="flex justify-end gap-2">
+                <Button disabled={uploading} onClick={() => setIsUploadModalOpen(false)} variant="ghost">
+                  닫기
+                </Button>
+                <Button disabled={!selectedFile || uploading} onClick={handleUpload} variant="primary">
+                  {uploading ? '검사 중' : '업로드 검사'}
+                </Button>
+              </div>
             </div>
-          </div>
-        )}
-      </Modal>
+          )}
+        </Modal>
+      ) : null}
 
       <Modal open={isHistoryModalOpen} title="상품 마스터 업로드 이력" size="wide" onClose={() => setIsHistoryModalOpen(false)}>
         {loadingUploads ? (
@@ -539,10 +656,13 @@ function UploadStatusBadge({ status }: { status: MasterUploadStatus }) {
   const statusMap: Record<MasterUploadStatus, { label: string; tone: 'green' | 'amber' | 'red' | 'blue' | 'neutral' }> = {
     UPLOADED: { label: '업로드됨', tone: 'blue' },
     PROCESSING: { label: '처리 중', tone: 'blue' },
+    READY_TO_APPLY: { label: '반영 대기', tone: 'blue' },
+    REVIEW_REQUIRED: { label: '확인 필요', tone: 'amber' },
     APPLIED: { label: '적용 완료', tone: 'green' },
     SUCCESS: { label: '성공', tone: 'green' },
     PARTIAL_FAILED: { label: '부분 실패', tone: 'amber' },
     FAILED: { label: '실패', tone: 'red' },
+    CANCELLED: { label: '취소', tone: 'neutral' },
   };
   const statusInfo = statusMap[status] ?? { label: status, tone: 'neutral' as const };
 

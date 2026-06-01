@@ -1,16 +1,21 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { mockScanLines } from '../api/mock';
+import { omsApi, type BackendScanLine } from '../api/oms';
+import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import {
   Badge,
   Button,
   Card,
   DateRangeQuickFilter,
+  ErrorState,
   Input,
+  LoadingState,
   ModalFrame,
 } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
 import { CodeCell } from '../components/domain';
+import type { PageResponse } from '../types/api';
 import type { ScanLine } from '../types/scan';
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
 
@@ -36,20 +41,73 @@ const initialFilters: ScanFilters = {
   storeName: '',
 };
 
+const pageSize = 20;
+
 export function ScanLinesPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const [filters, setFilters] = useState<ScanFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedLine, setSelectedLine] = useState<ScanLine | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageData, setPageData] = useState<PageResponse<BackendScanLine> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
 
-  const filteredLines = useMemo(() => filterScanLines(mockScanLines, filters), [filters]);
-  const summary = useMemo(() => createScanSummary(mockScanLines), []);
+  const lines = useMemo(() => (pageData?.items ?? []).map(toScanLine), [pageData]);
+  const filteredLines = useMemo(() => filterLoadedScanLines(lines, filters), [filters, lines]);
+  const summary = useMemo(() => createScanSummary(filteredLines, pageData?.totalElements ?? 0), [filteredLines, pageData]);
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
 
+  useEffect(() => {
+    void loadScanLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, filters.batchId, filters.barcode, filters.deliveryDateRange, filters.productCode, filters.scanCenter, filters.storeCode, page, reloadSeq, tenantId]);
+
+  useEffect(() => {
+    if (selectedLine && !filteredLines.some((line) => line.id === selectedLine.id)) {
+      setSelectedLine(null);
+    }
+  }, [filteredLines, selectedLine]);
+
+  async function loadScanLines() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (!tenantId) {
+        setPageData({ items: [], page: page - 1, size: pageSize, totalElements: 0, totalPages: 0 });
+        return;
+      }
+      const data = await omsApi.scanLines.list({
+        tenantId,
+        clientId,
+        page: page - 1,
+        size: pageSize,
+        batchId: parseNumericFilter(filters.batchId),
+        deliveryDate: exactDateFilter(filters.deliveryDateRange),
+        scanCenter: textFilter(filters.scanCenter),
+        storeCode: textFilter(filters.storeCode),
+        productCode: textFilter(filters.productCode),
+        barcode: textFilter(filters.barcode),
+      });
+      setPageData(data);
+    } catch (loadError) {
+      setPageData(null);
+      setError(loadError instanceof Error ? loadError.message : 'Scan 데이터를 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function updateFilter<TKey extends keyof ScanFilters>(key: TKey, value: ScanFilters[TKey]) {
+    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function resetFilters() {
+    setPage(1);
     setFilters(initialFilters);
   }
 
@@ -75,22 +133,42 @@ export function ScanLinesPage() {
               <Badge tone="blue">바코드</Badge>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              총 <span className="font-semibold text-teal-700">{filteredLines.length.toLocaleString()}</span>건이 검색되었습니다.
+              총 <span className="font-semibold text-teal-700">{(pageData?.totalElements ?? 0).toLocaleString()}</span>건이 검색되었습니다.
               행을 선택하면 바코드, 상품, 배송지 정보를 큰 화면에서 확인합니다.
             </p>
           </div>
+          <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
+            새로고침
+          </Button>
         </div>
-        <DataTable
-          columns={createColumns()}
-          data={filteredLines}
-          emptyDescription="배송일, Scan 센터, 거래처, 상품, 바코드 조건을 조정해 주세요."
-          emptyTitle="조건에 맞는 Scan 데이터가 없습니다."
-          getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
-          getRowKey={(item) => item.id}
-          onRowClick={setSelectedLine}
-        />
+        {loading && !pageData ? (
+          <div className="p-5">
+            <LoadingState label="Scan 조회 API에서 데이터를 불러오는 중입니다." />
+          </div>
+        ) : null}
+        {error && !loading ? (
+          <div className="p-5">
+            <ErrorState description={error} onRetry={() => setReloadSeq((current) => current + 1)} title="Scan 데이터를 조회하지 못했습니다." />
+          </div>
+        ) : null}
+        {!error ? (
+          <DataTable
+            columns={createColumns()}
+            data={filteredLines}
+            emptyDescription="배송일, Scan 센터, 거래처, 상품, 바코드 조건을 조정해 주세요."
+            emptyTitle="조건에 맞는 Scan 데이터가 없습니다."
+            getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
+            getRowKey={(item) => item.id}
+            onRowClick={setSelectedLine}
+          />
+        ) : null}
         <div className="px-5 py-4">
-          <Pagination page={1} total={filteredLines.length} totalPages={Math.max(1, Math.ceil(filteredLines.length / 20))} />
+          <Pagination
+            onPageChange={setPage}
+            page={page}
+            total={pageData?.totalElements ?? filteredLines.length}
+            totalPages={Math.max(1, pageData?.totalPages ?? 1)}
+          />
         </div>
       </Card>
 
@@ -321,7 +399,7 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function filterScanLines(lines: ScanLine[], filters: ScanFilters) {
+function filterLoadedScanLines(lines: ScanLine[], filters: ScanFilters) {
   return lines.filter((line) => (
     includesText(line.batchId, filters.batchId) &&
     isDateInRange(line.deliveryDate, filters.deliveryDateRange) &&
@@ -347,12 +425,12 @@ function countActiveFilters(filters: ScanFilters) {
   ].filter(Boolean).length;
 }
 
-function createScanSummary(lines: ScanLine[]) {
+function createScanSummary(lines: ScanLine[], totalElements: number) {
   return {
     centers: uniqueValues(lines.map((line) => line.scanCenter)).length,
     labelQty: lines.reduce((sum, line) => sum + line.labelQty, 0),
     stores: uniqueValues(lines.map((line) => line.orderBusinessSiteCode)).length,
-    total: lines.length,
+    total: totalElements,
   };
 }
 
@@ -362,4 +440,46 @@ function includesText(value: string, query: string) {
 
 function uniqueValues(values: string[]) {
   return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function toScanLine(row: BackendScanLine): ScanLine {
+  return {
+    id: String(row.id),
+    batchId: String(row.batchId),
+    sheetName: row.sheetName,
+    scanCenter: row.scanCenter ?? '-',
+    deliveryDate: row.deliveryDate ?? '',
+    bus: row.bus ?? '-',
+    barcode: row.barcode ?? '-',
+    orderBusinessSiteCode: row.orderBusinessSiteCode ?? '-',
+    storeName: row.storeName ?? '-',
+    productCode: row.productCode ?? '-',
+    productName: row.productName ?? '-',
+    labelQty: toNumber(row.labelQty),
+    unit: row.unit ?? '-',
+    temperatureType: row.temperatureType ?? '-',
+    rowNo: row.rowNo,
+  };
+}
+
+function parseNumericFilter(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) {
+    return undefined;
+  }
+
+  return Number(trimmed);
+}
+
+function textFilter(value: string) {
+  return value.trim() || undefined;
+}
+
+function exactDateFilter(range: DateRangeValue) {
+  return range.from && range.from === range.to ? range.from : undefined;
+}
+
+function toNumber(value: number | string | null | undefined) {
+  const numberValue = typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
 }

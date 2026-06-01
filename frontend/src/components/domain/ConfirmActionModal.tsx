@@ -1,13 +1,28 @@
 import { Button, Card, ModalFrame } from '../common';
 
 interface ConfirmActionModalProps {
+  cancelLabel?: string;
+  confirmLabel?: string;
+  confirmVariant?: 'primary' | 'secondary' | 'danger';
+  loading?: boolean;
   onClose: () => void;
+  onConfirm: () => void;
   open: boolean;
   title: string;
   description: string;
 }
 
-export function ConfirmActionModal({ description, onClose, open, title }: ConfirmActionModalProps) {
+export function ConfirmActionModal({
+  cancelLabel = '취소',
+  confirmLabel = '확인',
+  confirmVariant = 'primary',
+  description,
+  loading = false,
+  onClose,
+  onConfirm,
+  open,
+  title,
+}: ConfirmActionModalProps) {
   if (!open) {
     return null;
   }
@@ -18,11 +33,11 @@ export function ConfirmActionModal({ description, onClose, open, title }: Confir
         <p className="text-base font-semibold text-slate-900">{title}</p>
         <p className="mt-2 text-sm text-slate-500">{description}</p>
         <div className="mt-5 flex justify-end gap-2">
-          <Button onClick={onClose} variant="secondary">
-            취소
+          <Button disabled={loading} onClick={onClose} variant="secondary">
+            {cancelLabel}
           </Button>
-          <Button disabled variant="primary">
-            확인
+          <Button disabled={loading} onClick={onConfirm} variant={confirmVariant}>
+            {loading ? '처리 중' : confirmLabel}
           </Button>
         </div>
       </Card>

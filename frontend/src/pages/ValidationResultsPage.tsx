@@ -2,45 +2,54 @@ import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchDetail, type ValidationErrorItem } from '../api/oms';
-import { fakeCurrentUser } from '../app/auth';
-import { Badge, Button, Card, Input, ModalFrame, Select } from '../components/common';
+import { canOperateBatches, fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
+import { Badge, Button, Card, FullScreenLoadingOverlay, Input, ModalFrame, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
 import { CodeCell, MetricCard, SeverityBadge } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { ValidationSeverity } from '../types/validation';
 
 type SeverityFilter = ValidationSeverity | 'ALL';
+type ValidationActionState = 'revalidate' | 'download' | null;
 
 const severityFilterOptions = [
+  { label: '전체', value: 'ALL' },
   { label: 'Error', value: 'ERROR' },
   { label: 'Warning', value: 'WARNING' },
   { label: 'Info', value: 'INFO' },
-  { label: '전체', value: 'ALL' },
 ];
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
-const clientId = fakeCurrentUser.clientId ?? 1;
-
 export function ValidationResultsPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const { batchId } = useParams();
   const numericBatchId = Number(batchId);
   const [batch, setBatch] = useState<BackendBatchDetail | null>(null);
   const [response, setResponse] = useState<PageResponse<ValidationErrorItem> | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ERROR');
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
   const [sheetName, setSheetName] = useState('');
   const [errorCode, setErrorCode] = useState('');
   const [keyword, setKeyword] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState<ValidationErrorItem | null>(null);
   const [loading, setLoading] = useState(true);
+  const [actionState, setActionState] = useState<ValidationActionState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadValidationResults();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [numericBatchId, severityFilter]);
+  }, [clientId, numericBatchId, severityFilter, tenantId]);
 
   async function loadValidationResults(overrides?: Partial<ValidationFilters>) {
+    if (!tenantId) {
+      setErrorMessage('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
+      setLoading(false);
+      return;
+    }
+
     if (!Number.isInteger(numericBatchId) || numericBatchId <= 0) {
       setErrorMessage('유효하지 않은 배치 ID입니다.');
       setLoading(false);
@@ -77,7 +86,9 @@ export function ValidationResultsPage() {
 
   const rows = useMemo(() => filterRows(response?.items ?? [], keyword), [keyword, response]);
   const summary = useMemo(() => getValidationSummary(response?.items ?? [], batch), [batch, response]);
-  const canConfirm = batch?.errorCount === 0 && batch.status === 'READY_TO_CONFIRM';
+  const canOperateBatch = canOperateBatches();
+  const canConfirm = canOperateBatch && batch?.errorCount === 0 && batch.status === 'READY_TO_CONFIRM';
+  const canRevalidate = canOperateBatch && batch ? ['UPLOADED', 'VALIDATION_FAILED', 'READY_TO_CONFIRM'].includes(batch.status) : false;
   const activeFilterCount = useMemo(
     () => countActiveValidationFilters({ errorCode, keyword, severityFilter, sheetName }),
     [errorCode, keyword, severityFilter, sheetName],
@@ -89,12 +100,45 @@ export function ValidationResultsPage() {
   }
 
   async function resetValidationFilters() {
-    const defaultFilters = { errorCode: '', keyword: '', severityFilter: 'ERROR' as SeverityFilter, sheetName: '' };
+    const defaultFilters = { errorCode: '', keyword: '', severityFilter: 'ALL' as SeverityFilter, sheetName: '' };
     setSeverityFilter(defaultFilters.severityFilter);
     setSheetName(defaultFilters.sheetName);
     setErrorCode(defaultFilters.errorCode);
     setKeyword(defaultFilters.keyword);
     await loadValidationResults(defaultFilters);
+  }
+
+  async function handleRevalidate() {
+    if (!batch || !canOperateBatch || !tenantId) return;
+
+    setActionState('revalidate');
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      const result = await omsApi.batches.validate(batch.id, { tenantId, clientId, actorId: fakeCurrentUser.id ?? undefined });
+      await loadValidationResults();
+      setSuccessMessage(`재검증이 완료되었습니다. Error ${result.errorCount}건, Warning ${result.warningCount}건, Info ${result.infoCount}건`);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setActionState(null);
+    }
+  }
+
+  function handleDownloadCsv() {
+    if (!batch || rows.length === 0) return;
+
+    setActionState('download');
+    setErrorMessage(null);
+    setSuccessMessage(null);
+    try {
+      downloadValidationCsv(batch, rows, { errorCode, keyword, severityFilter, sheetName });
+      setSuccessMessage(`현재 조회 조건의 검증 항목 ${rows.length.toLocaleString()}건을 CSV로 내보냈습니다.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : '오류 내역 다운로드에 실패했습니다.');
+    } finally {
+      setActionState(null);
+    }
   }
 
   if (loading) {
@@ -107,8 +151,25 @@ export function ValidationResultsPage() {
 
   return (
     <div className="space-y-5">
+      {actionState === 'revalidate' ? (
+        <FullScreenLoadingOverlay
+          description="현재 마스터 기준으로 검증 항목을 다시 계산하고 있습니다. 잠시만 기다려 주세요."
+          detail={batch.batchNo}
+          title="배치를 재검증하고 있습니다"
+        />
+      ) : null}
       {errorMessage ? <ApiErrorCard message={errorMessage} onRetry={loadValidationResults} /> : null}
-      <ValidationHeader batch={batch} canConfirm={canConfirm} summary={summary} />
+      {successMessage ? <SuccessCard message={successMessage} /> : null}
+      <ValidationHeader
+        actionState={actionState}
+        batch={batch}
+        canConfirm={canConfirm}
+        canOperateBatch={canOperateBatch}
+        canRevalidate={canRevalidate}
+        onRevalidate={handleRevalidate}
+        summary={summary}
+      />
+      <ValidationRecoveryGuide batch={batch} summary={summary} />
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard description="현재 조회 조건의 검증 항목" label="조회 항목" value={rows.length.toLocaleString()} />
@@ -139,9 +200,9 @@ export function ValidationResultsPage() {
             <p className="text-base font-bold text-slate-950">검증 항목</p>
             <p className="mt-1 text-sm text-slate-500">행을 선택하면 원본값, 정규화값, 발생 위치를 확인합니다.</p>
           </div>
-          <div className="flex flex-wrap gap-2">
-            <Button disabled size="sm" variant="secondary">
-              오류 내역 다운로드
+            <div className="flex flex-wrap gap-2">
+            <Button disabled={rows.length === 0 || actionState !== null} onClick={handleDownloadCsv} size="sm" variant="secondary">
+              {actionState === 'download' ? '내보내는 중' : '검증 내역 다운로드'}
             </Button>
             <Link
               className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 hover:bg-slate-50"
@@ -211,7 +272,7 @@ function ValidationFilterPanel({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
-            {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>Error 기본 필터</Badge>}
+            {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
           </div>
           <p className="mt-1 text-xs text-slate-500">{createValidationFilterSummary({ errorCode, keyword, severityFilter, sheetName })}</p>
         </div>
@@ -250,12 +311,20 @@ function ValidationFilterPanel({
 }
 
 function ValidationHeader({
+  actionState,
   batch,
   canConfirm,
+  canOperateBatch,
+  canRevalidate,
+  onRevalidate,
   summary,
 }: {
+  actionState: ValidationActionState;
   batch: BackendBatchDetail;
   canConfirm: boolean;
+  canOperateBatch: boolean;
+  canRevalidate: boolean;
+  onRevalidate: () => void;
   summary: ReturnType<typeof getValidationSummary>;
 }) {
   const blocked = summary.error > 0;
@@ -279,10 +348,88 @@ function ValidationHeader({
               : 'Error가 없습니다. Warning 항목을 확인한 뒤 배치를 확정할 수 있습니다.'}
           </p>
         </div>
-        <div className="grid min-w-[260px] gap-2 sm:grid-cols-3">
-          <SeveritySummaryPill label="Error" tone="red" value={summary.error} />
-          <SeveritySummaryPill label="Warning" tone="amber" value={summary.warning} />
-          <SeveritySummaryPill label="Info" tone="blue" value={summary.info} />
+        <div className="min-w-[260px]">
+          <div className="grid gap-2 sm:grid-cols-3">
+            <SeveritySummaryPill label="Error" tone="red" value={summary.error} />
+            <SeveritySummaryPill label="Warning" tone="amber" value={summary.warning} />
+            <SeveritySummaryPill label="Info" tone="blue" value={summary.info} />
+          </div>
+          <div className="mt-3 flex flex-wrap justify-end gap-2">
+            {canOperateBatch ? (
+              <Button disabled={!canRevalidate || actionState !== null} onClick={onRevalidate} size="sm" variant="primary">
+                {actionState === 'revalidate' ? '재검증 중' : '재검증'}
+              </Button>
+            ) : null}
+            <Link
+              className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              to={`/batches/${batch.id}`}
+            >
+              배치 상세
+            </Link>
+          </div>
+          {canOperateBatch && !canRevalidate ? (
+            <p className="mt-2 text-right text-xs text-slate-500">확정/취소/롤백 상태에서는 재검증을 실행할 수 없습니다.</p>
+          ) : null}
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function ValidationRecoveryGuide({
+  batch,
+  summary,
+}: {
+  batch: BackendBatchDetail;
+  summary: ReturnType<typeof getValidationSummary>;
+}) {
+  if (summary.error === 0) {
+    return null;
+  }
+
+  return (
+    <Card className="border-amber-200 bg-amber-50 p-5">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <p className="text-base font-bold text-slate-950">Error 조치 후 재검증</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            이 배치는 확정되지 않았고 후속 제공 대상에서도 제외됩니다. 상품/배송지 마스터 누락은 마스터를 보완한 뒤 같은 배치를 재검증하고,
+            엑셀 원본값이 잘못된 경우에는 OIS 파일을 수정해 새 배치로 업로드하세요.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            to="/masters/products"
+          >
+            상품 마스터 보완
+          </Link>
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            to="/masters/store-routes"
+          >
+            배송지/차량 보완
+          </Link>
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
+            to="/uploads"
+          >
+            수정 엑셀 업로드
+          </Link>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="border-l-4 border-blue-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">마스터 보완</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">코드가 마스터에 없으면 기준 데이터를 먼저 upsert한 뒤 재검증합니다.</p>
+        </div>
+        <div className="border-l-4 border-amber-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">원본 파일 수정</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">OIS 엑셀의 코드나 수량이 틀렸으면 이 배치를 보존하고 수정 파일을 새로 올립니다.</p>
+        </div>
+        <div className="border-l-4 border-red-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">확정 차단</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">{batch.batchNo}는 Error가 없어질 때까지 확정, 외부 API, 다운로드가 막힙니다.</p>
         </div>
       </div>
     </Card>
@@ -348,6 +495,7 @@ function OperatorValidationDetailModal({ batch, onClose, row }: { batch: Backend
 
   const impact = validationImpact(row.severity);
   const actionGuide = row.actionGuide || severityGuide(row.severity);
+  const masterLink = relatedMasterLink(row);
 
   return (
     <ModalFrame onClose={onClose} panelClassName="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
@@ -418,6 +566,14 @@ function OperatorValidationDetailModal({ batch, onClose, row }: { batch: Backend
                   {action}
                 </div>
               ))}
+              {masterLink ? (
+                <Link
+                  className="inline-flex h-9 w-fit items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
+                  to={masterLink.to}
+                >
+                  {masterLink.label}
+                </Link>
+              ) : null}
             </div>
           </section>
         </div>
@@ -527,6 +683,22 @@ function nextActions(row: ValidationErrorItem) {
   return Array.from(new Set(actions));
 }
 
+function relatedMasterLink(row: ValidationErrorItem): { label: string; to: string } | null {
+  if (row.errorCode.includes('PRODUCT')) {
+    const ezadminCode = row.productCode ?? row.targetCode ?? row.originalValue ?? '';
+    const query = ezadminCode ? `?ezadminCode=${encodeURIComponent(ezadminCode)}` : '';
+    return { label: '상품 마스터 보기', to: `/masters/products${query}` };
+  }
+
+  if (row.errorCode.includes('STORE') || row.errorCode.includes('VEHICLE')) {
+    const baljugoCode = row.storeCode ?? row.targetCode ?? row.originalValue ?? '';
+    const query = baljugoCode ? `?baljugoCode=${encodeURIComponent(baljugoCode)}` : '';
+    return { label: '배송지/차량 마스터 보기', to: `/masters/store-routes${query}` };
+  }
+
+  return null;
+}
+
 function targetPrimaryLabel(row: ValidationErrorItem) {
   const code = targetCode(row);
   const name = targetName(row);
@@ -572,7 +744,7 @@ function domainLabel(domain: ValidationErrorItem['domain']) {
 }
 
 function getValidationSummary(rows: ValidationErrorItem[], batch: BackendBatchDetail | null) {
-  if (batch && rows.length === 0) {
+  if (batch) {
     return {
       error: batch.errorCount,
       info: batch.infoCount,
@@ -625,7 +797,7 @@ function filterRows(rows: ValidationErrorItem[], keyword: string) {
 
 function countActiveValidationFilters(filters: ValidationFilters) {
   return [
-    filters.severityFilter !== 'ERROR',
+    filters.severityFilter !== 'ALL',
     filters.sheetName.trim() !== '',
     filters.errorCode.trim() !== '',
     filters.keyword.trim() !== '',
@@ -669,6 +841,14 @@ function ApiErrorCard({ message, onRetry }: { message: string; onRetry: () => vo
   );
 }
 
+function SuccessCard({ message }: { message: string }) {
+  return (
+    <Card className="border-emerald-200 bg-emerald-50 px-5 py-4">
+      <p className="text-sm font-semibold text-emerald-800">{message}</p>
+    </Card>
+  );
+}
+
 function LoadingCard({ message }: { message: string }) {
   return (
     <Card className="px-6 py-10 text-center">
@@ -684,4 +864,69 @@ function formatApiError(error: unknown) {
   }
 
   return error instanceof Error ? error.message : 'API 요청 처리 중 오류가 발생했습니다.';
+}
+
+function downloadValidationCsv(batch: BackendBatchDetail, rows: ValidationErrorItem[], filters: ValidationFilters) {
+  const header = [
+    'batch_id',
+    'batch_no',
+    'severity',
+    'error_code',
+    'sheet_name',
+    'row_no',
+    'column_name',
+    'original_value',
+    'normalized_value',
+    'target_code',
+    'target_name',
+    'order_no',
+    'store_code',
+    'store_name',
+    'product_code',
+    'product_name',
+    'message',
+    'action_guide',
+    'resolved',
+  ];
+  const csvRows = rows.map((row) => [
+    row.batchId,
+    batch.batchNo,
+    row.severity,
+    row.errorCode,
+    row.sheetName ?? '',
+    row.rowNo ?? '',
+    row.columnName ?? '',
+    row.originalValue ?? '',
+    row.normalizedValue ?? '',
+    row.targetCode ?? '',
+    row.targetName ?? '',
+    row.orderNo ?? '',
+    row.storeCode ?? '',
+    row.storeName ?? '',
+    row.productCode ?? '',
+    row.productName ?? '',
+    row.userMessage || row.message,
+    row.actionGuide || severityGuide(row.severity),
+    row.resolvedYn ? 'Y' : 'N',
+  ]);
+  const csv = [header, ...csvRows].map((values) => values.map(escapeCsvValue).join(',')).join('\r\n');
+  const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+  const link = document.createElement('a');
+  const url = URL.createObjectURL(blob);
+  link.href = url;
+  link.download = `validation-results-${batch.batchNo}-${filters.severityFilter.toLowerCase()}-${formatDateForFileName(new Date())}.csv`;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function escapeCsvValue(value: unknown) {
+  const text = value === null || value === undefined ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+}
+
+function formatDateForFileName(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  return `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-${pad(date.getHours())}${pad(date.getMinutes())}`;
 }

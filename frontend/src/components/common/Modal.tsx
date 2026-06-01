@@ -1,4 +1,4 @@
-import { useEffect, useId, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 
 interface ModalProps {
   children: ReactNode;
@@ -8,11 +8,27 @@ interface ModalProps {
   title: string;
 }
 
+const MODAL_ANIMATION_MS = 160;
+
 export function Modal({ children, onClose, open, size = 'default', title }: ModalProps) {
   const titleId = useId();
+  const [shouldRender, setShouldRender] = useState(open);
+  const [visible, setVisible] = useState(false);
 
   useEffect(() => {
-    if (!open) {
+    if (open) {
+      setShouldRender(true);
+      const frame = window.requestAnimationFrame(() => setVisible(true));
+      return () => window.cancelAnimationFrame(frame);
+    }
+
+    setVisible(false);
+    const timeout = window.setTimeout(() => setShouldRender(false), MODAL_ANIMATION_MS);
+    return () => window.clearTimeout(timeout);
+  }, [open]);
+
+  useEffect(() => {
+    if (!shouldRender) {
       return;
     }
 
@@ -24,9 +40,9 @@ export function Modal({ children, onClose, open, size = 'default', title }: Moda
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose, open]);
+  }, [onClose, shouldRender]);
 
-  if (!open) {
+  if (!shouldRender) {
     return null;
   }
 
@@ -34,14 +50,18 @@ export function Modal({ children, onClose, open, size = 'default', title }: Moda
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 p-4"
+      className={`fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 p-4 transition-opacity duration-150 ease-out motion-reduce:transition-none ${
+        visible ? 'opacity-100' : 'opacity-0'
+      }`}
       onPointerDown={onClose}
       role="presentation"
     >
       <div
         aria-labelledby={titleId}
         aria-modal="true"
-        className={`flex max-h-[90vh] w-full ${sizeClass} flex-col rounded-lg bg-white shadow-xl`}
+        className={`flex max-h-[90vh] w-full ${sizeClass} flex-col rounded-lg bg-white shadow-xl transition-all duration-150 ease-out motion-reduce:transform-none motion-reduce:transition-none ${
+          visible ? 'translate-y-0 scale-100 opacity-100' : 'translate-y-2 scale-[0.98] opacity-0'
+        }`}
         onPointerDown={(event) => event.stopPropagation()}
         role="dialog"
       >

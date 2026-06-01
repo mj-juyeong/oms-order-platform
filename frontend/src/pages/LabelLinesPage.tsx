@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import { omsApi, type BackendLabelLine } from '../api/oms';
 import { Badge, Button, Card, ErrorState, Input, LoadingState, ModalFrame } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
@@ -12,6 +13,7 @@ interface LabelFilters {
   batchId: string;
   matchingCode: string;
   orderNo: string;
+  brandName: string;
   productCode: string;
   productName: string;
   qrCode: string;
@@ -21,14 +23,13 @@ interface LabelFilters {
 
 type LabelTypeFilter = 'ALL' | LabelLine['labelType'];
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
-const clientId = fakeCurrentUser.clientId ?? 1;
 const pageSize = 20;
 
 const initialFilters: LabelFilters = {
   batchId: '',
   matchingCode: '',
   orderNo: '',
+  brandName: '',
   productCode: '',
   productName: '',
   qrCode: '',
@@ -37,6 +38,8 @@ const initialFilters: LabelFilters = {
 };
 
 export function LabelLinesPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const [filters, setFilters] = useState<LabelFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [labelType, setLabelType] = useState<LabelTypeFilter>('ALL');
@@ -50,7 +53,7 @@ export function LabelLinesPage() {
 
   useEffect(() => {
     void loadLines();
-  }, [filters, labelType, page]);
+  }, [clientId, filters, labelType, page, tenantId]);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toLabelLine), [pageData]);
   const summary = useMemo(() => createLabelSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
@@ -62,6 +65,10 @@ export function LabelLinesPage() {
     setLoading(true);
     setError(null);
     try {
+      if (!tenantId) {
+        setPageData({ items: [], page: page - 1, size: pageSize, totalElements: 0, totalPages: 0 });
+        return;
+      }
       const data = await omsApi.labelLines.list({
         tenantId,
         clientId,
@@ -72,6 +79,7 @@ export function LabelLinesPage() {
         orderNo: textFilter(filters.orderNo),
         storeCode: textFilter(filters.storeCode),
         storeName: textFilter(filters.storeName),
+        brandName: textFilter(filters.brandName),
         productCode: textFilter(filters.productCode),
         productName: textFilter(filters.productName),
         matchingCode: textFilter(filters.matchingCode),
@@ -142,6 +150,10 @@ export function LabelLinesPage() {
     setError(null);
     setDownloadMessage(null);
     try {
+      if (!tenantId) {
+        setError('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
+        return;
+      }
       const downloaded = await omsApi.downloads.labels({
         tenantId,
         clientId,
@@ -149,6 +161,7 @@ export function LabelLinesPage() {
         labelType: requestedLabelType === 'ALL' ? undefined : requestedLabelType,
         orderNo: textFilter(filters.orderNo),
         storeCode: textFilter(filters.storeCode),
+        brandName: textFilter(filters.brandName),
         productCode: textFilter(filters.productCode),
         matchingCode: textFilter(filters.matchingCode),
         qrCode: textFilter(filters.qrCode),
@@ -197,7 +210,6 @@ export function LabelLinesPage() {
               <p className="text-base font-bold text-slate-950">Label 데이터</p>
               <Badge tone="blue">EA</Badge>
               <Badge tone="teal">BOX</Badge>
-              <Badge>실제 API</Badge>
             </div>
             <p className="mt-1 text-sm text-slate-500">
               총 <span className="font-semibold text-teal-700">{(pageData?.totalElements ?? 0).toLocaleString()}</span>건이 검색되었습니다.
@@ -205,12 +217,9 @@ export function LabelLinesPage() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
-            <Button disabled={!canDownloadCurrent || downloadingKey === 'current'} onClick={handleDownloadCurrent} size="sm" variant="primary">
+            <Button disabled={!canDownloadCurrent || downloadingKey === 'current'} onClick={handleDownloadCurrent} size="sm" variant="secondary">
               {downloadingKey === 'current' ? '다운로드 중' : '현재 조건 다운로드'}
             </Button>
-            <Link className="inline-flex h-8 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-800 hover:bg-slate-50" to="/downloads/labels">
-              다운로드 화면
-            </Link>
           </div>
         </div>
         <DataTable
@@ -310,6 +319,7 @@ function LabelFilterPanel({
             <Input label="QR코드" onChange={(event) => updateFilter('qrCode', event.target.value)} placeholder="QR-" value={filters.qrCode} />
             <Input label="거래처코드" onChange={(event) => updateFilter('storeCode', event.target.value)} placeholder="S001" value={filters.storeCode} />
             <Input label="거래처명" onChange={(event) => updateFilter('storeName', event.target.value)} placeholder="강남점" value={filters.storeName} />
+            <Input label="브랜드" onChange={(event) => updateFilter('brandName', event.target.value)} placeholder="백소정" value={filters.brandName} />
             <Input label="품목코드" onChange={(event) => updateFilter('productCode', event.target.value)} placeholder="P000001" value={filters.productCode} />
             <Input label="상품명" onChange={(event) => updateFilter('productName', event.target.value)} placeholder="상품명" value={filters.productName} />
           </div>
@@ -329,6 +339,7 @@ function createColumns(
     { key: 'status', header: '배치 상태', width: '150px', cell: (item) => (item.batchStatus ? <BatchStatusBadge status={item.batchStatus} /> : '-') },
     { key: 'orderNo', header: '주문번호', width: '180px', cell: (item) => <CodeCell value={item.orderNo} /> },
     { key: 'source', header: '행 번호', width: '110px', cell: (item) => <span className="text-xs text-slate-500">{item.rowNo}행</span> },
+    { key: 'brand', header: '브랜드', width: '130px', cell: (item) => item.brandName || '-' },
     { key: 'store', header: '거래처', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.storeCode} /> },
     { key: 'product', header: '상품', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
     { key: 'qty', header: '주문량', align: 'right', width: '90px', cell: (item) => item.orderQty.toLocaleString() },
@@ -390,9 +401,9 @@ function LabelDetailModal({
                 <p className="mt-3 text-sm leading-6 text-teal-800">Label_EA / Label_Box 데이터는 라벨 다운로드의 기준 데이터입니다.</p>
               </div>
               <div className="grid min-w-[280px] gap-2 sm:grid-cols-3">
+                <LabelSummaryPill label="브랜드" value={line.brandName || '-'} />
                 <LabelSummaryPill label="거래처" value={line.storeName || '-'} />
                 <LabelSummaryPill label="주문량" value={line.orderQty.toLocaleString()} />
-                <LabelSummaryPill label="라벨" value={labelBoxSummary(line)} />
               </div>
             </div>
           </div>
@@ -414,6 +425,7 @@ function LabelDetailModal({
             <DetailSection description="거래처와 라벨 매칭 기준을 확인합니다." title="거래처/매칭">
               <DetailItem label="거래처코드" value={<CodeCell value={line.storeCode} />} />
               <DetailItem label="거래처명" value={line.storeName || '-'} />
+              <DetailItem label="브랜드" value={line.brandName || '-'} />
               <DetailItem label="매칭코드" value={<CodeCell value={line.matchingCode} />} />
               <DetailItem label="박스" value={labelBoxSummary(line)} />
             </DetailSection>
@@ -453,6 +465,7 @@ function toLabelLine(row: BackendLabelLine): LabelLine {
     orderNo: row.orderNo ?? '',
     storeCode: row.storeCode ?? '',
     storeName: row.storeName ?? '',
+    brandName: row.brandName ?? '',
     productCode: row.productCode ?? '',
     productName: row.productName ?? '',
     orderQty: toNumber(row.orderQty),

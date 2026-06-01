@@ -1,16 +1,21 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { mockPlLines } from '../api/mock';
+import { omsApi, type BackendPlLine } from '../api/oms';
+import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import {
   Badge,
   Button,
   Card,
   DateRangeQuickFilter,
+  ErrorState,
   Input,
+  LoadingState,
   ModalFrame,
 } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
 import { CodeCell } from '../components/domain';
+import type { PageResponse } from '../types/api';
 import type { PlLine } from '../types/pl';
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
 
@@ -38,23 +43,82 @@ const initialFilters: PlFilters = {
   vehicleName: '',
 };
 
+const pageSize = 20;
+
 export function PlLinesPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const [filters, setFilters] = useState<PlFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [plType, setPlType] = useState<PlTypeFilter>('ALL');
   const [selectedLine, setSelectedLine] = useState<PlLine | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageData, setPageData] = useState<PageResponse<BackendPlLine> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
 
-  const filteredLines = useMemo(() => filterPlLines(mockPlLines, filters, plType), [filters, plType]);
-  const summary = useMemo(() => createPlSummary(mockPlLines), []);
+  const lines = useMemo(() => (pageData?.items ?? []).map(toPlLine), [pageData]);
+  const filteredLines = useMemo(() => filterLoadedPlLines(lines, filters, plType), [filters, lines, plType]);
+  const summary = useMemo(() => createPlSummary(filteredLines, pageData?.totalElements ?? 0), [filteredLines, pageData]);
   const activeFilterCount = useMemo(() => countActiveFilters(filters) + (plType === 'ALL' ? 0 : 1), [filters, plType]);
 
+  useEffect(() => {
+    void loadPlLines();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId, filters.batchId, filters.dueDateRange, filters.orderNo, filters.productCode, filters.storeCode, filters.vehicleName, page, plType, reloadSeq, tenantId]);
+
+  useEffect(() => {
+    if (selectedLine && !filteredLines.some((line) => line.id === selectedLine.id)) {
+      setSelectedLine(null);
+    }
+  }, [filteredLines, selectedLine]);
+
+  async function loadPlLines() {
+    setLoading(true);
+    setError(null);
+
+    try {
+      if (!tenantId) {
+        setPageData({ items: [], page: page - 1, size: pageSize, totalElements: 0, totalPages: 0 });
+        return;
+      }
+      const data = await omsApi.plLines.list({
+        tenantId,
+        clientId,
+        page: page - 1,
+        size: pageSize,
+        batchId: parseNumericFilter(filters.batchId),
+        plType: plType === 'ALL' ? undefined : plType,
+        dueDate: exactDateFilter(filters.dueDateRange),
+        vehicleName: textFilter(filters.vehicleName),
+        storeCode: textFilter(filters.storeCode),
+        productCode: textFilter(filters.productCode),
+        orderNo: textFilter(filters.orderNo),
+      });
+      setPageData(data);
+    } catch (loadError) {
+      setPageData(null);
+      setError(loadError instanceof Error ? loadError.message : 'PL 데이터를 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
   function updateFilter<TKey extends keyof PlFilters>(key: TKey, value: PlFilters[TKey]) {
+    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function resetFilters() {
+    setPage(1);
     setFilters(initialFilters);
     setPlType('ALL');
+  }
+
+  function updatePlType(value: PlTypeFilter) {
+    setPage(1);
+    setPlType(value);
   }
 
   return (
@@ -68,7 +132,7 @@ export function PlLinesPage() {
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
         plType={plType}
-        setPlType={setPlType}
+        setPlType={updatePlType}
         updateFilter={updateFilter}
       />
 
@@ -79,25 +143,44 @@ export function PlLinesPage() {
               <p className="text-base font-bold text-slate-950">PL 데이터</p>
               <Badge tone="blue">EA</Badge>
               <Badge tone="teal">BOX</Badge>
-              <Badge>피킹 리스트</Badge>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              총 <span className="font-semibold text-teal-700">{filteredLines.length.toLocaleString()}</span>건이 검색되었습니다.
+              총 <span className="font-semibold text-teal-700">{(pageData?.totalElements ?? 0).toLocaleString()}</span>건이 검색되었습니다.
               행을 선택하면 주문, 상품, 배송 정보를 큰 화면에서 확인합니다.
             </p>
           </div>
+          <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
+            새로고침
+          </Button>
         </div>
-        <DataTable
-          columns={createColumns()}
-          data={filteredLines}
-          emptyDescription="PL 유형, 납기일, 주문번호, 거래처, 상품, 차량 조건을 조정해 주세요."
-          emptyTitle="조건에 맞는 PL 데이터가 없습니다."
-          getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
-          getRowKey={(item) => item.id}
-          onRowClick={setSelectedLine}
-        />
+        {loading && !pageData ? (
+          <div className="p-5">
+            <LoadingState label="PL 조회 API에서 데이터를 불러오는 중입니다." />
+          </div>
+        ) : null}
+        {error && !loading ? (
+          <div className="p-5">
+            <ErrorState description={error} onRetry={() => setReloadSeq((current) => current + 1)} title="PL 데이터를 조회하지 못했습니다." />
+          </div>
+        ) : null}
+        {!error ? (
+          <DataTable
+            columns={createColumns()}
+            data={filteredLines}
+            emptyDescription="PL 유형, 납기일, 주문번호, 거래처, 상품, 차량 조건을 조정해 주세요."
+            emptyTitle="조건에 맞는 PL 데이터가 없습니다."
+            getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
+            getRowKey={(item) => item.id}
+            onRowClick={setSelectedLine}
+          />
+        ) : null}
         <div className="px-5 py-4">
-          <Pagination page={1} total={filteredLines.length} totalPages={Math.max(1, Math.ceil(filteredLines.length / 20))} />
+          <Pagination
+            onPageChange={setPage}
+            page={page}
+            total={pageData?.totalElements ?? filteredLines.length}
+            totalPages={Math.max(1, pageData?.totalPages ?? 1)}
+          />
         </div>
       </Card>
 
@@ -344,7 +427,7 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function filterPlLines(lines: PlLine[], filters: PlFilters, plType: PlTypeFilter) {
+function filterLoadedPlLines(lines: PlLine[], filters: PlFilters, plType: PlTypeFilter) {
   return lines.filter((line) => {
     if (plType !== 'ALL' && line.plType !== plType) {
       return false;
@@ -376,15 +459,59 @@ function countActiveFilters(filters: PlFilters) {
   ].filter(Boolean).length;
 }
 
-function createPlSummary(lines: PlLine[]) {
+function createPlSummary(lines: PlLine[], totalElements: number) {
   return {
     box: lines.filter((line) => line.plType === 'BOX').length,
     ea: lines.filter((line) => line.plType === 'EA').length,
     qty: lines.reduce((sum, line) => sum + line.orderQty, 0),
-    total: lines.length,
+    total: totalElements,
   };
 }
 
 function includesText(value: string, query: string) {
   return value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
+}
+
+function toPlLine(row: BackendPlLine): PlLine {
+  return {
+    id: String(row.id),
+    batchId: String(row.batchId),
+    plType: row.plType,
+    orderNo: row.orderNo ?? '-',
+    storeCode: row.storeCode ?? '-',
+    storeName: row.storeName ?? '-',
+    brandName: row.brandName ?? '-',
+    productCode: row.productCode ?? '-',
+    productName: row.productName ?? '-',
+    unit: row.unit ?? '-',
+    storageTemperature: row.storageTemperature ?? '-',
+    dueDate: row.dueDate ?? '',
+    orderQty: toNumber(row.orderQty),
+    vehicleName: row.vehicleName ?? '-',
+    cbm: toNumber(row.cbm),
+    qrCode: row.qrCode ?? '-',
+    rowNo: row.rowNo,
+  };
+}
+
+function parseNumericFilter(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed || !/^\d+$/.test(trimmed)) {
+    return undefined;
+  }
+
+  return Number(trimmed);
+}
+
+function textFilter(value: string) {
+  return value.trim() || undefined;
+}
+
+function exactDateFilter(range: DateRangeValue) {
+  return range.from && range.from === range.to ? range.from : undefined;
+}
+
+function toNumber(value: number | string | null | undefined) {
+  const numberValue = typeof value === 'number' ? value : Number(value ?? 0);
+  return Number.isFinite(numberValue) ? numberValue : 0;
 }

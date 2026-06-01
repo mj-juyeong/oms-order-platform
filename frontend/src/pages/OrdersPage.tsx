@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { omsApi } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import {
   Badge,
   Button,
@@ -14,12 +15,12 @@ import {
   Select,
 } from '../components/common';
 import { Pagination } from '../components/data/Pagination';
-import { CodeCell } from '../components/domain';
+import { BatchStatusBadge, CodeCell } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { BackendOrderLine, OrderLine } from '../types/order';
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
 
-type OrderViewMode = 'PRODUCTS' | 'STORES' | 'VEHICLES' | 'BATCHES';
+type OrderViewMode = 'ALL' | 'BRANDS' | 'PRODUCTS' | 'STORES' | 'VEHICLES' | 'BATCHES';
 
 interface OrderFilters {
   batchId: string;
@@ -27,6 +28,7 @@ interface OrderFilters {
   orderNo: string;
   storeCode: string;
   storeName: string;
+  brandName: string;
   productCode: string;
   productName: string;
   unit: 'ALL' | OrderLine['unit'];
@@ -48,8 +50,11 @@ interface OrderGroupRow {
 }
 
 const pageSize = 100;
+const modalOrderChunkSize = 30;
 
 const viewModeOptions: Array<{ label: string; value: OrderViewMode }> = [
+  { label: '전체 주문', value: 'ALL' },
+  { label: '브랜드별', value: 'BRANDS' },
   { label: '상품별', value: 'PRODUCTS' },
   { label: '거래처별', value: 'STORES' },
   { label: '차량별', value: 'VEHICLES' },
@@ -62,6 +67,7 @@ const initialFilters: OrderFilters = {
   orderNo: '',
   storeCode: '',
   storeName: '',
+  brandName: '',
   productCode: '',
   productName: '',
   unit: 'ALL',
@@ -75,10 +81,12 @@ const unitOptions = [
 ];
 
 export function OrdersPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const [filters, setFilters] = useState<OrderFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [viewMode, setViewMode] = useState<OrderViewMode>('PRODUCTS');
-  const [expandedGroupIds, setExpandedGroupIds] = useState<string[]>([]);
+  const [viewMode, setViewMode] = useState<OrderViewMode>('ALL');
+  const [selectedGroup, setSelectedGroup] = useState<OrderGroupRow | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderLine | null>(null);
   const [page, setPage] = useState(0);
   const [response, setResponse] = useState<PageResponse<BackendOrderLine> | null>(null);
@@ -97,9 +105,10 @@ export function OrdersPage() {
   const batchIdError = filters.batchId.trim() && !toNumberOrUndefined(filters.batchId) ? '배치 ID는 숫자로 입력해주세요.' : null;
 
   useEffect(() => {
-    const visibleGroupIds = new Set(visibleGroups.map((item) => item.id));
-    setExpandedGroupIds((current) => current.filter((groupId) => visibleGroupIds.has(groupId)));
-  }, [visibleGroups]);
+    if (selectedGroup && !visibleGroups.some((item) => item.id === selectedGroup.id)) {
+      setSelectedGroup(null);
+    }
+  }, [selectedGroup, visibleGroups]);
 
   useEffect(() => {
     if (selectedOrder && !visibleOrders.some((item) => item.id === selectedOrder.id)) {
@@ -119,8 +128,14 @@ export function OrdersPage() {
     setLoading(true);
     setErrorMessage(null);
 
+    if (!tenantId) {
+      setResponse({ items: [], page, size: pageSize, totalElements: 0, totalPages: 0 });
+      setLoading(false);
+      return;
+    }
+
     omsApi.orders
-      .list(buildOrderQuery(filters, page))
+      .list(buildOrderQuery(filters, page, tenantId, clientId))
       .then((data) => {
         if (!cancelled) {
           setResponse(data);
@@ -141,7 +156,7 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [batchIdError, filters, page, reloadSeq]);
+  }, [batchIdError, clientId, filters, page, reloadSeq, tenantId]);
 
   function updateFilter<TKey extends keyof OrderFilters>(key: TKey, value: OrderFilters[TKey]) {
     setPage(0);
@@ -172,11 +187,9 @@ export function OrdersPage() {
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-base font-bold text-slate-950">주문 요약</p>
-              <Badge tone="teal">관점별 그룹</Badge>
-              <Badge tone="green">확정 배치만</Badge>
             </div>
             <p className="mt-1 text-sm text-slate-500">
-              서버에서 조회한 확정 주문 <strong className="text-teal-700">{(response?.totalElements ?? 0).toLocaleString()}</strong>건 중
+              서버에서 조회한 주문 <strong className="text-teal-700">{(response?.totalElements ?? 0).toLocaleString()}</strong>건 중
               현재 페이지의 <strong className="text-teal-700">{visibleOrders.length.toLocaleString()}</strong>건을 묶어서 보여줍니다.
             </p>
           </div>
@@ -190,7 +203,6 @@ export function OrdersPage() {
                 {option.label}
               </ViewModeButton>
             ))}
-            <Button disabled size="sm" variant="primary">주문 다운로드</Button>
           </div>
         </div>
 
@@ -203,14 +215,8 @@ export function OrdersPage() {
         {!loading && !errorMessage ? (
           <>
             <GroupedOrderList
-              expandedGroupIds={expandedGroupIds}
               mode={viewMode}
-              onSelectOrder={setSelectedOrder}
-              onToggleGroup={(groupId) =>
-                setExpandedGroupIds((current) =>
-                  current.includes(groupId) ? current.filter((item) => item !== groupId) : [...current, groupId],
-                )
-              }
+              onOpenGroup={setSelectedGroup}
               rows={visibleGroups}
             />
             <div className="border-t border-slate-100 px-5 py-4">
@@ -223,7 +229,17 @@ export function OrdersPage() {
             </div>
           </>
         ) : null}
-        <OrderDetailModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+        <OrderGroupModal
+          group={selectedGroup}
+          mode={viewMode}
+          onClose={() => setSelectedGroup(null)}
+          onSelectOrder={setSelectedOrder}
+        />
+        <OrderDetailModal
+          order={selectedOrder}
+          onBackToList={selectedGroup ? () => setSelectedOrder(null) : undefined}
+          onClose={() => setSelectedOrder(null)}
+        />
       </Card>
     </div>
   );
@@ -231,7 +247,7 @@ export function OrdersPage() {
 
 function SummaryCards({ loading, summary }: { loading: boolean; summary: ReturnType<typeof createOrderSummary> }) {
   const cards = [
-    { label: '확정 주문', value: summary.total, tone: 'green' as const, description: 'CONFIRMED 배치 기준 총 조회 건수' },
+    { label: '조회 주문', value: summary.total, tone: 'green' as const, description: '현재 조건의 총 조회 건수' },
     { label: '현재 페이지', value: summary.loaded, tone: 'teal' as const, description: '현재 페이지에 표시 중인 주문 건수' },
     { label: '주문 수량', value: summary.totalQty, tone: 'blue' as const, description: '현재 페이지 주문 수량 합계' },
     { label: '코드 보존', value: summary.codeSensitive, tone: 'amber' as const, description: '0으로 시작하는 코드성 값' },
@@ -282,9 +298,8 @@ function OrderFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
-            <Badge tone="green">CONFIRMED</Badge>
           </div>
-          <p className="mt-1 text-xs text-slate-500">확정 완료된 배치의 PL 기반 주문 요약 데이터를 조회합니다.</p>
+          <p className="mt-1 text-xs text-slate-500">PL 기반 주문 요약 데이터를 조건별로 조회합니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
           <Button onClick={onReload} size="sm" variant="secondary">새로고침</Button>
@@ -303,6 +318,7 @@ function OrderFilterPanel({
             <Input label="주문번호" onChange={(event) => updateFilter('orderNo', event.target.value)} placeholder="0000000001" value={filters.orderNo} />
             <Input label="거래처코드" onChange={(event) => updateFilter('storeCode', event.target.value)} placeholder="BJ0133" value={filters.storeCode} />
             <Input label="거래처명" onChange={(event) => updateFilter('storeName', event.target.value)} placeholder="매장명" value={filters.storeName} />
+            <Input label="브랜드명" onChange={(event) => updateFilter('brandName', event.target.value)} placeholder="브랜드" value={filters.brandName} />
             <Input label="품목코드" onChange={(event) => updateFilter('productCode', event.target.value)} placeholder="73043" value={filters.productCode} />
             <Input label="품목명" onChange={(event) => updateFilter('productName', event.target.value)} placeholder="상품명" value={filters.productName} />
             <Select label="단위" onChange={(event) => updateFilter('unit', event.target.value as OrderFilters['unit'])} options={unitOptions} value={filters.unit} />
@@ -330,30 +346,26 @@ function ViewModeButton({ active, children, onClick }: { active: boolean; childr
 }
 
 function GroupedOrderList({
-  expandedGroupIds,
   mode,
-  onSelectOrder,
-  onToggleGroup,
+  onOpenGroup,
   rows,
 }: {
-  expandedGroupIds: string[];
   mode: OrderViewMode;
-  onSelectOrder: (order: OrderLine) => void;
-  onToggleGroup: (groupId: string) => void;
+  onOpenGroup: (group: OrderGroupRow) => void;
   rows: OrderGroupRow[];
 }) {
   if (rows.length === 0) {
     return (
       <div className="min-h-[360px] border-t border-slate-100 p-8 text-center">
         <p className="text-base font-bold text-slate-950">{viewModeLabel(mode)} 조회 결과가 없습니다.</p>
-        <p className="mt-2 text-sm text-slate-500">확정된 배치가 없거나 조회 조건에 맞는 주문이 없습니다.</p>
+        <p className="mt-2 text-sm text-slate-500">조회 조건에 맞는 주문이 없습니다.</p>
       </div>
     );
   }
 
   return (
     <div className="min-h-[440px] border-t border-slate-100">
-      <div className="grid grid-cols-[minmax(0,1.5fr)_88px_104px_104px_104px_104px_156px_32px] gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase text-slate-500 max-xl:hidden">
+      <div className="grid grid-cols-[minmax(0,1.5fr)_88px_104px_104px_104px_104px_156px] gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 text-xs font-semibold uppercase text-slate-500 max-xl:hidden">
         <span>{viewModeLabel(mode)}</span>
         <span className="text-right">주문 건</span>
         <span className="text-right">총 수량</span>
@@ -361,67 +373,33 @@ function GroupedOrderList({
         <span className="text-right">상품</span>
         <span className="text-right">거래처</span>
         <span>납기일</span>
-        <span />
       </div>
 
       <div className="divide-y divide-slate-100">
-        {rows.map((row) => {
-          const expanded = expandedGroupIds.includes(row.id);
-
-          return (
-            <section className={expanded ? 'bg-teal-50/30' : 'bg-white'} key={row.id}>
-              <button
-                aria-expanded={expanded}
-                className="grid w-full grid-cols-1 gap-3 px-5 py-4 text-left transition hover:bg-slate-50 xl:grid-cols-[minmax(0,1.5fr)_88px_104px_104px_104px_104px_156px_32px] xl:items-center"
-                onClick={() => onToggleGroup(row.id)}
-                type="button"
-              >
-                <span className="min-w-0">
-                  <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="min-w-0 truncate font-semibold text-slate-950">{row.label}</span>
-                    {row.subLabel ? <InlineCode value={row.subLabel} /> : null}
-                  </span>
+        {rows.map((row) => (
+          <section className="bg-white" key={row.id}>
+            <button
+              className="grid w-full grid-cols-1 gap-3 px-5 py-4 text-left transition hover:bg-slate-50 xl:grid-cols-[minmax(0,1.5fr)_88px_104px_104px_104px_104px_156px] xl:items-center"
+              onClick={() => onOpenGroup(row)}
+              type="button"
+            >
+              <span className="min-w-0">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className="min-w-0 truncate font-semibold text-slate-950">{row.label}</span>
+                  {row.subLabel ? <InlineCode value={row.subLabel} /> : null}
                 </span>
-                <GroupMetric label="주문 건" value={row.orderCount.toLocaleString()} />
-                <GroupMetric label="총 수량" value={row.totalQty.toLocaleString()} />
-                <GroupMetric label="단위" value={row.unitSummary} />
-                <GroupMetric label="상품" value={row.productCount.toLocaleString()} />
-                <GroupMetric label="거래처" value={row.storeCount.toLocaleString()} />
-                <GroupMetric label="납기일" value={row.dueDates} />
-                <span className="hidden items-center justify-end xl:inline-flex xl:justify-self-end">
-                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-md border border-slate-200 bg-white text-slate-500 shadow-sm">
-                    <ChevronIcon expanded={expanded} />
-                  </span>
-                </span>
-              </button>
-
-              <div className={`grid transition-[grid-template-rows,opacity] duration-300 ease-out ${expanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'}`}>
-                <div className="min-h-0 overflow-hidden">
-                  <ExpandedOrders mode={mode} orders={row.items} onSelectOrder={onSelectOrder} />
-                </div>
-              </div>
-            </section>
-          );
-        })}
+              </span>
+              <GroupMetric label="주문 건" value={row.orderCount.toLocaleString()} />
+              <GroupMetric label="총 수량" value={row.totalQty.toLocaleString()} />
+              <GroupMetric label="단위" value={row.unitSummary} />
+              <GroupMetric label="상품" value={row.productCount.toLocaleString()} />
+              <GroupMetric label="거래처" value={row.storeCount.toLocaleString()} />
+              <GroupMetric label="납기일" value={row.dueDates} />
+            </button>
+          </section>
+        ))}
       </div>
     </div>
-  );
-}
-
-function ChevronIcon({ expanded }: { expanded: boolean }) {
-  return (
-    <svg
-      aria-hidden="true"
-      className={`h-3.5 w-3.5 transition-transform duration-300 ease-out ${expanded ? 'rotate-180' : ''}`}
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="2"
-      viewBox="0 0 24 24"
-    >
-      <path d="m6 9 6 6 6-6" />
-    </svg>
   );
 }
 
@@ -431,6 +409,86 @@ function GroupMetric({ label, value }: { label: string; value: string }) {
       <span className="text-xs font-semibold text-slate-500 xl:hidden">{label}</span>
       <span className="font-semibold text-slate-800">{value}</span>
     </span>
+  );
+}
+
+function OrderGroupModal({
+  group,
+  mode,
+  onClose,
+  onSelectOrder,
+}: {
+  group: OrderGroupRow | null;
+  mode: OrderViewMode;
+  onClose: () => void;
+  onSelectOrder: (order: OrderLine) => void;
+}) {
+  const [visibleCount, setVisibleCount] = useState(modalOrderChunkSize);
+
+  useEffect(() => {
+    setVisibleCount(modalOrderChunkSize);
+  }, [group?.id]);
+
+  if (!group) {
+    return null;
+  }
+
+  const currentGroup = group;
+  const title = mode === 'ALL' ? '전체 주문' : `${viewModeLabel(mode)} 주문`;
+  const visibleOrders = currentGroup.items.slice(0, visibleCount);
+  const hasMore = visibleOrders.length < currentGroup.items.length;
+
+  function handleScroll(event: UIEvent<HTMLDivElement>) {
+    const target = event.currentTarget;
+    const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 160;
+    if (nearBottom && hasMore) {
+      setVisibleCount((current) => Math.min(current + modalOrderChunkSize, currentGroup.items.length));
+    }
+  }
+
+  return (
+    <ModalFrame onClose={onClose} panelClassName="flex max-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-lg font-bold text-slate-950">{title}</p>
+            <Badge tone="teal">{currentGroup.orderCount.toLocaleString()}건</Badge>
+          </div>
+          <p className="mt-1 truncate text-sm text-slate-500">
+            {currentGroup.label}{currentGroup.subLabel ? ` · ${currentGroup.subLabel}` : ''}
+          </p>
+        </div>
+        <Button aria-label="주문 목록 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col bg-slate-50 px-6 py-5">
+        <div className="grid gap-3 md:grid-cols-4">
+          <GroupSummaryTile label="주문 건" value={`${currentGroup.orderCount.toLocaleString()}건`} />
+          <GroupSummaryTile label="총 수량" value={currentGroup.totalQty.toLocaleString()} />
+          <GroupSummaryTile label="상품" value={`${currentGroup.productCount.toLocaleString()}개`} />
+          <GroupSummaryTile label="거래처" value={`${currentGroup.storeCount.toLocaleString()}개`} />
+        </div>
+
+        <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white" onScroll={handleScroll}>
+          <ExpandedOrders mode={mode} orders={visibleOrders} onSelectOrder={onSelectOrder} />
+        </div>
+
+        <div className="flex shrink-0 items-center justify-center px-4 pt-4 text-xs font-semibold text-slate-500">
+          {hasMore
+            ? `${visibleOrders.length.toLocaleString()} / ${currentGroup.items.length.toLocaleString()}건 표시 중 · 아래로 스크롤하면 더 불러옵니다.`
+            : `${currentGroup.items.length.toLocaleString()}건 전체 표시`}
+        </div>
+      </div>
+    </ModalFrame>
+  );
+}
+
+function GroupSummaryTile({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 font-mono text-base font-bold text-slate-950">{value}</p>
+    </div>
   );
 }
 
@@ -444,12 +502,14 @@ function ExpandedOrders({
   orders: OrderLine[];
 }) {
   const showStore = mode !== 'STORES';
+  const showBrand = mode !== 'BRANDS';
   const showProduct = mode !== 'PRODUCTS';
   const showVehicle = mode !== 'VEHICLES';
   const showBatch = mode !== 'BATCHES';
   const headers = [
     '주문번호',
     showStore ? '거래처' : null,
+    showBrand ? '브랜드' : null,
     showProduct ? '상품' : null,
     '납기일',
     '수량',
@@ -457,12 +517,11 @@ function ExpandedOrders({
     showBatch ? '배치' : null,
     'OIS PL',
     '상태',
-    '',
   ].filter(Boolean);
 
   return (
-    <div className="border-t border-teal-100 bg-white px-5 pb-5 pt-1">
-      <div className="mt-3 overflow-x-auto rounded-md border border-slate-200">
+    <div className="bg-white">
+      <div className="overflow-x-auto">
         <table className="min-w-full border-separate border-spacing-0 text-sm">
           <thead className="bg-slate-50">
             <tr>
@@ -475,19 +534,22 @@ function ExpandedOrders({
           </thead>
           <tbody>
             {orders.map((order) => (
-              <tr className="hover:bg-slate-50" key={order.id}>
+              <tr
+                className="cursor-pointer hover:bg-teal-50/60"
+                key={order.id}
+                onClick={() => onSelectOrder(order)}
+                tabIndex={0}
+              >
                 <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><CodeCell value={order.orderNo} /></td>
                 {showStore ? <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><StoreCell order={order} /></td> : null}
+                {showBrand ? <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3 text-slate-700">{order.brandName || '-'}</td> : null}
                 {showProduct ? <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><ProductCell order={order} /></td> : null}
                 <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3 text-slate-700">{order.dueDate || '-'}</td>
                 <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3 text-right font-semibold text-slate-900">{order.orderQty.toLocaleString()} {order.unit}</td>
                 {showVehicle ? <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3 text-slate-700">{formatVehicleRound(order)}</td> : null}
                 {showBatch ? <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><InlineCode value={order.batchId} /></td> : null}
                 <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><SourcePlCell order={order} /></td>
-                <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><BatchScopeBadge /></td>
-                <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3 text-right">
-                  <Button onClick={() => onSelectOrder(order)} size="sm" variant="secondary">상세</Button>
-                </td>
+                <td className="whitespace-nowrap border-b border-slate-100 px-4 py-3"><OrderBatchStatus order={order} /></td>
               </tr>
             ))}
           </tbody>
@@ -528,8 +590,12 @@ function SourcePlCell({ order }: { order: OrderLine }) {
   );
 }
 
-function BatchScopeBadge() {
-  return <Badge tone="green">확정</Badge>;
+function OrderBatchStatus({ order }: { order: OrderLine }) {
+  if (order.batchStatus) {
+    return <BatchStatusBadge status={order.batchStatus} />;
+  }
+
+  return <Badge tone={order.confirmed ? 'green' : 'neutral'}>{order.confirmed ? '확정' : '미확정'}</Badge>;
 }
 
 function InlineCode({ value }: { value?: string }) {
@@ -552,33 +618,44 @@ function InlineCode({ value }: { value?: string }) {
   );
 }
 
-function OrderDetailModal({ onClose, order }: { onClose: () => void; order: OrderLine | null }) {
+function OrderDetailModal({
+  onBackToList,
+  onClose,
+  order,
+}: {
+  onBackToList?: () => void;
+  onClose: () => void;
+  order: OrderLine | null;
+}) {
   if (!order) {
     return null;
   }
 
   return (
-    <ModalFrame onClose={onClose} panelClassName="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+    <ModalFrame onClose={onClose} panelClassName="flex max-h-[84vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
       <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-lg font-bold text-slate-950">주문 상세</p>
-            <BatchScopeBadge />
+            <OrderBatchStatus order={order} />
             <Badge tone={order.unit === 'EA' ? 'blue' : 'teal'}>{order.unit}</Badge>
           </div>
           <p className="mt-1 text-sm text-slate-500">PL 데이터를 기준으로 재구성한 OMS 주문 조회용 요약입니다.</p>
         </div>
-        <Button aria-label="주문 상세 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {onBackToList ? <Button onClick={onBackToList} size="sm" variant="secondary">주문 목록으로</Button> : null}
+          <Button aria-label="주문 상세 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
+        </div>
       </div>
 
       <div className="overflow-y-auto bg-slate-50 px-6 py-5">
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-base font-bold text-slate-950">{order.productName || '-'}</p>
           <p className="mt-1 text-sm text-slate-600">{order.storeName || order.storeCode || '-'} · {order.orderQty.toLocaleString()} {order.unit}</p>
-          <p className="mt-3 text-sm leading-6 text-emerald-800">확정 완료된 배치의 주문입니다. 외부 API 제공과 운영 다운로드 대상에 포함될 수 있습니다.</p>
+          <p className="mt-3 text-sm leading-6 text-slate-600">PL 데이터를 기준으로 재구성한 OMS 주문 조회용 요약입니다.</p>
         </div>
 
-        <div className="mt-5 grid gap-4 xl:grid-cols-3">
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
           <DetailSection title="주문 정보" description="주문과 배치 기준 정보">
             <DetailItem label="주문번호" value={<CodeCell value={order.orderNo} />} />
             <DetailItem label="고객사" value={order.clientName} />
@@ -605,6 +682,7 @@ function OrderDetailModal({ onClose, order }: { onClose: () => void; order: Orde
         </div>
 
         <div className="mt-5 flex flex-wrap justify-end gap-2">
+          {onBackToList ? <Button onClick={onBackToList} variant="secondary">주문 목록으로</Button> : null}
           <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${order.batchId}`}>
             배치 상세
           </Link>
@@ -639,19 +717,19 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function buildOrderQuery(filters: OrderFilters, page: number) {
+function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number, clientId?: number) {
   return {
-    tenantId: fakeCurrentUser.tenantId ?? 1,
-    clientId: fakeCurrentUser.clientId ?? 1,
+    tenantId,
+    clientId,
     page,
     size: pageSize,
-    confirmedOnly: true,
     batchId: toNumberOrUndefined(filters.batchId),
     dueDateFrom: filters.dueDateRange.from || undefined,
     dueDateTo: filters.dueDateRange.to || undefined,
     orderNo: textOrUndefined(filters.orderNo),
     storeCode: textOrUndefined(filters.storeCode),
     storeName: textOrUndefined(filters.storeName),
+    brandName: textOrUndefined(filters.brandName),
     productCode: textOrUndefined(filters.productCode),
     productName: textOrUndefined(filters.productName),
     unit: filters.unit === 'ALL' ? undefined : filters.unit,
@@ -698,6 +776,22 @@ function formatVehicleRound(order: OrderLine) {
 }
 
 function groupOrders(rows: OrderLine[], mode: OrderViewMode): OrderGroupRow[] {
+  if (mode === 'ALL') {
+    return rows.map((row) => ({
+      id: `ALL-${row.id}`,
+      label: row.orderNo || `주문 ${row.id}`,
+      subLabel: [row.brandName, row.productName || row.productCode, row.storeName || row.storeCode].filter(Boolean).join(' · '),
+      items: [row],
+      orderCount: 1,
+      totalQty: row.orderQty,
+      unitSummary: row.unit,
+      productCount: row.productCode ? 1 : 0,
+      storeCount: row.storeCode ? 1 : 0,
+      vehicleCount: row.vehicleName ? 1 : 0,
+      dueDates: row.dueDate || '-',
+    }));
+  }
+
   const groupMap = new Map<string, OrderLine[]>();
 
   rows.forEach((row) => {
@@ -730,6 +824,7 @@ function groupOrders(rows: OrderLine[], mode: OrderViewMode): OrderGroupRow[] {
 }
 
 function groupKeyForMode(row: OrderLine, mode: OrderViewMode) {
+  if (mode === 'BRANDS') return row.brandName || '-';
   if (mode === 'PRODUCTS') return row.productCode || row.productName || '-';
   if (mode === 'STORES') return row.storeCode || row.storeName || '-';
   if (mode === 'VEHICLES') return row.vehicleName || '-';
@@ -737,6 +832,9 @@ function groupKeyForMode(row: OrderLine, mode: OrderViewMode) {
 }
 
 function groupLabelForMode(row: OrderLine, mode: OrderViewMode): Pick<OrderGroupRow, 'label' | 'subLabel'> {
+  if (mode === 'BRANDS') {
+    return { label: row.brandName || '-', subLabel: row.storeName || row.storeCode || '' };
+  }
   if (mode === 'PRODUCTS') {
     return { label: row.productName || '-', subLabel: row.productCode };
   }
@@ -750,6 +848,8 @@ function groupLabelForMode(row: OrderLine, mode: OrderViewMode): Pick<OrderGroup
 }
 
 function viewModeLabel(mode: OrderViewMode) {
+  if (mode === 'ALL') return '전체 주문';
+  if (mode === 'BRANDS') return '브랜드별';
   if (mode === 'PRODUCTS') return '상품별';
   if (mode === 'STORES') return '거래처별';
   if (mode === 'VEHICLES') return '차량별';

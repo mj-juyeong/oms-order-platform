@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import { omsApi, type BackendBatchSummary } from '../api/oms';
 import {
   Badge,
@@ -54,9 +55,6 @@ interface LabelLineCountResponse {
   items: Array<{ storeCode?: string | null }>;
 }
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
-const clientId = fakeCurrentUser.clientId ?? 1;
-
 const initialFilters: LabelDownloadFilters = {
   batchId: '',
   deliveryDateRange: { preset: 'ALL', from: '', to: '' },
@@ -68,6 +66,8 @@ const initialFilters: LabelDownloadFilters = {
 };
 
 export function LabelDownloadsPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const [filters, setFilters] = useState<LabelDownloadFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [rows, setRows] = useState<LabelDownloadRow[]>([]);
@@ -78,7 +78,7 @@ export function LabelDownloadsPage() {
 
   useEffect(() => {
     void loadRows();
-  }, []);
+  }, [clientId, tenantId]);
 
   const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
   const filteredRows = useMemo(() => filterRows(rows, filters), [filters, rows]);
@@ -89,6 +89,10 @@ export function LabelDownloadsPage() {
     setLoading(true);
     setError(null);
     try {
+      if (!tenantId) {
+        setRows([]);
+        return;
+      }
       const [batchPage, downloadLogPage] = await Promise.all([
         omsApi.batches.list({ tenantId, clientId, page: 0, size: 100 }),
         omsApi.audit.downloads({ tenantId, clientId, downloadType: 'LABEL', page: 0, size: 100 }).catch(() => ({
@@ -101,7 +105,7 @@ export function LabelDownloadsPage() {
       ]);
 
       const logs = downloadLogPage.items as DownloadLogItem[];
-      const nextRows = await Promise.all(batchPage.items.map((batch) => toLabelDownloadRow(batch, logs)));
+      const nextRows = await Promise.all(batchPage.items.map((batch) => toLabelDownloadRow(batch, logs, tenantId, clientId)));
       setRows(nextRows);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : '라벨 다운로드 대상을 불러오지 못했습니다.');
@@ -126,6 +130,10 @@ export function LabelDownloadsPage() {
     setDownloadingBatchId(row.id);
     setError(null);
     try {
+      if (!tenantId) {
+        setError('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
+        return;
+      }
       const labelType = filters.labelType === 'ALL' ? undefined : filters.labelType;
       const downloaded = await omsApi.downloads.labels({
         tenantId,
@@ -243,11 +251,11 @@ export function LabelDownloadsPage() {
   );
 }
 
-async function toLabelDownloadRow(batch: BackendBatchSummary, logs: DownloadLogItem[]): Promise<LabelDownloadRow> {
+async function toLabelDownloadRow(batch: BackendBatchSummary, logs: DownloadLogItem[], tenantId: number, selectedClientId?: number): Promise<LabelDownloadRow> {
   const [eaCount, boxCount, stores] = await Promise.all([
-    fetchLabelCount(batch.id, 'EA'),
-    fetchLabelCount(batch.id, 'BOX'),
-    fetchLabelStores(batch.id),
+    fetchLabelCount(tenantId, batch.id, 'EA', selectedClientId),
+    fetchLabelCount(tenantId, batch.id, 'BOX', selectedClientId),
+    fetchLabelStores(tenantId, batch.id, selectedClientId),
   ]);
   const latestLog = logs
     .filter((log) => log.batchId === batch.id)
@@ -275,12 +283,12 @@ async function toLabelDownloadRow(batch: BackendBatchSummary, logs: DownloadLogI
   };
 }
 
-async function fetchLabelCount(batchId: number, labelType: 'EA' | 'BOX') {
+async function fetchLabelCount(tenantId: number, batchId: number, labelType: 'EA' | 'BOX', clientId?: number) {
   const result = await omsApi.labelLines.list({ tenantId, clientId, batchId, labelType, page: 0, size: 1 }) as LabelLineCountResponse;
   return result.totalElements;
 }
 
-async function fetchLabelStores(batchId: number) {
+async function fetchLabelStores(tenantId: number, batchId: number, clientId?: number) {
   const result = await omsApi.labelLines.list({ tenantId, clientId, batchId, page: 0, size: 500 }) as LabelLineCountResponse;
   return new Set(result.items.map((item) => item.storeCode).filter((value): value is string => Boolean(value)));
 }

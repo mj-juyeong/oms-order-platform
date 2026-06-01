@@ -1,19 +1,19 @@
 import { Link } from 'react-router-dom';
-
-interface PageAction {
-  label: string;
-  to: string;
-}
+import { fakeCurrentUser, hasAnyRole, hasAnyScope } from '../../app/auth';
+import type { RouteAction } from '../../routes/routeMeta';
 
 interface PageHeaderProps {
   title: string;
   description: string;
   notice?: string;
-  primaryAction?: PageAction;
-  secondaryActions?: PageAction[];
+  primaryAction?: RouteAction;
+  secondaryActions?: RouteAction[];
 }
 
 export function PageHeader({ description, notice, primaryAction, secondaryActions = [], title }: PageHeaderProps) {
+  const visiblePrimaryAction = primaryAction && isVisibleAction(primaryAction) ? primaryAction : null;
+  const visibleSecondaryActions = secondaryActions.filter(isVisibleAction);
+
   return (
     <section className="border-b border-slate-200 pb-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
@@ -21,9 +21,9 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
           <h1 className="text-2xl font-bold tracking-normal text-slate-950">{title}</h1>
           <p className="mt-1 max-w-3xl text-sm leading-6 text-slate-600">{description}</p>
         </div>
-        {primaryAction || secondaryActions.length > 0 ? (
+        {visiblePrimaryAction || visibleSecondaryActions.length > 0 ? (
           <div className="flex w-full flex-wrap gap-3 sm:w-auto sm:justify-end sm:gap-4">
-            {secondaryActions.map((action) => (
+            {visibleSecondaryActions.map((action) => (
               <Link
                 className="inline-flex h-10 min-w-28 items-center justify-center rounded-md border border-slate-300 bg-white px-5 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
                 key={action.to}
@@ -32,12 +32,12 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
                 {action.label}
               </Link>
             ))}
-            {primaryAction ? (
+            {visiblePrimaryAction ? (
               <Link
                 className="inline-flex h-10 min-w-28 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-5 text-sm font-semibold text-white transition hover:bg-teal-800"
-                to={primaryAction.to}
+                to={visiblePrimaryAction.to}
               >
-                {primaryAction.label}
+                {visiblePrimaryAction.label}
               </Link>
             ) : null}
           </div>
@@ -50,4 +50,10 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
       ) : null}
     </section>
   );
+}
+
+function isVisibleAction(action: RouteAction) {
+  const roleAllowed = !action.roles || hasAnyRole(fakeCurrentUser.roles, action.roles);
+  const scopeAllowed = !action.scopes || hasAnyScope(fakeCurrentUser.userScopeType, action.scopes);
+  return roleAllowed && scopeAllowed;
 }

@@ -1,15 +1,19 @@
 import { useEffect, useMemo, useState } from 'react';
+import * as AlertDialog from '@radix-ui/react-alert-dialog';
+import { CheckCircle } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchDetail } from '../api/oms';
-import { fakeCurrentUser } from '../app/auth';
+import { canAdministerBatches, canOperateBatches, fakeCurrentUser } from '../app/auth';
+import { useClientScope } from '../app/clientContext';
 import { Badge, Button, Card, FullScreenLoadingOverlay } from '../components/common';
 import { DataTable, type DataTableColumn } from '../components/data';
-import { BatchStatusBadge, MetricCard } from '../components/domain';
+import { BatchStatusBadge, ConfirmActionModal, MetricCard } from '../components/domain';
 import type { SheetResult } from '../types/batch';
 
 type ProgressStepKey = 'uploaded' | 'parsed' | 'validated' | 'confirmed' | 'available';
-type ActionState = 'validate' | 'confirm' | null;
+type ActionState = 'validate' | 'confirm' | 'cancel' | 'rollback' | null;
+type PendingDangerAction = 'cancel' | 'rollback' | null;
 
 const progressSteps: Array<{ key: ProgressStepKey; label: string; description: string }> = [
   { key: 'uploaded', label: '업로드 완료', description: '파일 접수' },
@@ -31,29 +35,41 @@ const sheetStatusLabel: Record<SheetResult['status'], string> = {
   ERROR: '오류 있음',
 };
 
-const tenantId = fakeCurrentUser.tenantId ?? 1;
-const clientId = fakeCurrentUser.clientId ?? 1;
-
 export function BatchDetailPage() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const { clientId } = useClientScope();
   const { batchId } = useParams();
   const numericBatchId = Number(batchId);
   const [batch, setBatch] = useState<BackendBatchDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [actionState, setActionState] = useState<ActionState>(null);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [confirmSuccessAlertOpen, setConfirmSuccessAlertOpen] = useState(false);
+  const [pendingDangerAction, setPendingDangerAction] = useState<PendingDangerAction>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const sheetResults = useMemo(() => mapSheetResults(batch), [batch]);
   const totalRowCount = useMemo(() => sheetResults.reduce((sum, sheet) => sum + sheet.rowCount, 0), [sheetResults]);
-  const canValidate = batch ? batch.status === 'UPLOADED' || batch.status === 'VALIDATION_FAILED' || batch.status === 'READY_TO_CONFIRM' : false;
-  const canConfirm = batch?.status === 'READY_TO_CONFIRM' && batch.errorCount === 0;
+  const canOperateBatch = canOperateBatches();
+  const canAdministerBatch = canAdministerBatches();
+  const canValidate = canOperateBatch && batch ? batch.status === 'UPLOADED' || batch.status === 'VALIDATION_FAILED' || batch.status === 'READY_TO_CONFIRM' : false;
+  const canConfirm = canOperateBatch && batch?.status === 'READY_TO_CONFIRM' && batch.errorCount === 0;
+  const canCancel = canAdministerBatch && batch ? !['CONFIRMED', 'CANCELLED', 'ROLLED_BACK'].includes(batch.status) : false;
+  const canRollback = canAdministerBatch && batch?.status === 'CONFIRMED';
   const confirmed = batch?.status === 'CONFIRMED';
 
   useEffect(() => {
     loadBatch();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [numericBatchId]);
+  }, [clientId, numericBatchId, tenantId]);
 
   async function loadBatch() {
+    if (!tenantId) {
+      setErrorMessage('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
+      setLoading(false);
+      return;
+    }
+
     if (!Number.isInteger(numericBatchId) || numericBatchId <= 0) {
       setErrorMessage('유효하지 않은 배치 ID입니다.');
       setLoading(false);
@@ -73,9 +89,10 @@ export function BatchDetailPage() {
   }
 
   async function handleValidate() {
-    if (!batch) return;
+    if (!batch || !canOperateBatch || !tenantId) return;
     setActionState('validate');
     setErrorMessage(null);
+    setConfirmSuccessAlertOpen(false);
     try {
       await omsApi.batches.validate(batch.id, { tenantId, clientId, actorId: fakeCurrentUser.id ?? undefined });
       await loadBatch();
@@ -87,11 +104,53 @@ export function BatchDetailPage() {
   }
 
   async function handleConfirm() {
-    if (!batch) return;
+    if (!batch || !canOperateBatch || !tenantId) return;
     setActionState('confirm');
     setErrorMessage(null);
     try {
       await omsApi.batches.confirm(batch.id, { tenantId, clientId, actorId: fakeCurrentUser.id ?? undefined });
+      setConfirmModalOpen(false);
+      await loadBatch();
+      setConfirmSuccessAlertOpen(true);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setActionState(null);
+    }
+  }
+
+  async function handleCancel() {
+    if (!batch || !canAdministerBatch || !tenantId) return;
+    setActionState('cancel');
+    setErrorMessage(null);
+    setConfirmSuccessAlertOpen(false);
+    try {
+      await omsApi.batches.cancel(
+        batch.id,
+        { tenantId, clientId },
+        { actorId: fakeCurrentUser.id ?? undefined, reason: '운영자 요청으로 배치 취소' },
+      );
+      setPendingDangerAction(null);
+      await loadBatch();
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setActionState(null);
+    }
+  }
+
+  async function handleRollback() {
+    if (!batch || !canAdministerBatch || !tenantId) return;
+    setActionState('rollback');
+    setErrorMessage(null);
+    setConfirmSuccessAlertOpen(false);
+    try {
+      await omsApi.batches.rollback(
+        batch.id,
+        { tenantId, clientId },
+        { actorId: fakeCurrentUser.id ?? undefined, reason: '운영자 요청으로 확정 배치 롤백' },
+      );
+      setPendingDangerAction(null);
       await loadBatch();
     } catch (error) {
       setErrorMessage(formatApiError(error));
@@ -124,14 +183,64 @@ export function BatchDetailPage() {
           title="배치를 확정하고 있습니다"
         />
       ) : null}
+      {actionState === 'cancel' ? (
+        <FullScreenLoadingOverlay
+          description="배치 취소를 요청하고 최신 상태를 다시 불러오는 중입니다. 잠시만 기다려 주세요."
+          detail={batch.batchNo}
+          title="배치를 취소하고 있습니다"
+        />
+      ) : null}
+      {actionState === 'rollback' ? (
+        <FullScreenLoadingOverlay
+          description="확정 배치 롤백을 요청하고 최신 상태를 다시 불러오는 중입니다. 잠시만 기다려 주세요."
+          detail={batch.batchNo}
+          title="배치를 롤백하고 있습니다"
+        />
+      ) : null}
+      <ConfirmActionModal
+        confirmLabel="확정"
+        description="확정 후에는 이 배치가 외부 API 제공과 운영 다운로드 대상에 포함됩니다."
+        loading={actionState === 'confirm'}
+        onClose={() => setConfirmModalOpen(false)}
+        onConfirm={handleConfirm}
+        open={confirmModalOpen}
+        title="주문을 확정하시겠습니까?"
+      />
+      <ConfirmActionModal
+        confirmLabel="배치 취소"
+        confirmVariant="danger"
+        description="취소된 배치는 확정, 외부 API 제공, 라벨 다운로드 대상으로 사용할 수 없습니다. 계속 진행할까요?"
+        loading={actionState === 'cancel'}
+        onClose={() => setPendingDangerAction(null)}
+        onConfirm={handleCancel}
+        open={pendingDangerAction === 'cancel'}
+        title="배치를 취소할까요?"
+      />
+      <ConfirmActionModal
+        confirmLabel="롤백 실행"
+        confirmVariant="danger"
+        description="확정 상태를 되돌리면 외부 API 제공과 다운로드 대상에서 제외될 수 있습니다. 계속 진행할까요?"
+        loading={actionState === 'rollback'}
+        onClose={() => setPendingDangerAction(null)}
+        onConfirm={handleRollback}
+        open={pendingDangerAction === 'rollback'}
+        title="확정 배치를 롤백할까요?"
+      />
+      <ConfirmedOrderAlert open={confirmSuccessAlertOpen} onClose={() => setConfirmSuccessAlertOpen(false)} />
       {errorMessage ? <ApiErrorCard message={errorMessage} onRetry={loadBatch} /> : null}
       <BatchHeader
         actionState={actionState}
         batch={batch}
+        canAdministerBatch={canAdministerBatch}
+        canCancel={canCancel}
         canConfirm={canConfirm}
+        canOperateBatch={canOperateBatch}
+        canRollback={canRollback}
         canValidate={canValidate}
         confirmed={Boolean(confirmed)}
-        onConfirm={handleConfirm}
+        onConfirm={() => setConfirmModalOpen(true)}
+        onRequestCancel={() => setPendingDangerAction('cancel')}
+        onRequestRollback={() => setPendingDangerAction('rollback')}
         onValidate={handleValidate}
       />
 
@@ -144,6 +253,7 @@ export function BatchDetailPage() {
 
       <BatchProgress batch={batch} />
       <ValidationPolicyPanel batch={batch} canConfirm={canConfirm} />
+      <BatchRecoveryPanel batch={batch} canOperateBatch={canOperateBatch} />
 
       <Card className="p-5">
         <div className="flex flex-col gap-3 border-b border-slate-100 pb-4 md:flex-row md:items-center md:justify-between">
@@ -163,21 +273,65 @@ export function BatchDetailPage() {
   );
 }
 
+function ConfirmedOrderAlert({ onClose, open }: { onClose: () => void; open: boolean }) {
+  return (
+    <AlertDialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)}>
+      <AlertDialog.Portal>
+        <AlertDialog.Overlay className="fixed inset-0 z-50 bg-slate-950/40" />
+        <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-6 text-left shadow-lg duration-150 data-[state=closed]:scale-95 data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100">
+          <div className="flex items-start gap-3">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+              <CheckCircle aria-hidden="true" size={22} strokeWidth={2.3} />
+            </div>
+            <div className="min-w-0">
+              <AlertDialog.Title className="text-base font-semibold text-slate-950">
+                주문이 확정되었습니다.
+              </AlertDialog.Title>
+              <AlertDialog.Description className="mt-2 text-sm leading-6 text-slate-500">
+                배치 상태가 확정 완료로 변경되었습니다.
+              </AlertDialog.Description>
+            </div>
+          </div>
+          <div className="mt-6 flex justify-end">
+            <AlertDialog.Action asChild>
+              <Button onClick={onClose} variant="primary">
+                확인
+              </Button>
+            </AlertDialog.Action>
+          </div>
+        </AlertDialog.Content>
+      </AlertDialog.Portal>
+    </AlertDialog.Root>
+  );
+}
+
 function BatchHeader({
   actionState,
   batch,
+  canAdministerBatch,
+  canCancel,
   canConfirm,
+  canOperateBatch,
+  canRollback,
   canValidate,
   confirmed,
   onConfirm,
+  onRequestCancel,
+  onRequestRollback,
   onValidate,
 }: {
   actionState: ActionState;
   batch: BackendBatchDetail;
+  canAdministerBatch: boolean;
+  canCancel: boolean;
   canConfirm: boolean;
+  canOperateBatch: boolean;
+  canRollback: boolean;
   canValidate: boolean;
   confirmed: boolean;
   onConfirm: () => void;
+  onRequestCancel: () => void;
+  onRequestRollback: () => void;
   onValidate: () => void;
 }) {
   const uploadedFile = batch.uploadedFiles[0];
@@ -197,10 +351,16 @@ function BatchHeader({
             <BatchPrimaryActions
               actionState={actionState}
               batch={batch}
+              canAdministerBatch={canAdministerBatch}
+              canCancel={canCancel}
               canConfirm={canConfirm}
+              canOperateBatch={canOperateBatch}
+              canRollback={canRollback}
               canValidate={canValidate}
               confirmed={confirmed}
               onConfirm={onConfirm}
+              onRequestCancel={onRequestCancel}
+              onRequestRollback={onRequestRollback}
               onValidate={onValidate}
             />
           </div>
@@ -223,18 +383,30 @@ function BatchHeader({
 function BatchPrimaryActions({
   actionState,
   batch,
+  canAdministerBatch,
+  canCancel,
   canConfirm,
+  canOperateBatch,
+  canRollback,
   canValidate,
   confirmed,
   onConfirm,
+  onRequestCancel,
+  onRequestRollback,
   onValidate,
 }: {
   actionState: ActionState;
   batch: BackendBatchDetail;
+  canAdministerBatch: boolean;
+  canCancel: boolean;
   canConfirm: boolean;
+  canOperateBatch: boolean;
+  canRollback: boolean;
   canValidate: boolean;
   confirmed: boolean;
   onConfirm: () => void;
+  onRequestCancel: () => void;
+  onRequestRollback: () => void;
   onValidate: () => void;
 }) {
   if (confirmed) {
@@ -246,25 +418,44 @@ function BatchPrimaryActions({
         >
           라벨 다운로드
         </Link>
-        <Button className="min-w-28" variant="secondary">API 제공 상태</Button>
+        <Link
+          className="inline-flex h-10 min-w-28 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          to={`/external-api/status?batchId=${batch.id}`}
+        >
+          API 제공 상태
+        </Link>
+        {canAdministerBatch ? (
+          <Button className="min-w-24" disabled={!canRollback || actionState !== null} onClick={onRequestRollback} variant="danger">
+            롤백
+          </Button>
+        ) : null}
       </div>
     );
   }
 
   return (
     <div className="flex flex-wrap gap-2 xl:justify-end">
-      <Button className="min-w-24" disabled={!canValidate || actionState !== null} onClick={onValidate} variant="secondary">
-        {actionState === 'validate' ? '검증 중' : '검증 실행'}
-      </Button>
+      {canOperateBatch ? (
+        <Button className="min-w-24" disabled={!canValidate || actionState !== null} onClick={onValidate} variant="secondary">
+          {actionState === 'validate' ? '검증 중' : '검증 실행'}
+        </Button>
+      ) : null}
       <Link
         className="inline-flex h-10 min-w-24 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
         to={`/batches/${batch.id}/validation`}
       >
         검증 결과
       </Link>
-      <Button className="min-w-24" disabled={!canConfirm || actionState !== null} onClick={onConfirm} variant="primary">
-        {actionState === 'confirm' ? '확정 중' : '배치 확정'}
-      </Button>
+      {canOperateBatch ? (
+        <Button className="min-w-24" disabled={!canConfirm || actionState !== null} onClick={onConfirm} variant="primary">
+          {actionState === 'confirm' ? '확정 중' : '배치 확정'}
+        </Button>
+      ) : null}
+      {canAdministerBatch ? (
+        <Button className="min-w-24" disabled={!canCancel || actionState !== null} onClick={onRequestCancel} variant="danger">
+          취소
+        </Button>
+      ) : null}
     </div>
   );
 }
@@ -396,6 +587,62 @@ function ValidationPolicyPanel({ batch, canConfirm }: { batch: BackendBatchDetai
   );
 }
 
+function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDetail; canOperateBatch: boolean }) {
+  if (!canOperateBatch || batch.status === 'CONFIRMED' || batch.status === 'CANCELLED' || batch.status === 'ROLLED_BACK') {
+    return null;
+  }
+
+  const hasErrors = batch.errorCount > 0 || batch.status === 'VALIDATION_FAILED';
+
+  return (
+    <Card className={`p-5 ${hasErrors ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <p className="text-base font-bold text-slate-950">{hasErrors ? '검증 실패 후 처리' : '검증 후 처리 기준'}</p>
+          <p className="mt-2 text-sm leading-6 text-slate-700">
+            실패한 배치는 그대로 보존하고 확정, 외부 API 제공, 라벨 다운로드만 차단합니다. 마스터 보완으로 해결되는 오류는 같은 배치를 재검증하고,
+            엑셀 원본값 자체가 틀린 경우에는 수정한 새 엑셀을 업로드하세요.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            to="/masters/products"
+          >
+            상품 마스터
+          </Link>
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            to="/masters/store-routes"
+          >
+            배송지/차량 마스터
+          </Link>
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
+            to="/uploads"
+          >
+            새 엑셀 업로드
+          </Link>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        <div className="border-l-4 border-blue-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">마스터 누락</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">상품코드나 거래처코드를 마스터에 추가한 뒤 이 배치를 다시 검증합니다.</p>
+        </div>
+        <div className="border-l-4 border-amber-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">엑셀 원본 오류</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">수량, 코드, 주문 구조가 잘못되었으면 OIS 엑셀을 수정해 새 배치로 업로드합니다.</p>
+        </div>
+        <div className="border-l-4 border-teal-400 bg-white/70 px-4 py-3">
+          <p className="text-sm font-bold text-slate-900">재검증 가능 상태</p>
+          <p className="mt-1 text-sm leading-5 text-slate-600">현재 배치 상태가 UPLOADED, VALIDATION_FAILED, READY_TO_CONFIRM이면 재검증할 수 있습니다.</p>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 function createSheetColumns(): DataTableColumn<SheetResult>[] {
   return [
     { key: 'sheetName', header: '원본 시트명', width: '190px', cell: (item) => <span className="font-mono text-slate-900">{item.sheetName}</span> },
@@ -465,7 +712,7 @@ function sheetMessage(item: SheetResult) {
 
 function actionHint(batch: BackendBatchDetail, canConfirm: boolean, confirmed: boolean) {
   if (confirmed) return '확정 완료 상태이므로 라벨 다운로드와 외부 API 제공 상태를 확인할 수 있습니다.';
-  if (batch.errorCount > 0) return 'Error를 먼저 확인해야 배치 확정이 가능합니다.';
+  if (batch.errorCount > 0) return 'Error를 먼저 확인하세요. 마스터 누락은 보완 후 재검증하고, 엑셀 원본 오류는 수정 파일을 새로 업로드합니다.';
   if (canConfirm) return 'Error가 없어 확정할 수 있습니다. Warning은 운영 확인 후 진행하세요.';
   return '검증 상태를 확인한 뒤 후속 작업을 진행하세요.';
 }
