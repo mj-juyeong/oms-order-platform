@@ -150,6 +150,7 @@ class OisExcelParser {
 					orderNo = raw.firstValue(ORDER_NO_HEADERS),
 					storeCode = raw.firstValue(STORE_CODE_HEADERS),
 					storeName = raw.firstValue(STORE_NAME_HEADERS),
+					brandName = raw.firstValue(BRAND_NAME_HEADERS),
 					productCode = raw.firstValue(PRODUCT_CODE_HEADERS),
 					productName = raw.firstValue(PRODUCT_NAME_HEADERS),
 					orderQty = raw.firstValue(ORDER_QTY_HEADERS).toDecimalOrNull(),
@@ -205,7 +206,7 @@ private val SCAN_LABEL_QTY_HEADERS = setOf("labelqty", "label_qty", "라벨수�
 
 private val ORDER_NO_HEADERS = setOf("orderno", "order_no", "주문번호")
 private val STORE_CODE_HEADERS = setOf("storecode", "store_code", "거래처코드", "매장코드")
-private val STORE_NAME_HEADERS = setOf("storename", "store_name", "거래처명", "매장명")
+private val STORE_NAME_HEADERS = setOf("storename", "store_name", "거래처", "거래처명", "매장명")
 private val BRAND_NAME_HEADERS = setOf("brandname", "brand_name", "브랜드명", "브랜드")
 private val PRODUCT_CODE_HEADERS = setOf("productcode", "product_code", "품목코드", "상품코드")
 private val PRODUCT_NAME_HEADERS = setOf("productname", "product_name", "품목명", "상품명", "품명")
@@ -258,4 +259,3 @@ private fun String?.toDateOrNull(): LocalDate? {
 		DateUtil.getJavaDate(value.toDouble()).toInstant().atZone(ZoneId.systemDefault()).toLocalDate()
 	}.getOrNull()
 }
-

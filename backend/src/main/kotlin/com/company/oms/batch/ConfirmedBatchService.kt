@@ -18,14 +18,14 @@ class ConfirmedBatchService(
 	@Transactional(readOnly = true)
 	fun requireConfirmedBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 	): UploadBatchEntity {
 		val batch =
 			uploadBatchRepository.findById(batchId).orElseThrow {
 				OmsException(ErrorCode.BATCH_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 			}
-		if (batch.tenantId != tenantId || batch.clientId != clientId) {
+		if (batch.tenantId != tenantId || (clientId != null && batch.clientId != clientId)) {
 			throw OmsException(ErrorCode.BATCH_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 		}
 		if (batch.status != BatchStatus.CONFIRMED) {

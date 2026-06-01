@@ -1,10 +1,11 @@
 package com.company.oms.batch
 
 import com.company.oms.common.persistence.BatchStatus
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.JpaRepository
 import java.time.LocalDate
 
-interface UploadBatchRepository : JpaRepository<UploadBatchEntity, Long> {
+interface UploadBatchRepository : JpaRepository<UploadBatchEntity, Long>, JpaSpecificationExecutor<UploadBatchEntity> {
 	fun findAllByTenantIdAndClientId(
 		tenantId: Long,
 		clientId: Long,

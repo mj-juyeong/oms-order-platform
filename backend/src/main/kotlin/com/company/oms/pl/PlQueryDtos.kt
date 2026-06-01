@@ -29,7 +29,7 @@ data class PlLineResponse(
 	val rawRowJson: String?,
 )
 
-fun PlLineEntity.toResponse(): PlLineResponse =
+fun PlLineEntity.toResponse(fallbackStoreName: String? = null): PlLineResponse =
 	PlLineResponse(
 		id = requireNotNull(id),
 		tenantId = tenantId,
@@ -39,7 +39,7 @@ fun PlLineEntity.toResponse(): PlLineResponse =
 		plType = plType,
 		orderNo = orderNo,
 		storeCode = storeCode,
-		storeName = storeName,
+		storeName = storeName?.takeIf(String::isNotBlank) ?: fallbackStoreName,
 		brandName = brandName,
 		productCode = productCode,
 		productName = productName,

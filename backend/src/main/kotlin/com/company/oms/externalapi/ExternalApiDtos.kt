@@ -21,6 +21,7 @@ data class ExternalApiStatusResponse(
 	val requiredScope: String,
 	val tenantId: Long,
 	val clientId: Long,
+	val clientName: String?,
 	val batchId: Long,
 	val batchNo: String,
 	val deliveryDate: LocalDate?,

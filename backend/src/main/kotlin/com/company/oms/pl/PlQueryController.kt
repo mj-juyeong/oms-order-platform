@@ -1,5 +1,7 @@
 package com.company.oms.pl
 
+import com.company.oms.auth.AccessScopeService
+import com.company.oms.auth.UserRole
 import com.company.oms.common.persistence.PlType
 import com.company.oms.common.response.PageResponse
 import org.springframework.context.annotation.Profile
@@ -14,13 +16,14 @@ import java.time.LocalDate
 @RequestMapping("/api/v1/pl-lines")
 @Profile("local")
 class PlQueryController(
+	private val accessScopeService: AccessScopeService,
 	private val plQueryService: PlQueryService,
 ) {
 
 	@GetMapping
 	fun listPlLines(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) batchId: Long?,
 		@RequestParam(required = false) plType: PlType?,
 		@RequestParam(required = false)
@@ -30,12 +33,15 @@ class PlQueryController(
 		@RequestParam(required = false) storeCode: String?,
 		@RequestParam(required = false) productCode: String?,
 		@RequestParam(required = false) orderNo: String?,
+		@RequestParam(defaultValue = "true") confirmedOnly: Boolean,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<PlLineResponse> =
-		plQueryService.listPlLines(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<PlLineResponse> {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return plQueryService.listPlLines(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			plType = plType,
 			dueDate = dueDate,
@@ -43,7 +49,9 @@ class PlQueryController(
 			storeCode = storeCode,
 			productCode = productCode,
 			orderNo = orderNo,
+			confirmedOnly = confirmedOnly,
 			page = page,
 			size = size,
 		)
+	}
 }

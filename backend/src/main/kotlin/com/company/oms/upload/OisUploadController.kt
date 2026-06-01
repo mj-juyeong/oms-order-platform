@@ -1,5 +1,7 @@
 package com.company.oms.upload
 
+import com.company.oms.auth.AccessScopeService
+import com.company.oms.auth.UserRole
 import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.persistence.ValidationSeverity
 import com.company.oms.common.response.PageResponse
@@ -25,6 +27,7 @@ import java.time.LocalDate
 @RequestMapping("/api/v1/order-excel-batches")
 @Profile("local")
 class OisUploadController(
+	private val accessScopeService: AccessScopeService,
 	private val oisUploadService: OisUploadService,
 	private val batchValidationService: BatchValidationService,
 ) {
@@ -36,77 +39,102 @@ class OisUploadController(
 		@RequestParam(required = false) memo: String?,
 		@RequestParam(required = false) uploadedBy: Long?,
 		@RequestParam file: MultipartFile,
-	): OisUploadResponse =
-		oisUploadService.uploadOrderExcel(
-			tenantId = tenantId,
-			clientId = clientId,
+	): OisUploadResponse {
+		accessScopeService.requireTenantOperator()
+		val scope = accessScopeService.requireClientAccess(tenantId, clientId)
+		return oisUploadService.uploadOrderExcel(
+			tenantId = scope.tenantId,
+			clientId = requireNotNull(scope.clientId),
 			file = file,
 			memo = memo,
 			uploadedBy = uploadedBy,
 		)
+	}
 
 	@GetMapping
 	fun listBatches(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) status: BatchStatus?,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		deliveryDate: LocalDate?,
+		@RequestParam(required = false) keyword: String?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		deliveryDateFrom: LocalDate?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		deliveryDateTo: LocalDate?,
+		@RequestParam(defaultValue = "false") errorOnly: Boolean,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<OisBatchSummaryResponse> =
-		oisUploadService.listBatches(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<OisBatchSummaryResponse> {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return oisUploadService.listBatches(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			status = status,
-			deliveryDate = deliveryDate,
+			keyword = keyword,
+			deliveryDateFrom = deliveryDate ?: deliveryDateFrom,
+			deliveryDateTo = deliveryDate ?: deliveryDateTo,
+			errorOnly = errorOnly,
 			page = page,
 			size = size,
 		)
+	}
 
 	@GetMapping("/{batchId}")
 	fun getBatch(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
-	): OisBatchDetailResponse =
-		oisUploadService.getBatch(
-			tenantId = tenantId,
-			clientId = clientId,
+	): OisBatchDetailResponse {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return oisUploadService.getBatch(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 		)
+	}
 
 	@PostMapping("/{batchId}/validate")
 	fun validateBatch(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
 		@RequestParam(required = false) memo: String?,
 		@RequestParam(required = false) actorId: Long?,
-	): BatchValidationResponse =
-		batchValidationService.validateBatch(
-			tenantId = tenantId,
-			clientId = clientId,
+	): BatchValidationResponse {
+		accessScopeService.requireTenantOperator()
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return batchValidationService.validateBatch(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			memo = memo,
 			actorId = actorId,
 		)
+	}
 
 	@GetMapping("/{batchId}/validation-errors")
 	fun listValidationErrors(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
 		@RequestParam(required = false) severity: ValidationSeverity?,
 		@RequestParam(required = false) sheetName: String?,
 		@RequestParam(required = false) errorCode: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<ValidationErrorResponse> =
-		batchValidationService.listValidationErrors(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<ValidationErrorResponse> {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return batchValidationService.listValidationErrors(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			severity = severity,
 			sheetName = sheetName,
@@ -114,46 +142,56 @@ class OisUploadController(
 			page = page,
 			size = size,
 		)
+	}
 
 	@PostMapping("/{batchId}/confirm")
 	fun confirmBatch(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
 		@RequestParam(required = false) actorId: Long?,
-	): BatchStatusChangeResponse =
-		batchValidationService.confirmBatch(
-			tenantId = tenantId,
-			clientId = clientId,
+	): BatchStatusChangeResponse {
+		accessScopeService.requireTenantOperator()
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return batchValidationService.confirmBatch(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			actorId = actorId,
 		)
+	}
 
 	@PostMapping("/{batchId}/cancel")
 	fun cancelBatch(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
 		@RequestBody(required = false) request: BatchActionRequest?,
-	): BatchStatusChangeResponse =
-		batchValidationService.cancelBatch(
-			tenantId = tenantId,
-			clientId = clientId,
+	): BatchStatusChangeResponse {
+		accessScopeService.requireTenantAdmin()
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return batchValidationService.cancelBatch(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			request = request ?: BatchActionRequest(),
 		)
+	}
 
 	@PostMapping("/{batchId}/rollback")
 	fun rollbackBatch(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable batchId: Long,
 		@RequestBody(required = false) request: BatchActionRequest?,
-	): BatchStatusChangeResponse =
-		batchValidationService.rollbackBatch(
-			tenantId = tenantId,
-			clientId = clientId,
+	): BatchStatusChangeResponse {
+		accessScopeService.requireTenantAdmin()
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return batchValidationService.rollbackBatch(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			request = request ?: BatchActionRequest(),
 		)
+	}
 }

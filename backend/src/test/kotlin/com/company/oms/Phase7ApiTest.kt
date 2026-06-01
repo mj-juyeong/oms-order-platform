@@ -96,9 +96,20 @@ class Phase7ApiTest @Autowired constructor(
 			status { isOk() }
 			jsonPath("$.data.items[0].batchId") { value(batchId.toInt()) }
 			jsonPath("$.data.items[0].orderNo") { value("0000000001") }
+			jsonPath("$.data.items[0].brandName") { value("브랜드A") }
 			jsonPath("$.data.items[0].productCode") { value("001234") }
 			jsonPath("$.data.items[0].batchStatus") { value("CONFIRMED") }
 			jsonPath("$.data.items[0].confirmed") { value(true) }
+		}
+
+		mockMvc.get("/api/v1/orders") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("brandName", "브랜드A")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(1) }
+			jsonPath("$.data.items[0].brandName") { value("브랜드A") }
 		}
 
 		mockMvc.get("/api/v1/orders") {
@@ -134,6 +145,25 @@ class Phase7ApiTest @Autowired constructor(
 			jsonPath("$.data.items[0].orderBusinessSiteCode") { value("000777") }
 		}
 
+		mockMvc.get("/api/v1/scan-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(0) }
+		}
+
+		mockMvc.get("/api/v1/scan-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+			param("confirmedOnly", "false")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(1) }
+		}
+
 		mockMvc.get("/api/v1/pl-lines") {
 			param("tenantId", scope.tenantId.toString())
 			param("clientId", scope.clientId.toString())
@@ -145,6 +175,25 @@ class Phase7ApiTest @Autowired constructor(
 			jsonPath("$.data.items[0].qrCode") { value("PL-QR-0001") }
 		}
 
+		mockMvc.get("/api/v1/pl-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(0) }
+		}
+
+		mockMvc.get("/api/v1/pl-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+			param("confirmedOnly", "false")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(1) }
+		}
+
 		mockMvc.get("/api/v1/label-lines") {
 			param("tenantId", scope.tenantId.toString())
 			param("clientId", scope.clientId.toString())
@@ -154,7 +203,27 @@ class Phase7ApiTest @Autowired constructor(
 		}.andExpect {
 			status { isOk() }
 			jsonPath("$.data.items[0].labelType") { value("EA") }
+			jsonPath("$.data.items[0].brandName") { value("브랜드A") }
 			jsonPath("$.data.items[0].matchingCode") { value("MATCH-0001") }
+		}
+
+		mockMvc.get("/api/v1/label-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(0) }
+		}
+
+		mockMvc.get("/api/v1/label-lines") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("batchId", uploadedOnlyBatchId.toString())
+			param("confirmedOnly", "false")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(2) }
 		}
 	}
 
@@ -301,8 +370,9 @@ class Phase7ApiTest @Autowired constructor(
 			assertEquals("_metadata", workbook.getSheetName(0))
 			assertEquals("Label_EA", workbook.getSheetName(1))
 			assertEquals(2, workbook.numberOfSheets)
-			assertEquals("batch_id", workbook.getSheet("Label_EA").getRow(0).getCell(0).stringCellValue)
-			assertEquals("EA", workbook.getSheet("Label_EA").getRow(1).getCell(1).stringCellValue)
+			assertEquals("주문번호", workbook.getSheet("Label_EA").getRow(0).getCell(0).stringCellValue)
+			assertEquals("브랜드", workbook.getSheet("Label_EA").getRow(0).getCell(3).stringCellValue)
+			assertEquals("브랜드A", workbook.getSheet("Label_EA").getRow(1).getCell(3).stringCellValue)
 		}
 
 		val log = downloadLogRepository.findAllByBatchId(confirmedBatchId).single()
@@ -502,6 +572,7 @@ class Phase7ApiTest @Autowired constructor(
 			"order_no",
 			"store_code",
 			"store_name",
+			"brand_name",
 			"product_code",
 			"product_name",
 			"due_date",
@@ -513,6 +584,7 @@ class Phase7ApiTest @Autowired constructor(
 			"0000000001",
 			storeCode,
 			"매장",
+			"브랜드A",
 			productCode,
 			"상품",
 			"2026-05-29",
@@ -528,13 +600,14 @@ class Phase7ApiTest @Autowired constructor(
 			"order_no",
 			"store_code",
 			"store_name",
+			"brand_name",
 			"product_code",
 			"product_name",
 			"order_qty",
 			"matching_code",
 			"qr_code",
 		).writeTo(sheet.createRow(0))
-		listOf("0000000001", storeCode, "매장", productCode, "상품", "3", "MATCH-0001", "LABEL-QR-0001")
+		listOf("0000000001", storeCode, "매장", "브랜드A", productCode, "상품", "3", "MATCH-0001", "LABEL-QR-0001")
 			.writeTo(sheet.createRow(1))
 
 		val boxSheet = workbook.createSheet("Label_Box")
@@ -542,6 +615,7 @@ class Phase7ApiTest @Autowired constructor(
 			"order_no",
 			"store_code",
 			"store_name",
+			"brand_name",
 			"product_code",
 			"product_name",
 			"order_qty",
@@ -550,7 +624,7 @@ class Phase7ApiTest @Autowired constructor(
 			"matching_code",
 			"qr_code",
 		).writeTo(boxSheet.createRow(0))
-		listOf("0000000001", storeCode, "매장", productCode, "상품", "1", "1", "1", "MATCH-BOX-0001", "LABEL-BOX-QR-0001")
+		listOf("0000000001", storeCode, "매장", "브랜드A", productCode, "상품", "1", "1", "1", "MATCH-BOX-0001", "LABEL-BOX-QR-0001")
 			.writeTo(boxSheet.createRow(1))
 	}
 

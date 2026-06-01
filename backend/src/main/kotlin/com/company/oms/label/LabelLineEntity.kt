@@ -40,6 +40,9 @@ class LabelLineEntity(
 	@Column(name = "store_name", length = 255)
 	var storeName: String? = null,
 
+	@Column(name = "brand_name", length = 255)
+	var brandName: String? = null,
+
 	@Column(name = "product_code", length = 64)
 	var productCode: String? = null,
 
@@ -74,4 +77,3 @@ class LabelLineEntity(
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	var id: Long? = null
 }
-

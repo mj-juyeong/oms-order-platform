@@ -20,6 +20,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import tools.jackson.databind.ObjectMapper
 import java.io.ByteArrayOutputStream
 import java.time.LocalDateTime
 
@@ -32,15 +33,17 @@ class LabelDownloadService(
 	private val downloadLogRepository: DownloadLogRepository,
 	private val batchAuditLogRepository: BatchAuditLogRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val objectMapper: ObjectMapper,
 ) {
 
 	@Transactional
 	fun downloadLabels(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		labelType: LabelType?,
 		storeCode: String?,
+		brandName: String?,
 		productCode: String?,
 		orderNo: String?,
 		matchingCode: String?,
@@ -49,15 +52,17 @@ class LabelDownloadService(
 		vehicleName: String?,
 		downloadedBy: Long?,
 	): LabelDownloadFile {
-		val currentUser = requireDownloadPermission(tenantId, clientId)
 		val batch = confirmedBatchService.requireConfirmedBatch(tenantId, clientId, batchId)
+		val resolvedClientId = batch.clientId
+		val currentUser = requireDownloadPermission(tenantId, resolvedClientId)
 		val rows =
 			findLabelRows(
 				tenantId = tenantId,
-				clientId = clientId,
+				clientId = resolvedClientId,
 				batchId = batchId,
 				labelType = labelType,
 				storeCode = storeCode,
+				brandName = brandName,
 				productCode = productCode,
 				orderNo = orderNo,
 				matchingCode = matchingCode,
@@ -73,12 +78,12 @@ class LabelDownloadService(
 		val fileName = labelFileName(batchId, labelType)
 		val content = createWorkbook(batch, rows, labelType)
 		val resolvedDownloadedBy = currentUser.userId ?: downloadedBy
-		val filterJson = labelFilterJson(labelType, storeCode, productCode, orderNo, matchingCode, qrCode, deliveryRound, vehicleName)
+		val filterJson = labelFilterJson(labelType, storeCode, brandName, productCode, orderNo, matchingCode, qrCode, deliveryRound, vehicleName)
 
 		downloadLogRepository.save(
 			DownloadLogEntity(
 				tenantId = tenantId,
-				clientId = clientId,
+				clientId = resolvedClientId,
 				batchId = batchId,
 				downloadType = "LABEL",
 				fileName = fileName,
@@ -97,14 +102,14 @@ class LabelDownloadService(
 	@Transactional(readOnly = true)
 	fun getDownloadLog(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		downloadLogId: Long,
 	): DownloadLogResponse {
 		val log =
 			downloadLogRepository.findById(downloadLogId).orElseThrow {
 				OmsException(ErrorCode.DOWNLOAD_LOG_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 			}
-		if (log.tenantId != tenantId || log.clientId != clientId) {
+		if (log.tenantId != tenantId || (clientId != null && log.clientId != clientId)) {
 			throw OmsException(ErrorCode.DOWNLOAD_LOG_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 		}
 		return log.toResponse()
@@ -116,6 +121,7 @@ class LabelDownloadService(
 		batchId: Long,
 		labelType: LabelType?,
 		storeCode: String?,
+		brandName: String?,
 		productCode: String?,
 		orderNo: String?,
 		matchingCode: String?,
@@ -134,6 +140,7 @@ class LabelDownloadService(
 			batchId = batchId,
 			labelType = labelType,
 			storeCode = storeCode,
+			brandName = brandName?.trim()?.takeIf(String::isNotBlank),
 			productCode = productCode,
 			orderNo = orderNo,
 			matchingCode = matchingCode,
@@ -163,10 +170,11 @@ class LabelDownloadService(
 
 	private fun requireDownloadPermission(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 	): CurrentUser {
 		val currentUser =
 			authGuard.requireAnyRole(
+				UserRole.VIEWER,
 				UserRole.OPERATOR,
 				UserRole.ADMIN,
 				UserRole.SYSTEM_ADMIN,
@@ -174,7 +182,7 @@ class LabelDownloadService(
 		if (currentUser.tenantId != null && currentUser.tenantId != tenantId) {
 			throw OmsException(ErrorCode.FORBIDDEN, status = HttpStatus.FORBIDDEN)
 		}
-		if (currentUser.clientId != null && currentUser.clientId != clientId) {
+		if (currentUser.clientId != null && clientId != null && currentUser.clientId != clientId) {
 			throw OmsException(ErrorCode.FORBIDDEN, status = HttpStatus.FORBIDDEN)
 		}
 		return currentUser
@@ -191,11 +199,12 @@ class LabelDownloadService(
 				.toSortedMap(compareBy { it.name })
 				.forEach { (labelType, typeRows) ->
 					val sheet = workbook.createSheet(sheetName(labelType))
-					LABEL_HEADERS.writeTo(sheet.createRow(0))
+					val headers = labelHeaders(labelType)
+					headers.writeTo(sheet.createRow(0))
 					typeRows.forEachIndexed { index, row ->
-						labelRowValues(row).writeTo(sheet.createRow(index + 1))
+						labelRowValues(row, headers).writeTo(sheet.createRow(index + 1))
 					}
-					for (columnIndex in LABEL_HEADERS.indices) {
+					for (columnIndex in headers.indices) {
 						sheet.autoSizeColumn(columnIndex)
 					}
 				}
@@ -203,7 +212,7 @@ class LabelDownloadService(
 			if (rows.isEmpty()) {
 				val labelType = requestedLabelType ?: LabelType.EA
 				val sheet = workbook.createSheet(sheetName(labelType))
-				LABEL_HEADERS.writeTo(sheet.createRow(0))
+				labelHeaders(labelType).writeTo(sheet.createRow(0))
 			}
 
 			return ByteArrayOutputStream().use { output ->
@@ -232,24 +241,51 @@ class LabelDownloadService(
 		sheet.autoSizeColumn(1)
 	}
 
-	private fun labelRowValues(row: LabelLineEntity): List<String?> =
-		listOf(
-			row.batchId.toString(),
-			row.labelType.name,
-			row.orderNo,
-			row.storeCode,
-			row.storeName,
-			row.productCode,
-			row.productName,
-			row.orderQty?.toPlainString(),
-			row.sequenceNo,
-			row.matchingCode,
-			row.qrCode,
-			row.boxSequence,
-			row.totalBoxQty?.toPlainString(),
-			row.sheetName,
-			row.rowNo.toString(),
-		)
+	private fun labelRowValues(
+		row: LabelLineEntity,
+		headers: List<String>,
+	): List<String?> {
+		val rawRow = rawRow(row)
+		return headers.map { header -> labelCellValue(row, rawRow, header) }
+	}
+
+	private fun labelCellValue(
+		row: LabelLineEntity,
+		rawRow: Map<String, String>,
+		header: String,
+	): String? =
+		when (header) {
+			"주문번호" -> row.orderNo ?: rawValue(rawRow, header)
+			"거래처코드" -> row.storeCode ?: rawValue(rawRow, header)
+			"거래처" -> row.storeName ?: rawValue(rawRow, header)
+			"브랜드" -> row.brandName ?: rawValue(rawRow, header)
+			"품목코드" -> row.productCode ?: rawValue(rawRow, header)
+			"품명" -> row.productName ?: rawValue(rawRow, header)
+			"주문량" -> row.orderQty?.toPlainString() ?: rawValue(rawRow, header)
+			"순번" -> row.sequenceNo ?: rawValue(rawRow, header)
+			"QR코드" -> row.qrCode ?: rawValue(rawRow, header)
+			"매칭코드" -> row.matchingCode ?: rawValue(rawRow, header)
+			"박스순번" -> row.boxSequence ?: rawValue(rawRow, header)
+			"총박스수량" -> row.totalBoxQty?.toPlainString() ?: rawValue(rawRow, header)
+			else -> rawValue(rawRow, header)
+		}
+
+	private fun rawRow(row: LabelLineEntity): Map<String, String> =
+		row.rawRowJson
+			?.takeIf(String::isNotBlank)
+			?.let { json ->
+				runCatching {
+					objectMapper.readValue(json, Map::class.java)
+						.entries
+						.associate { entry -> entry.key.toString() to (entry.value?.toString() ?: "") }
+				}.getOrDefault(emptyMap())
+			}
+			.orEmpty()
+
+	private fun rawValue(
+		rawRow: Map<String, String>,
+		header: String,
+	): String? = rawRow[normalizeHeader(header)]?.takeIf(String::isNotBlank)
 
 	private fun List<String?>.writeTo(row: Row) {
 		forEachIndexed { index, value -> row.createCell(index).setCellValue(value ?: "") }
@@ -295,6 +331,7 @@ class LabelDownloadService(
 	private fun labelFilterJson(
 		labelType: LabelType?,
 		storeCode: String?,
+		brandName: String?,
 		productCode: String?,
 		orderNo: String?,
 		matchingCode: String?,
@@ -306,6 +343,7 @@ class LabelDownloadService(
 			listOf(
 				"labelType" to labelType?.name,
 				"storeCode" to storeCode,
+				"brandName" to brandName,
 				"productCode" to productCode,
 				"orderNo" to orderNo,
 				"matchingCode" to matchingCode,
@@ -328,24 +366,79 @@ class LabelDownloadService(
 	private fun jsonEscape(value: String): String =
 		value.replace("\\", "\\\\").replace("\"", "\\\"")
 
+	private fun normalizeHeader(value: String): String =
+		value.trim()
+			.removePrefix("\uFEFF")
+			.lowercase()
+			.replace(" ", "")
+			.replace("-", "_")
+
 	private companion object {
-		val LABEL_HEADERS =
+		fun labelHeaders(labelType: LabelType): List<String> =
+			when (labelType) {
+				LabelType.EA -> LABEL_EA_HEADERS
+				LabelType.BOX -> LABEL_BOX_HEADERS
+			}
+
+		val LABEL_EA_HEADERS =
 			listOf(
-				"batch_id",
-				"label_type",
-				"order_no",
-				"store_code",
-				"store_name",
-				"product_code",
-				"product_name",
-				"order_qty",
-				"sequence_no",
-				"matching_code",
-				"qr_code",
-				"box_sequence",
-				"total_box_qty",
-				"sheet_name",
-				"row_no",
+				"주문번호",
+				"거래처코드",
+				"거래처",
+				"브랜드",
+				"품목코드",
+				"품명",
+				"규격",
+				"단위",
+				"과세대상",
+				"분류(대)",
+				"보관온도",
+				"원산지",
+				"품목비고",
+				"납기요청일",
+				"주문량",
+				"물류대행",
+				"차량명",
+				"CBM",
+				"간편주소",
+				"박스입수량",
+				"박스판매가능",
+				"순번",
+				"매칭코드",
+			)
+
+		val LABEL_BOX_HEADERS =
+			listOf(
+				"주문번호",
+				"거래처코드",
+				"거래처",
+				"브랜드",
+				"품목코드",
+				"품명",
+				"규격",
+				"단위",
+				"과세대상",
+				"분류(대)",
+				"보관온도",
+				"원산지",
+				"품목비고",
+				"납기요청일",
+				"주문량",
+				"물류대행",
+				"차량명",
+				"CBM",
+				"간편주소",
+				"박스입수량",
+				"박스판매가능",
+				"동일상품수량",
+				"박스순번",
+				"총박스수량",
+				"박스번호",
+				"피킹순서",
+				"비고",
+				"순번",
+				"QR코드",
+				"매칭코드",
 			)
 	}
 }

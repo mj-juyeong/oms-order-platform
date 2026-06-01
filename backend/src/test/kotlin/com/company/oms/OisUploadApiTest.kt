@@ -1,5 +1,8 @@
 package com.company.oms
 
+import com.company.oms.batch.UploadBatchEntity
+import com.company.oms.batch.UploadBatchRepository
+import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.scope.ClientEntity
 import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
@@ -32,6 +35,7 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import java.io.ByteArrayOutputStream
 import java.nio.file.Files
+import java.time.LocalDate
 import java.util.UUID
 
 @SpringBootTest
@@ -47,6 +51,7 @@ class OisUploadApiTest @Autowired constructor(
 	private val scanLineRepository: ScanLineRepository,
 	private val plLineRepository: PlLineRepository,
 	private val orderLineRepository: OrderLineRepository,
+	private val uploadBatchRepository: UploadBatchRepository,
 ) {
 
 	@BeforeEach
@@ -56,6 +61,67 @@ class OisUploadApiTest @Autowired constructor(
 			.locations("classpath:db/migration")
 			.load()
 			.migrate()
+	}
+
+	@Test
+	fun batchListAppliesSearchFiltersBeforeTotalCount() {
+		val (tenantId, clientId) = createScope()
+		val otherClient = clientRepository.saveAndFlush(
+			ClientEntity(
+				tenantId = tenantId,
+				code = "client-${UUID.randomUUID()}",
+				name = "Other Client",
+			),
+		)
+
+		uploadBatchRepository.saveAllAndFlush(
+			listOf(
+				batch(
+					tenantId = tenantId,
+					clientId = clientId,
+					batchNo = "OE-KEEP-001",
+					status = BatchStatus.VALIDATION_FAILED,
+					deliveryDate = LocalDate.parse("2026-06-01"),
+					errorCount = 2,
+					memo = "웰스토리 검색 대상",
+				),
+				batch(
+					tenantId = tenantId,
+					clientId = clientId,
+					batchNo = "OE-SKIP-001",
+					status = BatchStatus.CONFIRMED,
+					deliveryDate = LocalDate.parse("2026-06-02"),
+					errorCount = 0,
+					memo = "다른 메모",
+				),
+				batch(
+					tenantId = tenantId,
+					clientId = otherClient.id!!,
+					batchNo = "OE-KEEP-OTHER-CLIENT",
+					status = BatchStatus.VALIDATION_FAILED,
+					deliveryDate = LocalDate.parse("2026-06-01"),
+					errorCount = 3,
+					memo = "웰스토리 검색 대상",
+				),
+			),
+		)
+
+		mockMvc.get("/api/v1/order-excel-batches") {
+			param("tenantId", tenantId.toString())
+			param("clientId", clientId.toString())
+			param("keyword", "웰스토리")
+			param("deliveryDateFrom", "2026-06-01")
+			param("deliveryDateTo", "2026-06-01")
+			param("errorOnly", "true")
+			param("page", "0")
+			param("size", "50")
+			header("X-User-Id", "1")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(1) }
+			jsonPath("$.data.items", hasSize<Any>(1))
+			jsonPath("$.data.items[0].batchNo") { value("OE-KEEP-001") }
+		}
 	}
 
 	@Test
@@ -146,6 +212,25 @@ class OisUploadApiTest @Autowired constructor(
 		)
 		return tenant.id!! to client.id!!
 	}
+
+	private fun batch(
+		tenantId: Long,
+		clientId: Long,
+		batchNo: String,
+		status: BatchStatus,
+		deliveryDate: LocalDate,
+		errorCount: Int,
+		memo: String,
+	): UploadBatchEntity =
+		UploadBatchEntity(
+			tenantId = tenantId,
+			clientId = clientId,
+			batchNo = batchNo,
+			status = status,
+			deliveryDate = deliveryDate,
+			errorCount = errorCount,
+			memo = memo,
+		)
 
 	private fun oisWorkbookBytes(): ByteArray {
 		XSSFWorkbook().use { workbook ->
@@ -293,4 +378,3 @@ class OisUploadApiTest @Autowired constructor(
 }
 
 class OisUploadMySqlContainer(imageName: String) : MySQLContainer<OisUploadMySqlContainer>(imageName)
-

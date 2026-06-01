@@ -1,5 +1,7 @@
 package com.company.oms.scan
 
+import com.company.oms.batch.UploadBatchRepository
+import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.response.PageResponse
 import com.company.oms.common.response.toPageResponse
 import org.springframework.context.annotation.Profile
@@ -11,37 +13,31 @@ import java.time.LocalDate
 @Profile("local")
 class ScanQueryService(
 	private val scanLineRepository: ScanLineRepository,
+	private val uploadBatchRepository: UploadBatchRepository,
 ) {
 
 	@Transactional(readOnly = true)
 	fun listScanLines(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long?,
 		deliveryDate: LocalDate?,
 		scanCenter: String?,
 		storeCode: String?,
 		productCode: String?,
 		barcode: String?,
+		confirmedOnly: Boolean,
 		page: Int,
 		size: Int,
 	): PageResponse<ScanLineResponse> {
-		val rows =
-			when {
-				batchId != null -> scanLineRepository.findAllByTenantIdAndClientIdAndBatchId(tenantId, clientId, batchId)
-				deliveryDate != null && scanCenter != null ->
-					scanLineRepository.findAllByTenantIdAndClientIdAndDeliveryDateAndScanCenter(
-						tenantId,
-						clientId,
-						deliveryDate,
-						scanCenter,
-					)
-				barcode != null -> scanLineRepository.findAllByTenantIdAndClientIdAndBarcode(tenantId, clientId, barcode)
-				else -> scanLineRepository.findAll().filter { it.tenantId == tenantId && it.clientId == clientId }
-			}
+		val statusByBatchId = batchStatusById(tenantId, clientId)
+		val rows = scanLineRepository.findAll()
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
+			.filter { batchId == null || it.batchId == batchId }
 
 		return rows
 			.asSequence()
+			.filter { !confirmedOnly || statusByBatchId[it.batchId] == BatchStatus.CONFIRMED }
 			.filter { deliveryDate == null || it.deliveryDate == deliveryDate }
 			.filter { scanCenter == null || it.scanCenter == scanCenter }
 			.filter { storeCode == null || it.orderBusinessSiteCode == storeCode }
@@ -52,4 +48,10 @@ class ScanQueryService(
 			.toList()
 			.toPageResponse(page, size)
 	}
+
+	private fun batchStatusById(tenantId: Long, clientId: Long?): Map<Long, BatchStatus> =
+		uploadBatchRepository.findAll()
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
+			.mapNotNull { batch -> batch.id?.let { it to batch.status } }
+			.toMap()
 }

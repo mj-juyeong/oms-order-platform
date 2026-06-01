@@ -22,7 +22,7 @@ class AuditQueryService(
 	@Transactional(readOnly = true)
 	fun listBatchAuditLogs(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long?,
 		action: String?,
 		from: LocalDateTime?,
@@ -33,7 +33,7 @@ class AuditQueryService(
 		authGuard.requireAdmin()
 		return batchAuditLogRepository.findAll()
 			.asSequence()
-			.filter { it.tenantId == tenantId && it.clientId == clientId }
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.filter { batchId == null || it.batchId == batchId }
 			.filter { action == null || it.action == action }
 			.filter { from == null || (it.createdAt != null && !it.createdAt!!.isBefore(from)) }
@@ -47,7 +47,7 @@ class AuditQueryService(
 	@Transactional(readOnly = true)
 	fun listApiCallLogs(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		apiKeyId: Long?,
 		path: String?,
 		responseStatus: Int?,
@@ -59,7 +59,7 @@ class AuditQueryService(
 		authGuard.requireAdmin()
 		return apiCallLogRepository.findAll()
 			.asSequence()
-			.filter { it.tenantId == tenantId && it.clientId == clientId }
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.filter { apiKeyId == null || it.apiKeyId == apiKeyId }
 			.filter { path == null || it.path == path }
 			.filter { responseStatus == null || it.responseStatus == responseStatus }
@@ -74,7 +74,7 @@ class AuditQueryService(
 	@Transactional(readOnly = true)
 	fun listDownloadLogs(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long?,
 		downloadType: String?,
 		downloadedBy: Long?,
@@ -86,7 +86,7 @@ class AuditQueryService(
 		authGuard.requireAdmin()
 		return downloadLogRepository.findAll()
 			.asSequence()
-			.filter { it.tenantId == tenantId && it.clientId == clientId }
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.filter { batchId == null || it.batchId == batchId }
 			.filter { downloadType == null || it.downloadType == downloadType }
 			.filter { downloadedBy == null || it.downloadedBy == downloadedBy }

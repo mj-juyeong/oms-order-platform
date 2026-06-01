@@ -1,5 +1,7 @@
 package com.company.oms.download
 
+import com.company.oms.auth.AccessScopeService
+import com.company.oms.auth.UserRole
 import com.company.oms.common.persistence.LabelType
 import org.springframework.context.annotation.Profile
 import org.springframework.http.ContentDisposition
@@ -16,16 +18,18 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api/v1/downloads")
 @Profile("local")
 class DownloadController(
+	private val accessScopeService: AccessScopeService,
 	private val labelDownloadService: LabelDownloadService,
 ) {
 
 	@GetMapping("/labels")
 	fun downloadLabels(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam batchId: Long,
 		@RequestParam(required = false) labelType: LabelType?,
 		@RequestParam(required = false) storeCode: String?,
+		@RequestParam(required = false) brandName: String?,
 		@RequestParam(required = false) productCode: String?,
 		@RequestParam(required = false) orderNo: String?,
 		@RequestParam(required = false) matchingCode: String?,
@@ -34,13 +38,16 @@ class DownloadController(
 		@RequestParam(required = false) vehicleName: String?,
 		@RequestParam(required = false) downloadedBy: Long?,
 	): ResponseEntity<ByteArray> {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
 		val file =
 			labelDownloadService.downloadLabels(
-				tenantId = tenantId,
-				clientId = clientId,
+				tenantId = scope.tenantId,
+				clientId = scope.clientId,
 				batchId = batchId,
 				labelType = labelType,
 				storeCode = storeCode,
+				brandName = brandName,
 				productCode = productCode,
 				orderNo = orderNo,
 				matchingCode = matchingCode,
@@ -60,12 +67,15 @@ class DownloadController(
 	@GetMapping("/{downloadLogId}")
 	fun getDownloadLog(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable downloadLogId: Long,
-	): DownloadLogResponse =
-		labelDownloadService.getDownloadLog(
-			tenantId = tenantId,
-			clientId = clientId,
+	): DownloadLogResponse {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return labelDownloadService.getDownloadLog(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			downloadLogId = downloadLogId,
 		)
+	}
 }

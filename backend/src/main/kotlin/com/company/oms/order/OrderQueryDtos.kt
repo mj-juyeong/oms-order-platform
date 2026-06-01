@@ -26,7 +26,10 @@ data class OrderLineResponse(
 	val confirmed: Boolean,
 )
 
-fun OrderLineEntity.toResponse(batchStatus: BatchStatus?): OrderLineResponse =
+fun OrderLineEntity.toResponse(
+	batchStatus: BatchStatus?,
+	fallbackStoreName: String? = null,
+): OrderLineResponse =
 	OrderLineResponse(
 		id = requireNotNull(id),
 		tenantId = tenantId,
@@ -35,7 +38,7 @@ fun OrderLineEntity.toResponse(batchStatus: BatchStatus?): OrderLineResponse =
 		sourcePlLineId = sourcePlLineId,
 		orderNo = orderNo,
 		storeCode = storeCode,
-		storeName = storeName,
+		storeName = storeName?.takeIf(String::isNotBlank) ?: fallbackStoreName,
 		brandName = brandName,
 		productCode = productCode,
 		productName = productName,

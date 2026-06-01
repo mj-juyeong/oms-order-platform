@@ -34,6 +34,7 @@ interface LabelLineRepository : JpaRepository<LabelLineEntity, Long> {
 		  and l.batchId = :batchId
 		  and (:labelType is null or l.labelType = :labelType)
 		  and (:storeCode is null or l.storeCode = :storeCode)
+		  and (:brandName is null or lower(l.brandName) like lower(concat('%', :brandName, '%')))
 		  and (:productCode is null or l.productCode = :productCode)
 		  and (:orderNo is null or l.orderNo = :orderNo)
 		  and (:matchingCode is null or l.matchingCode = :matchingCode)
@@ -47,6 +48,7 @@ interface LabelLineRepository : JpaRepository<LabelLineEntity, Long> {
 		@Param("batchId") batchId: Long,
 		@Param("labelType") labelType: LabelType?,
 		@Param("storeCode") storeCode: String?,
+		@Param("brandName") brandName: String?,
 		@Param("productCode") productCode: String?,
 		@Param("orderNo") orderNo: String?,
 		@Param("matchingCode") matchingCode: String?,

@@ -26,6 +26,10 @@ import com.company.oms.scan.ScanLineRepository
 import com.company.oms.upload.storage.FileStorage
 import com.company.oms.upload.storage.StoreFileCommand
 import org.springframework.context.annotation.Profile
+import org.springframework.data.domain.Page
+import org.springframework.data.domain.PageRequest
+import org.springframework.data.domain.Sort
+import org.springframework.data.jpa.domain.Specification
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
@@ -146,30 +150,41 @@ class OisUploadService(
 	@Transactional(readOnly = true)
 	fun listBatches(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		status: BatchStatus?,
-		deliveryDate: LocalDate?,
+		keyword: String?,
+		deliveryDateFrom: LocalDate?,
+		deliveryDateTo: LocalDate?,
+		errorOnly: Boolean,
 		page: Int,
 		size: Int,
 	): PageResponse<OisBatchSummaryResponse> {
 		validateScope(tenantId, clientId)
-		return uploadBatchRepository.findAllByTenantIdAndClientId(tenantId, clientId)
-			.filter { status == null || it.status == status }
-			.filter { deliveryDate == null || it.deliveryDate == deliveryDate }
-			.sortedByDescending { it.uploadedAt }
-			.map { it.toSummaryResponse() }
-			.toPage(page, size)
+		val safePage = page.coerceAtLeast(0)
+		val safeSize = size.coerceIn(1, 200)
+		return uploadBatchRepository.findAll(
+			batchSearchSpec(
+				tenantId = tenantId,
+				clientId = clientId,
+				status = status,
+				keyword = keyword?.trim()?.takeIf { it.isNotBlank() },
+				deliveryDateFrom = deliveryDateFrom,
+				deliveryDateTo = deliveryDateTo,
+				errorOnly = errorOnly,
+			),
+			PageRequest.of(safePage, safeSize, Sort.by(Sort.Direction.DESC, "uploadedAt")),
+		).toResponsePage { it.toSummaryResponse() }
 	}
 
 	@Transactional(readOnly = true)
 	fun getBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 	): OisBatchDetailResponse {
 		validateScope(tenantId, clientId)
 		val batch = uploadBatchRepository.findById(batchId)
-			.filter { it.tenantId == tenantId && it.clientId == clientId }
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.orElseThrow {
 				OmsException(
 					errorCode = ErrorCode.BATCH_NOT_FOUND,
@@ -183,13 +198,16 @@ class OisUploadService(
 		)
 	}
 
-	private fun validateScope(tenantId: Long, clientId: Long) {
+	private fun validateScope(tenantId: Long, clientId: Long?) {
 		if (!tenantRepository.existsById(tenantId)) {
 			throw OmsException(
 				errorCode = ErrorCode.NOT_FOUND,
 				message = "물류사를 찾을 수 없습니다.",
 				status = HttpStatus.NOT_FOUND,
 			)
+		}
+		if (clientId == null) {
+			return
 		}
 
 		val client = clientRepository.findById(clientId)
@@ -298,6 +316,7 @@ class OisUploadService(
 			orderNo = orderNo,
 			storeCode = storeCode,
 			storeName = storeName,
+			brandName = brandName,
 			productCode = productCode,
 			productName = productName,
 			orderQty = orderQty,
@@ -387,18 +406,59 @@ private fun ExcelSheetResultEntity.toResponse(): OisSheetResultResponse =
 		message = message,
 	)
 
-private fun <T> List<T>.toPage(page: Int, size: Int): PageResponse<T> {
-	val safePage = page.coerceAtLeast(0)
-	val safeSize = size.coerceIn(1, 200)
-	val from = (safePage * safeSize).coerceAtMost(this.size)
-	val to = (from + safeSize).coerceAtMost(this.size)
+private fun batchSearchSpec(
+	tenantId: Long,
+	clientId: Long?,
+	status: BatchStatus?,
+	keyword: String?,
+	deliveryDateFrom: LocalDate?,
+	deliveryDateTo: LocalDate?,
+	errorOnly: Boolean,
+): Specification<UploadBatchEntity> =
+	Specification { root, _, criteriaBuilder ->
+		val predicates = mutableListOf(
+			criteriaBuilder.equal(root.get<Long>("tenantId"), tenantId),
+		)
 
-	return PageResponse(
-		items = subList(from, to),
-		page = safePage,
-		size = safeSize,
-		totalElements = this.size.toLong(),
-		totalPages = if (isEmpty()) 0 else ceil(this.size.toDouble() / safeSize).toInt(),
+		if (clientId != null) {
+			predicates += criteriaBuilder.equal(root.get<Long>("clientId"), clientId)
+		}
+		if (status != null) {
+			predicates += criteriaBuilder.equal(root.get<BatchStatus>("status"), status)
+		}
+		if (deliveryDateFrom != null) {
+			predicates += criteriaBuilder.greaterThanOrEqualTo(root.get("deliveryDate"), deliveryDateFrom)
+		}
+		if (deliveryDateTo != null) {
+			predicates += criteriaBuilder.lessThanOrEqualTo(root.get("deliveryDate"), deliveryDateTo)
+		}
+		if (errorOnly) {
+			predicates += criteriaBuilder.or(
+				criteriaBuilder.greaterThan(root.get("errorCount"), 0),
+				criteriaBuilder.equal(root.get<BatchStatus>("status"), BatchStatus.VALIDATION_FAILED),
+			)
+		}
+		if (keyword != null) {
+			val loweredKeyword = keyword.lowercase()
+			val likeKeyword = "%$loweredKeyword%"
+			val keywordPredicates = mutableListOf(
+				criteriaBuilder.like(criteriaBuilder.lower(root.get("batchNo")), likeKeyword),
+				criteriaBuilder.like(criteriaBuilder.lower(criteriaBuilder.coalesce(root.get("memo"), "")), likeKeyword),
+			)
+			keyword.toLongOrNull()?.let { parsedId ->
+				keywordPredicates += criteriaBuilder.equal(root.get<Long>("id"), parsedId)
+			}
+			predicates += criteriaBuilder.or(*keywordPredicates.toTypedArray())
+		}
+
+		criteriaBuilder.and(*predicates.toTypedArray())
+	}
+
+private fun <TEntity : Any, TResponse> Page<TEntity>.toResponsePage(mapper: (TEntity) -> TResponse): PageResponse<TResponse> =
+	PageResponse(
+		items = content.map(mapper),
+		page = number,
+		size = size,
+		totalElements = totalElements,
+		totalPages = totalPages,
 	)
-}
-

@@ -1,5 +1,7 @@
 package com.company.oms.order
 
+import com.company.oms.auth.AccessScopeService
+import com.company.oms.auth.UserRole
 import com.company.oms.common.response.PageResponse
 import org.springframework.context.annotation.Profile
 import org.springframework.format.annotation.DateTimeFormat
@@ -14,25 +16,27 @@ import java.time.LocalDate
 @RequestMapping("/api/v1/orders")
 @Profile("local")
 class OrderQueryController(
+	private val accessScopeService: AccessScopeService,
 	private val orderQueryService: OrderQueryService,
 ) {
 
 	@GetMapping
 	fun listOrders(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) batchId: Long?,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		deliveryDate: LocalDate?,
 		@RequestParam(required = false) storeCode: String?,
 		@RequestParam(required = false) storeName: String?,
+		@RequestParam(required = false) brandName: String?,
 		@RequestParam(required = false) productCode: String?,
 		@RequestParam(required = false) productName: String?,
 		@RequestParam(required = false) orderNo: String?,
 		@RequestParam(required = false) unit: String?,
 		@RequestParam(required = false) vehicleName: String?,
-		@RequestParam(required = false) confirmedOnly: Boolean?,
+		@RequestParam(defaultValue = "true") confirmedOnly: Boolean,
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		dueDateFrom: LocalDate?,
@@ -41,35 +45,42 @@ class OrderQueryController(
 		dueDateTo: LocalDate?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<OrderLineResponse> =
-		orderQueryService.listOrders(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<OrderLineResponse> {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return orderQueryService.listOrders(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			batchId = batchId,
 			deliveryDate = deliveryDate,
 			storeCode = storeCode,
 			storeName = storeName,
+			brandName = brandName,
 			productCode = productCode,
 			productName = productName,
 			orderNo = orderNo,
 			unit = unit,
 			vehicleName = vehicleName,
-			confirmedOnly = confirmedOnly ?: false,
+			confirmedOnly = confirmedOnly,
 			dueDateFrom = dueDateFrom,
 			dueDateTo = dueDateTo,
 			page = page,
 			size = size,
 		)
+	}
 
 	@GetMapping("/{orderLineId}")
 	fun getOrderLine(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@PathVariable orderLineId: Long,
-	): OrderLineResponse =
-		orderQueryService.getOrderLine(
-			tenantId = tenantId,
-			clientId = clientId,
+	): OrderLineResponse {
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return orderQueryService.getOrderLine(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
 			orderLineId = orderLineId,
 		)
+	}
 }

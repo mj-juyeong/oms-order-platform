@@ -30,6 +30,7 @@ import com.company.oms.pl.PlLineRepository
 import com.company.oms.scan.ScanLineEntity
 import com.company.oms.scan.ScanLineRepository
 import org.flywaydb.core.Flyway
+import org.hamcrest.Matchers.nullValue
 import org.junit.jupiter.api.Assertions.assertNotNull
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -37,6 +38,7 @@ import org.junit.jupiter.api.condition.EnabledIfSystemProperty
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc
+import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
@@ -72,6 +74,7 @@ class Phase8AuthLogApiTest @Autowired constructor(
 	private val batchAuditLogRepository: BatchAuditLogRepository,
 	private val apiCallLogRepository: ApiCallLogRepository,
 	private val downloadLogRepository: DownloadLogRepository,
+	private val passwordEncoder: PasswordEncoder,
 ) {
 
 	@BeforeEach
@@ -137,6 +140,182 @@ class Phase8AuthLogApiTest @Autowired constructor(
 		}.andExpect {
 			status { isOk() }
 			jsonPath("$.data.totalElements") { value(3) }
+		}
+	}
+
+	@Test
+	fun tenantAdminCanOnlyManageAllowedUsersInOwnTenant() {
+		val scope = createScope()
+		val otherScope = createScope()
+		val adminUserId = createUser(scope, "ADMIN")
+
+		mockMvc.post("/api/v1/users") {
+			header("X-User-Id", adminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "loginId": "system-${UUID.randomUUID()}",
+				  "name": "System Admin",
+				  "userScopeType": "SYSTEM",
+				  "tenantId": null,
+				  "clientId": null,
+				  "password": "secret",
+				  "roleCodes": ["SYSTEM_ADMIN"]
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+
+		mockMvc.post("/api/v1/users") {
+			header("X-User-Id", adminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "loginId": "other-tenant-${UUID.randomUUID()}",
+				  "name": "Other Tenant User",
+				  "userScopeType": "TENANT",
+				  "tenantId": ${otherScope.tenantId},
+				  "clientId": null,
+				  "password": "secret",
+				  "roleCodes": ["OPERATOR"]
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+
+		mockMvc.post("/api/v1/users") {
+			header("X-User-Id", adminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "loginId": "client-op-${UUID.randomUUID()}",
+				  "name": "Client Operator",
+				  "userScopeType": "CLIENT",
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "password": "secret",
+				  "roleCodes": ["OPERATOR"]
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+
+		mockMvc.post("/api/v1/users") {
+			header("X-User-Id", adminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "loginId": "client-viewer-${UUID.randomUUID()}",
+				  "name": "Client Viewer",
+				  "userScopeType": "CLIENT",
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "password": "secret",
+				  "roleCodes": ["VIEWER"]
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.id") { exists() }
+		}
+	}
+
+	@Test
+	fun clientViewerIsRestrictedToOwnClientOnOperationalApis() {
+		val scope = createScope()
+		val otherClient =
+			clientRepository.saveAndFlush(
+				ClientEntity(
+					tenantId = scope.tenantId,
+					code = "client-${UUID.randomUUID()}",
+					name = "Other Client",
+				),
+			)
+		val otherScope = createScope()
+		val clientViewerUserId = createUser(scope, "VIEWER", UserScopeType.CLIENT, scope.clientId)
+
+		mockMvc.get("/api/v1/order-excel-batches") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(0) }
+		}
+
+		mockMvc.get("/api/v1/order-excel-batches") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", otherClient.id!!.toString())
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+
+		mockMvc.get("/api/v1/order-excel-batches") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", otherScope.tenantId.toString())
+			param("clientId", otherScope.clientId.toString())
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+	}
+
+	@Test
+	fun loginIssuesJwtAndBearerTokenCanReadCurrentUser() {
+		val scope = createScope()
+		val role = roleRepository.findByCode("OPERATOR") ?: roleRepository.saveAndFlush(RoleEntity(code = "OPERATOR", name = "OPERATOR"))
+		val user =
+			userRepository.saveAndFlush(
+				UserEntity(
+					userScopeType = UserScopeType.TENANT,
+					tenantId = scope.tenantId,
+					loginId = "login-${UUID.randomUUID()}",
+					name = "Operator",
+					passwordHash = passwordEncoder.encode("secret") ?: "",
+				),
+			)
+		userRoleRepository.saveAndFlush(UserRoleEntity(UserRoleId(user.id!!, role.id!!)))
+
+		val loginResult =
+			mockMvc.post("/api/v1/auth/login") {
+				contentType = org.springframework.http.MediaType.APPLICATION_JSON
+				content = """{"loginId":"${user.loginId}","password":"secret"}"""
+			}.andExpect {
+				status { isOk() }
+				jsonPath("$.data.accessToken") { exists() }
+				jsonPath("$.data.tokenType") { value("Bearer") }
+				jsonPath("$.data.user.userScopeType") { value("TENANT") }
+				jsonPath("$.data.user.roles[0]") { value("OPERATOR") }
+			}.andReturn()
+
+		val accessToken = Regex(""""accessToken":"([^"]+)"""")
+			.find(loginResult.response.contentAsString)
+			?.groupValues
+			?.get(1)
+			?: error("accessToken not found")
+
+		mockMvc.get("/api/v1/auth/me") {
+			header("Authorization", "Bearer $accessToken")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.id") { value(user.id!!.toInt()) }
+			jsonPath("$.data.loginId") { value(user.loginId) }
+			jsonPath("$.data.tenantId") { value(scope.tenantId.toInt()) }
+			jsonPath("$.data.clientId") { value(nullValue()) }
+		}
+
+		mockMvc.post("/api/v1/auth/logout") {
+			header("Authorization", "Bearer $accessToken")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.loggedOut") { value(true) }
 		}
 	}
 
@@ -440,13 +619,16 @@ class Phase8AuthLogApiTest @Autowired constructor(
 	private fun createUser(
 		scope: TestScope,
 		roleCode: String,
+		userScopeType: UserScopeType = UserScopeType.TENANT,
+		clientId: Long? = null,
 	): Long {
 		val role = roleRepository.findByCode(roleCode) ?: roleRepository.saveAndFlush(RoleEntity(code = roleCode, name = roleCode))
 		val user =
 			userRepository.saveAndFlush(
 				UserEntity(
-					userScopeType = UserScopeType.TENANT,
+					userScopeType = userScopeType,
 					tenantId = scope.tenantId,
+					clientId = clientId,
 					loginId = "user-${UUID.randomUUID()}",
 					name = "User",
 					passwordHash = "test",

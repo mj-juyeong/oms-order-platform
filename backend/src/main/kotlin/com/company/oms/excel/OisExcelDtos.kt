@@ -119,6 +119,7 @@ data class ParsedLabelRow(
 	val orderNo: String?,
 	val storeCode: String?,
 	val storeName: String?,
+	val brandName: String?,
 	val productCode: String?,
 	val productName: String?,
 	val orderQty: BigDecimal?,
@@ -129,4 +130,3 @@ data class ParsedLabelRow(
 	val totalBoxQty: BigDecimal?,
 	val rawRow: Map<String, String>,
 )
-

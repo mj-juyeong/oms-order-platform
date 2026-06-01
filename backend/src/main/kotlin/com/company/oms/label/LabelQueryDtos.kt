@@ -15,6 +15,7 @@ data class LabelLineResponse(
 	val orderNo: String?,
 	val storeCode: String?,
 	val storeName: String?,
+	val brandName: String?,
 	val productCode: String?,
 	val productName: String?,
 	val orderQty: BigDecimal?,
@@ -27,7 +28,10 @@ data class LabelLineResponse(
 	val rawRowJson: String?,
 )
 
-fun LabelLineEntity.toResponse(batchStatus: BatchStatus? = null): LabelLineResponse =
+fun LabelLineEntity.toResponse(
+	batchStatus: BatchStatus? = null,
+	fallbackStoreName: String? = null,
+): LabelLineResponse =
 	LabelLineResponse(
 		id = requireNotNull(id),
 		tenantId = tenantId,
@@ -38,7 +42,8 @@ fun LabelLineEntity.toResponse(batchStatus: BatchStatus? = null): LabelLineRespo
 		labelType = labelType,
 		orderNo = orderNo,
 		storeCode = storeCode,
-		storeName = storeName,
+		storeName = storeName?.takeIf(String::isNotBlank) ?: fallbackStoreName,
+		brandName = brandName,
 		productCode = productCode,
 		productName = productName,
 		orderQty = orderQty,

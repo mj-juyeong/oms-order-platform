@@ -19,7 +19,7 @@ class AuditQueryController(
 	@GetMapping("/batches")
 	fun listBatchAuditLogs(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) batchId: Long?,
 		@RequestParam(required = false) action: String?,
 		@RequestParam(required = false)
@@ -36,7 +36,7 @@ class AuditQueryController(
 	@GetMapping("/api-calls")
 	fun listApiCallLogs(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) apiKeyId: Long?,
 		@RequestParam(required = false) path: String?,
 		@RequestParam(required = false) responseStatus: Int?,
@@ -54,7 +54,7 @@ class AuditQueryController(
 	@GetMapping("/downloads")
 	fun listDownloadLogs(
 		@RequestParam tenantId: Long,
-		@RequestParam clientId: Long,
+		@RequestParam(required = false) clientId: Long?,
 		@RequestParam(required = false) batchId: Long?,
 		@RequestParam(required = false) downloadType: String?,
 		@RequestParam(required = false) downloadedBy: Long?,

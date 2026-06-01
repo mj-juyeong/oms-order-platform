@@ -2,13 +2,14 @@ package com.company.oms.externalapi
 
 import com.company.oms.auth.ApiKeyEntity
 import com.company.oms.auth.ApiKeyRepository
-import com.company.oms.auth.AuthGuard
+import com.company.oms.auth.AccessScopeService
 import com.company.oms.auth.UserRole
 import com.company.oms.batch.UploadBatchEntity
 import com.company.oms.batch.UploadBatchRepository
 import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.response.PageResponse
 import com.company.oms.common.response.toPageResponse
+import com.company.oms.common.scope.ClientRepository
 import com.company.oms.pl.PlLineEntity
 import com.company.oms.pl.PlLineRepository
 import com.company.oms.scan.ScanLineEntity
@@ -23,12 +24,13 @@ import java.time.LocalDateTime
 @Service
 @Profile("local")
 class ExternalApiStatusService(
-	private val authGuard: AuthGuard,
+	private val accessScopeService: AccessScopeService,
 	private val uploadBatchRepository: UploadBatchRepository,
 	private val scanLineRepository: ScanLineRepository,
 	private val plLineRepository: PlLineRepository,
 	private val apiKeyRepository: ApiKeyRepository,
 	private val apiCallLogRepository: ApiCallLogRepository,
+	private val clientRepository: ClientRepository,
 ) {
 
 	@Transactional(readOnly = true)
@@ -42,13 +44,17 @@ class ExternalApiStatusService(
 		page: Int,
 		size: Int,
 	): PageResponse<ExternalApiStatusResponse> {
-		authGuard.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN, UserRole.SYSTEM_ADMIN, UserRole.SUPPORT)
+		accessScopeService.requireAnyRole(UserRole.VIEWER, UserRole.OPERATOR, UserRole.ADMIN)
+		val scope = accessScopeService.requireClientAccess(tenantId, clientId)
+		val resolvedTenantId = scope.tenantId
+		val resolvedClientId = requireNotNull(scope.clientId)
 
 		val channels = channel?.let { listOf(it) } ?: ExternalApiChannel.entries
-		val activeApiKeysByScope = activeApiKeysByScope(tenantId, clientId)
-		val lastCallsByEndpoint = lastCallsByEndpoint(tenantId, clientId)
+		val activeApiKeysByScope = activeApiKeysByScope(resolvedTenantId, resolvedClientId)
+		val lastCallsByEndpoint = lastCallsByEndpoint(resolvedTenantId, resolvedClientId)
+		val clientName = clientRepository.findById(resolvedClientId).orElse(null)?.name
 
-		return uploadBatchRepository.findAllByTenantIdAndClientId(tenantId, clientId)
+		return uploadBatchRepository.findAllByTenantIdAndClientId(resolvedTenantId, resolvedClientId)
 			.asSequence()
 			.filter { batchId == null || it.id == batchId }
 			.filter { deliveryDate == null || it.deliveryDate == deliveryDate }
@@ -59,6 +65,7 @@ class ExternalApiStatusService(
 					toStatusResponse(
 						batch = batch,
 						channel = selectedChannel,
+						clientName = clientName,
 						activeApiKeys = activeApiKeysByScope[selectedChannel.requiredScope].orEmpty(),
 						lastCall = lastCallsByEndpoint[selectedChannel.endpoint],
 					)
@@ -77,6 +84,7 @@ class ExternalApiStatusService(
 	private fun toStatusResponse(
 		batch: UploadBatchEntity,
 		channel: ExternalApiChannel,
+		clientName: String?,
 		activeApiKeys: List<ApiKeyEntity>,
 		lastCall: ApiCallLogEntity?,
 	): ExternalApiStatusResponse =
@@ -90,6 +98,7 @@ class ExternalApiStatusService(
 					requiredScope = channel.requiredScope,
 					tenantId = batch.tenantId,
 					clientId = batch.clientId,
+					clientName = clientName,
 					batchId = requireNotNull(batch.id),
 					batchNo = batch.batchNo,
 					deliveryDate = batch.deliveryDate,
@@ -120,6 +129,7 @@ class ExternalApiStatusService(
 					requiredScope = channel.requiredScope,
 					tenantId = batch.tenantId,
 					clientId = batch.clientId,
+					clientName = clientName,
 					batchId = requireNotNull(batch.id),
 					batchNo = batch.batchNo,
 					deliveryDate = batch.deliveryDate,
