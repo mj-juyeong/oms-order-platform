@@ -171,8 +171,8 @@ export const mockPlLines: PlLine[] = [
 ];
 
 export const mockLabelLines: LabelLine[] = [
-  { id: 'label-1', batchId: 'BATCH-20260528-001', labelType: 'EA', orderNo: '202512150000000001', storeCode: 'S001', storeName: '강남점', productCode: 'P000001', productName: '냉장 소스', orderQty: 12, sequence: '001', matchingCode: 'M-0001', qrCode: '', rowNo: 2 },
-  { id: 'label-2', batchId: 'BATCH-20260528-001', labelType: 'BOX', orderNo: '202512150000000002', storeCode: 'S002', storeName: '분당점', productCode: 'P000002', productName: '냉동 패티', orderQty: 4, sequence: '002', matchingCode: 'M-0002', qrCode: 'QR-LABEL-0002', boxSequence: '1/2', totalBoxQty: 2, rowNo: 2 },
+  { id: 'label-1', batchId: 'BATCH-20260528-001', labelType: 'EA', orderNo: '202512150000000001', storeCode: 'S001', storeName: '강남점', brandName: 'Brand A', productCode: 'P000001', productName: '냉장 소스', orderQty: 12, sequence: '001', matchingCode: 'M-0001', qrCode: '', rowNo: 2 },
+  { id: 'label-2', batchId: 'BATCH-20260528-001', labelType: 'BOX', orderNo: '202512150000000002', storeCode: 'S002', storeName: '분당점', brandName: 'Brand A', productCode: 'P000002', productName: '냉동 패티', orderQty: 4, sequence: '002', matchingCode: 'M-0002', qrCode: 'QR-LABEL-0002', boxSequence: '1/2', totalBoxQty: 2, rowNo: 2 },
 ];
 
 export const mockProductMasterItems: ProductMasterItem[] = [
@@ -303,6 +303,7 @@ export const mockExternalApiStatuses: ExternalApiStatusRow[] = [
     requiredScope: 'WOS_SCAN_READ',
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     batchId: 20260528002,
     batchNo: 'BATCH-20260528-002',
     deliveryDate: '2025-12-16',
@@ -327,6 +328,7 @@ export const mockExternalApiStatuses: ExternalApiStatusRow[] = [
     requiredScope: 'PL_READ',
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     batchId: 20260528002,
     batchNo: 'BATCH-20260528-002',
     deliveryDate: '2025-12-16',
@@ -354,6 +356,7 @@ export const mockExternalApiStatuses: ExternalApiStatusRow[] = [
     requiredScope: 'WOS_SCAN_READ',
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     batchId: 20260528001,
     batchNo: 'BATCH-20260528-001',
     deliveryDate: '2025-12-15',
@@ -376,6 +379,7 @@ export const mockExternalApiStatuses: ExternalApiStatusRow[] = [
     requiredScope: 'PL_READ',
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     batchId: 20260527004,
     batchNo: 'BATCH-20260527-004',
     deliveryDate: '2025-12-14',
@@ -404,6 +408,7 @@ export const mockApiKeys: ApiKeyItem[] = [
     id: 1,
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     name: 'WOS 운영 연동 Key',
     status: 'ACTIVE',
     allowedScope: ['WOS_SCAN_READ'],
@@ -415,6 +420,7 @@ export const mockApiKeys: ApiKeyItem[] = [
     id: 2,
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     name: 'PL 운영 연동 Key',
     status: 'ACTIVE',
     allowedScope: ['PL_READ'],
@@ -426,6 +432,7 @@ export const mockApiKeys: ApiKeyItem[] = [
     id: 3,
     tenantId: 1,
     clientId: 1,
+    clientName: '웰스토리',
     name: '테스트 종료 Key',
     status: 'REVOKED',
     allowedScope: ['WOS_SCAN_READ', 'PL_READ'],

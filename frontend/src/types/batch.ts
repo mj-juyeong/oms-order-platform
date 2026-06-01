@@ -35,3 +35,63 @@ export interface UploadBatch {
   storeRouteMasterVersion: string;
   sheetResults: SheetResult[];
 }
+
+export interface BackendBatchSummary {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  status: BatchStatus;
+  batchNo: string;
+  deliveryDate?: string | null;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  uploadedAt: string;
+  confirmedAt?: string | null;
+  memo?: string | null;
+}
+
+export interface BackendBatchDetail extends BackendBatchSummary {
+  uploadedFiles: Array<{
+    id: number;
+    fileType: string;
+    originalFileName: string;
+    fileHash: string;
+    fileSize: number;
+    contentType?: string | null;
+  }>;
+  sheetResults: Array<{
+    id: number;
+    sheetName: string;
+    sheetType: string;
+    suffixValue?: string | null;
+    dataRowCount: number;
+    status: string;
+    message?: string | null;
+  }>;
+}
+
+export interface OisSheetResult {
+  id: number;
+  sheetName: string;
+  sheetType: string;
+  suffixValue?: string | null;
+  dataRowCount: number;
+  status: string;
+  message?: string | null;
+}
+
+export interface OisUploadResponse {
+  batchId: number;
+  tenantId: number;
+  clientId: number;
+  status: BatchStatus;
+  batchNo: string;
+  deliveryDate?: string | null;
+  fileName: string;
+  sheetResults: OisSheetResult[];
+  scanLineCount: number;
+  plLineCount: number;
+  labelLineCount: number;
+  orderLineCount: number;
+}

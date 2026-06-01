@@ -1,6 +1,17 @@
 export const endpoints = {
   auth: {
+    login: '/auth/login',
+    logout: '/auth/logout',
     me: '/auth/me',
+  },
+  clients: {
+    list: '/clients',
+    resolveCandidates: '/clients/resolve-candidates',
+    detail: (clientId: number) => `/clients/${clientId}`,
+  },
+  tenants: {
+    list: '/tenants',
+    detail: (tenantId: number) => `/tenants/${tenantId}`,
   },
   apiKeys: {
     list: '/api-keys',
@@ -27,8 +38,18 @@ export const endpoints = {
   masters: {
     products: '/masters/products',
     productUploads: '/masters/products/uploads',
+    productUploadPreview: '/masters/products/uploads/preview',
+    productUploadApply: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/apply`,
+    productUploadCancel: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/cancel`,
+    productUploadRowErrors: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/row-errors`,
     storeRoutes: '/masters/store-routes',
     storeRouteUploads: '/masters/store-routes/uploads',
+    storeRouteUploadPreview: '/masters/store-routes/uploads/preview',
+    storeRouteUploadApply: (uploadId: number | string) => `/masters/store-routes/uploads/${uploadId}/apply`,
+    storeRouteUploadCancel: (uploadId: number | string) => `/masters/store-routes/uploads/${uploadId}/cancel`,
+    storeRouteUploadRowErrors: (uploadId: number | string) => `/masters/store-routes/uploads/${uploadId}/row-errors`,
+    clientProductCodeMappings: '/masters/client-product-code-mappings',
+    clientStoreCodeMappings: '/masters/client-store-code-mappings',
   },
   audit: {
     batches: '/audit/batches',

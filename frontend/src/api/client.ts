@@ -1,4 +1,5 @@
 import type { ApiResponse } from '../types/api';
+import { getAuthToken } from '../app/auth';
 
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '/api/v1';
 export const EXTERNAL_API_BASE_URL = import.meta.env.VITE_EXTERNAL_API_BASE_URL ?? '/external/v1';
@@ -63,12 +64,17 @@ async function readApiResponse<TData>(response: Response): Promise<ApiResponse<T
 
 export async function apiClient<TData>(path: string, options: RequestOptions = {}): Promise<ApiResponse<TData>> {
   const headers = new Headers(options.headers);
+  const authToken = getAuthToken();
 
   if (options.body !== undefined && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json');
   }
 
-  if (DEV_USER_ID && !headers.has('X-User-Id')) {
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
+
+  if (!authToken && DEV_USER_ID && !headers.has('X-User-Id')) {
     headers.set('X-User-Id', DEV_USER_ID);
   }
 
@@ -101,7 +107,11 @@ export async function uploadMultipart<TData>(
   options: Omit<RequestInit, 'body'> = {},
 ): Promise<TData> {
   const headers = new Headers(options.headers);
-  if (DEV_USER_ID && !headers.has('X-User-Id')) {
+  const authToken = getAuthToken();
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
+  if (!authToken && DEV_USER_ID && !headers.has('X-User-Id')) {
     headers.set('X-User-Id', DEV_USER_ID);
   }
 
@@ -122,7 +132,11 @@ export async function uploadMultipart<TData>(
 
 export async function downloadBlob(path: string, options: Omit<RequestInit, 'body'> = {}): Promise<DownloadedBlob> {
   const headers = new Headers(options.headers);
-  if (DEV_USER_ID && !headers.has('X-User-Id')) {
+  const authToken = getAuthToken();
+  if (authToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${authToken}`);
+  }
+  if (!authToken && DEV_USER_ID && !headers.has('X-User-Id')) {
     headers.set('X-User-Id', DEV_USER_ID);
   }
 

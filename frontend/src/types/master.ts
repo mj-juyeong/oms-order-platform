@@ -6,7 +6,41 @@ export interface MasterVersion {
   active: boolean;
 }
 
-export type MasterUploadStatus = 'UPLOADED' | 'PROCESSING' | 'APPLIED' | 'PARTIAL_FAILED' | 'FAILED' | 'SUCCESS';
+export type MasterUploadStatus =
+  | 'UPLOADED'
+  | 'PROCESSING'
+  | 'READY_TO_APPLY'
+  | 'REVIEW_REQUIRED'
+  | 'APPLIED'
+  | 'PARTIAL_FAILED'
+  | 'FAILED'
+  | 'CANCELLED'
+  | 'SUCCESS';
+
+export interface MasterUploadRowFailure {
+  rowNo: number;
+  columnName: string;
+  errorCode: string;
+  message: string;
+  originalValue?: string | null;
+  keyValue?: string | null;
+  rawRow: Record<string, string>;
+}
+
+export interface MasterUploadPreviewResult {
+  uploadId: number | string;
+  fileName?: string;
+  rowCount: number;
+  validCount: number;
+  failedCount: number;
+  candidateInsertedCount: number;
+  candidateUpdatedCount: number;
+  candidateUnchangedCount: number;
+  status: MasterUploadStatus;
+  failures: MasterUploadRowFailure[];
+  uploadedAt?: string;
+  uploadedBy?: string | number | null;
+}
 
 export interface ProductMasterUploadResult {
   uploadId: number | string;
@@ -80,4 +114,44 @@ export interface StoreRouteMasterItem {
   activeYn?: boolean;
   operationStatus?: 'ACTIVE' | 'INACTIVE';
   rowNo?: number | null;
+}
+
+export interface ClientProductCodeMapping {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  clientProductCode: string;
+  ezadminCode: string;
+  productName?: string | null;
+  activeYn: boolean;
+  memo?: string | null;
+}
+
+export interface ClientProductCodeMappingUpsertRequest {
+  tenantId: number;
+  clientId: number;
+  clientProductCode: string;
+  ezadminCode: string;
+  activeYn?: boolean;
+  memo?: string | null;
+}
+
+export interface ClientStoreCodeMapping {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  clientStoreCode: string;
+  baljugoCode: string;
+  storeName?: string | null;
+  activeYn: boolean;
+  memo?: string | null;
+}
+
+export interface ClientStoreCodeMappingUpsertRequest {
+  tenantId: number;
+  clientId: number;
+  clientStoreCode: string;
+  baljugoCode: string;
+  activeYn?: boolean;
+  memo?: string | null;
 }

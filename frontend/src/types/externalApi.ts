@@ -8,6 +8,7 @@ export interface ExternalApiStatusRow {
   requiredScope: string;
   tenantId: number;
   clientId?: number | null;
+  clientName?: string | null;
   batchId: number;
   batchNo: string;
   deliveryDate?: string | null;

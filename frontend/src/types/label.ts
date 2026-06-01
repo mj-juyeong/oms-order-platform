@@ -9,6 +9,7 @@ export interface LabelLine {
   orderNo: string;
   storeCode: string;
   storeName: string;
+  brandName: string;
   productCode: string;
   productName: string;
   orderQty: number;
@@ -38,4 +39,28 @@ export interface LabelDownloadRow {
   unavailableReason?: string;
   lastDownloadedAt?: string;
   downloadedBy?: string;
+}
+
+export interface BackendLabelLine {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  batchId: number;
+  batchStatus?: import('./batch').BatchStatus | null;
+  sheetName: string;
+  labelType: 'EA' | 'BOX';
+  orderNo?: string | null;
+  storeCode?: string | null;
+  storeName?: string | null;
+  brandName?: string | null;
+  productCode?: string | null;
+  productName?: string | null;
+  orderQty?: number | string | null;
+  sequenceNo?: string | null;
+  matchingCode?: string | null;
+  qrCode?: string | null;
+  boxSequence?: string | null;
+  totalBoxQty?: number | string | null;
+  rowNo: number;
+  rawRowJson?: string | null;
 }
