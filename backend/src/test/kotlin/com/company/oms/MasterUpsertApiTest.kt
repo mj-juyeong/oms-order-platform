@@ -1,7 +1,14 @@
 package com.company.oms
 
+import com.company.oms.common.scope.ClientEntity
+import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
 import com.company.oms.common.scope.TenantRepository
+import com.company.oms.master.ProductMasterItemEntity
+import com.company.oms.master.ProductMasterItemRepository
+import com.company.oms.master.StoreRouteMasterItemEntity
+import com.company.oms.master.StoreRouteMasterItemRepository
+import com.company.oms.master.MasterUploadRowErrorRepository
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.flywaydb.core.Flyway
 import org.hamcrest.Matchers.hasSize
@@ -17,8 +24,10 @@ import org.springframework.test.context.DynamicPropertySource
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.multipart
+import org.springframework.test.web.servlet.post
 import org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath
 import org.springframework.mock.web.MockMultipartFile
+import org.springframework.http.MediaType
 import org.testcontainers.containers.MySQLContainer
 import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
@@ -26,6 +35,9 @@ import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.util.UUID
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -35,6 +47,10 @@ import java.util.UUID
 class MasterUpsertApiTest @Autowired constructor(
 	private val mockMvc: MockMvc,
 	private val tenantRepository: TenantRepository,
+	private val clientRepository: ClientRepository,
+	private val productMasterItemRepository: ProductMasterItemRepository,
+	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val masterUploadRowErrorRepository: MasterUploadRowErrorRepository,
 ) {
 
 	@BeforeEach
@@ -184,6 +200,105 @@ class MasterUpsertApiTest @Autowired constructor(
 	}
 
 	@Test
+	fun productMasterPreviewShowsRowFailuresAndApplyUpsertsOnlyValidRows() {
+		val tenantId = createTenant()
+
+		val previewResult = mockMvc.multipart("/api/v1/masters/products/uploads/preview") {
+			file(
+				MockMultipartFile(
+					"file",
+					"products.csv",
+					"text/csv",
+					"""
+				ezadmin_code,product_name
+				P-001,Product A
+				,Missing Code
+				P-001,Duplicate Product
+				P-002,Product B
+					""".trimIndent().toByteArray(StandardCharsets.UTF_8),
+				),
+			)
+			param("tenantId", tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.rowCount") { value(4) }
+			jsonPath("$.data.validCount") { value(2) }
+			jsonPath("$.data.failedCount") { value(2) }
+			jsonPath("$.data.candidateInsertedCount") { value(2) }
+			jsonPath("$.data.status") { value("REVIEW_REQUIRED") }
+			jsonPath("$.data.failures", hasSize<Any>(2))
+			jsonPath("$.data.failures[0].rowNo") { value(3) }
+			jsonPath("$.data.failures[0].errorCode") { value("MASTER_KEY_REQUIRED") }
+			jsonPath("$.data.failures[1].rowNo") { value(4) }
+			jsonPath("$.data.failures[1].errorCode") { value("DUPLICATE_MASTER_KEY") }
+		}.andReturn()
+
+		assertFalse(productMasterItemRepository.existsByTenantIdAndEzadminCode(tenantId, "P-001"))
+		assertFalse(productMasterItemRepository.existsByTenantIdAndEzadminCode(tenantId, "P-002"))
+
+		val uploadId = extractUploadId(previewResult.response.contentAsString)
+		assertEquals(2, masterUploadRowErrorRepository.findAllByMasterUploadBatchIdOrderByRowNoAscIdAsc(uploadId).size)
+		mockMvc.get("/api/v1/masters/products/uploads/$uploadId/row-errors") {
+			param("tenantId", tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data", hasSize<Any>(2))
+			jsonPath("$.data[0].rowNo") { value(3) }
+			jsonPath("$.data[0].columnName") { value("ezadmin_code") }
+			jsonPath("$.data[0].rawRow.ezadmin_code") { value("") }
+			jsonPath("$.data[1].rowNo") { value(4) }
+			jsonPath("$.data[1].keyValue") { value("P-001") }
+		}
+
+		mockMvc.post("/api/v1/masters/products/uploads/$uploadId/apply") {
+			param("tenantId", tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.rowCount") { value(4) }
+			jsonPath("$.data.insertedCount") { value(2) }
+			jsonPath("$.data.failedCount") { value(2) }
+			jsonPath("$.data.status") { value("PARTIAL_FAILED") }
+		}
+
+		assertTrue(productMasterItemRepository.existsByTenantIdAndEzadminCode(tenantId, "P-001"))
+		assertTrue(productMasterItemRepository.existsByTenantIdAndEzadminCode(tenantId, "P-002"))
+	}
+
+	@Test
+	fun productMasterPreviewCanBeCancelledBeforeApply() {
+		val tenantId = createTenant()
+
+		val previewResult = mockMvc.multipart("/api/v1/masters/products/uploads/preview") {
+			file(
+				MockMultipartFile(
+					"file",
+					"products.csv",
+					"text/csv",
+					"""
+				ezadmin_code,product_name
+				P-CANCEL,Product A
+				,Missing Code
+					""".trimIndent().toByteArray(StandardCharsets.UTF_8),
+				),
+			)
+			param("tenantId", tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("REVIEW_REQUIRED") }
+		}.andReturn()
+
+		val uploadId = extractUploadId(previewResult.response.contentAsString)
+		mockMvc.post("/api/v1/masters/products/uploads/$uploadId/cancel") {
+			param("tenantId", tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("CANCELLED") }
+		}
+
+		assertFalse(productMasterItemRepository.existsByTenantIdAndEzadminCode(tenantId, "P-CANCEL"))
+	}
+
+	@Test
 	fun storeRouteMasterUploadUsesStoreDataSheetAndSupportsCustomerCodeAndActiveFilters() {
 		val tenantId = createTenant()
 
@@ -226,6 +341,88 @@ class MasterUpsertApiTest @Autowired constructor(
 			jsonPath("$.data.items[0].deliveryDay") { value("월,화,수,목,금,토") }
 			jsonPath("$.data.items[0].vehicleName") { value("11가1234") }
 			jsonPath("$.data.items[0].activeYn") { value(false) }
+		}
+	}
+
+	@Test
+	fun clientCodeMappingApisUpsertAndListMappings() {
+		val tenantId = createTenant()
+		val clientId = clientRepository.saveAndFlush(
+			ClientEntity(
+				tenantId = tenantId,
+				code = "client-${UUID.randomUUID()}",
+				name = "Client",
+			),
+		).id!!
+		productMasterItemRepository.saveAndFlush(
+			ProductMasterItemEntity(
+				tenantId = tenantId,
+				ezadminCode = "P-STD-001",
+				productName = "표준상품",
+			),
+		)
+		storeRouteMasterItemRepository.saveAndFlush(
+			StoreRouteMasterItemEntity(
+				tenantId = tenantId,
+				baljugoCode = "STORE-STD-001",
+				storeName = "표준매장",
+			),
+		)
+
+		mockMvc.post("/api/v1/masters/client-product-code-mappings") {
+			contentType = MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "tenantId": $tenantId,
+				  "clientId": $clientId,
+				  "clientProductCode": "WS-P-001",
+				  "ezadminCode": "P-STD-001",
+				  "memo": "웰스토리 상품 코드"
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.clientProductCode") { value("WS-P-001") }
+			jsonPath("$.data.ezadminCode") { value("P-STD-001") }
+			jsonPath("$.data.productName") { value("표준상품") }
+		}
+
+		mockMvc.get("/api/v1/masters/client-product-code-mappings") {
+			param("tenantId", tenantId.toString())
+			param("clientId", clientId.toString())
+			param("clientProductCode", "WS")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.items", hasSize<Any>(1))
+			jsonPath("$.data.items[0].clientProductCode") { value("WS-P-001") }
+		}
+
+		mockMvc.post("/api/v1/masters/client-store-code-mappings") {
+			contentType = MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "tenantId": $tenantId,
+				  "clientId": $clientId,
+				  "clientStoreCode": "WS-S-001",
+				  "baljugoCode": "STORE-STD-001",
+				  "memo": "웰스토리 거래처 코드"
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.clientStoreCode") { value("WS-S-001") }
+			jsonPath("$.data.baljugoCode") { value("STORE-STD-001") }
+			jsonPath("$.data.storeName") { value("표준매장") }
+		}
+
+		mockMvc.get("/api/v1/masters/client-store-code-mappings") {
+			param("tenantId", tenantId.toString())
+			param("clientId", clientId.toString())
+			param("clientStoreCode", "WS")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.items", hasSize<Any>(1))
+			jsonPath("$.data.items[0].clientStoreCode") { value("WS-S-001") }
 		}
 	}
 
@@ -291,6 +488,14 @@ class MasterUpsertApiTest @Autowired constructor(
 			}
 		}
 	}
+
+	private fun extractUploadId(content: String): Long =
+		Regex(""""uploadId":(\d+)""")
+			.find(content)
+			?.groupValues
+			?.get(1)
+			?.toLong()
+			?: error("uploadId not found in response: $content")
 
 	companion object {
 		@Container

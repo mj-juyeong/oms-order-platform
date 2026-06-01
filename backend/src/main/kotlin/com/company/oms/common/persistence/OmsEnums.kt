@@ -52,9 +52,12 @@ enum class MasterType {
 enum class MasterUploadStatus {
 	UPLOADED,
 	PROCESSING,
+	READY_TO_APPLY,
+	REVIEW_REQUIRED,
 	APPLIED,
 	PARTIAL_FAILED,
 	FAILED,
+	CANCELLED,
 }
 
 enum class UserScopeType {
@@ -62,4 +65,3 @@ enum class UserScopeType {
 	TENANT,
 	CLIENT,
 }
-

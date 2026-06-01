@@ -15,6 +15,8 @@ import com.company.oms.common.request.RequestContext
 import com.company.oms.common.response.PageResponse
 import com.company.oms.label.LabelLineEntity
 import com.company.oms.label.LabelLineRepository
+import com.company.oms.master.ClientProductCodeMappingRepository
+import com.company.oms.master.ClientStoreCodeMappingRepository
 import com.company.oms.master.ProductMasterItemRepository
 import com.company.oms.master.StoreRouteMasterItemRepository
 import com.company.oms.pl.PlLineEntity
@@ -37,6 +39,8 @@ class BatchValidationService(
 	private val batchAuditLogRepository: BatchAuditLogRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val clientProductCodeMappingRepository: ClientProductCodeMappingRepository,
+	private val clientStoreCodeMappingRepository: ClientStoreCodeMappingRepository,
 	private val scanLineRepository: ScanLineRepository,
 	private val plLineRepository: PlLineRepository,
 	private val labelLineRepository: LabelLineRepository,
@@ -46,7 +50,7 @@ class BatchValidationService(
 	@Transactional
 	fun validateBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		memo: String?,
 		actorId: Long?,
@@ -96,7 +100,7 @@ class BatchValidationService(
 	@Transactional
 	fun confirmBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		actorId: Long?,
 	): BatchStatusChangeResponse {
@@ -125,7 +129,7 @@ class BatchValidationService(
 	@Transactional
 	fun cancelBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		request: BatchActionRequest,
 	): BatchStatusChangeResponse {
@@ -146,7 +150,7 @@ class BatchValidationService(
 	@Transactional
 	fun rollbackBatch(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		request: BatchActionRequest,
 	): BatchStatusChangeResponse {
@@ -167,7 +171,7 @@ class BatchValidationService(
 	@Transactional(readOnly = true)
 	fun listValidationErrors(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 		severity: ValidationSeverity?,
 		sheetName: String?,
@@ -252,7 +256,7 @@ class BatchValidationService(
 		if (code.isNullOrBlank()) {
 			return listOf(validationError(batch, ValidationSeverity.ERROR, "PRODUCT_CODE_REQUIRED", domain, sheetName, rowNo, "product_code", lineTable, lineId, "품목코드가 비어 있습니다.", productCode))
 		}
-		if (!productMasterItemRepository.existsByTenantIdAndEzadminCode(batch.tenantId, code)) {
+		if (resolveProductMasterCode(batch, code) == null) {
 			return listOf(validationError(batch, ValidationSeverity.ERROR, "PRODUCT_MASTER_NOT_FOUND", domain, sheetName, rowNo, "product_code", lineTable, lineId, "상품 마스터에 존재하지 않는 품목코드입니다.", code))
 		}
 		return emptyList()
@@ -266,7 +270,7 @@ class BatchValidationService(
 		if (code.isNullOrBlank()) {
 			return listOf(validationError(batch, ValidationSeverity.WARNING, "LABEL_EA_PRODUCT_CODE_MISSING", UploadDomain.LABEL, label.sheetName, label.rowNo, "product_code", "label_lines", label.id, "Label_EA 품목코드가 비어 있습니다.", label.productCode))
 		}
-		if (!productMasterItemRepository.existsByTenantIdAndEzadminCode(batch.tenantId, code)) {
+		if (resolveProductMasterCode(batch, code) == null) {
 			return listOf(validationError(batch, ValidationSeverity.WARNING, "LABEL_EA_PRODUCT_MASTER_NOT_FOUND", UploadDomain.LABEL, label.sheetName, label.rowNo, "product_code", "label_lines", label.id, "Label_EA 품목코드가 상품 마스터에 없습니다.", code))
 		}
 		return emptyList()
@@ -286,7 +290,7 @@ class BatchValidationService(
 		if (code.isNullOrBlank()) {
 			return listOf(validationError(batch, ValidationSeverity.ERROR, "STORE_CODE_REQUIRED", domain, sheetName, rowNo, columnName, lineTable, lineId, "배송지/거래처 코드가 비어 있습니다.", storeCode))
 		}
-		if (!storeRouteMasterItemRepository.existsByTenantIdAndBaljugoCode(batch.tenantId, code)) {
+		if (resolveStoreRouteMasterCode(batch, code) == null) {
 			return listOf(validationError(batch, ValidationSeverity.ERROR, "STORE_ROUTE_MASTER_NOT_FOUND", domain, sheetName, rowNo, columnName, lineTable, lineId, "배송지/차량 마스터에 존재하지 않는 코드입니다.", code))
 		}
 		return emptyList()
@@ -298,7 +302,8 @@ class BatchValidationService(
 	): List<ValidationErrorEntity> {
 		val storeCode = pl.storeCode?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
 		val vehicleName = pl.vehicleName?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
-		val master = storeRouteMasterItemRepository.findByTenantIdAndBaljugoCode(batch.tenantId, storeCode)
+		val resolvedStoreCode = resolveStoreRouteMasterCode(batch, storeCode) ?: return emptyList()
+		val master = storeRouteMasterItemRepository.findByTenantIdAndBaljugoCode(batch.tenantId, resolvedStoreCode)
 			?: return emptyList()
 		val masterVehicleName = master.vehicleName?.trim()?.takeIf(String::isNotBlank) ?: return emptyList()
 		if (masterVehicleName == vehicleName) {
@@ -321,6 +326,32 @@ class BatchValidationService(
 				normalizedValue = masterVehicleName,
 			),
 		)
+	}
+
+	private fun resolveProductMasterCode(batch: UploadBatchEntity, productCode: String): String? {
+		if (productMasterItemRepository.existsByTenantIdAndEzadminCode(batch.tenantId, productCode)) {
+			return productCode
+		}
+		val mapping = clientProductCodeMappingRepository
+			.findByTenantIdAndClientIdAndClientProductCode(batch.tenantId, batch.clientId, productCode)
+			?.takeIf { it.activeYn }
+			?: return null
+		return mapping.ezadminCode.takeIf {
+			productMasterItemRepository.existsByTenantIdAndEzadminCode(batch.tenantId, it)
+		}
+	}
+
+	private fun resolveStoreRouteMasterCode(batch: UploadBatchEntity, storeCode: String): String? {
+		if (storeRouteMasterItemRepository.existsByTenantIdAndBaljugoCode(batch.tenantId, storeCode)) {
+			return storeCode
+		}
+		val mapping = clientStoreCodeMappingRepository
+			.findByTenantIdAndClientIdAndClientStoreCode(batch.tenantId, batch.clientId, storeCode)
+			?.takeIf { it.activeYn }
+			?: return null
+		return mapping.baljugoCode.takeIf {
+			storeRouteMasterItemRepository.existsByTenantIdAndBaljugoCode(batch.tenantId, it)
+		}
 	}
 
 	private fun validationError(
@@ -356,11 +387,11 @@ class BatchValidationService(
 
 	private fun getBatchForScope(
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		batchId: Long,
 	): UploadBatchEntity =
 		uploadBatchRepository.findById(batchId)
-			.filter { it.tenantId == tenantId && it.clientId == clientId }
+			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.orElseThrow {
 				OmsException(
 					errorCode = ErrorCode.BATCH_NOT_FOUND,

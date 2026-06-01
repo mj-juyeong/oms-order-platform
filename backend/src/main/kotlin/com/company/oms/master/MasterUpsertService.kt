@@ -16,6 +16,8 @@ import org.springframework.transaction.annotation.Transactional
 import org.springframework.web.multipart.MultipartFile
 import tools.jackson.databind.ObjectMapper
 import java.math.BigDecimal
+import java.nio.file.Files
+import java.nio.file.Path
 import java.time.LocalDateTime
 import kotlin.math.ceil
 
@@ -27,6 +29,7 @@ class MasterUpsertService(
 	private val productMasterCsvParser: ProductMasterCsvParser,
 	private val storeRouteMasterExcelParser: StoreRouteMasterExcelParser,
 	private val masterUploadBatchRepository: MasterUploadBatchRepository,
+	private val masterUploadRowErrorRepository: MasterUploadRowErrorRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
 	private val objectMapper: ObjectMapper,
@@ -90,6 +93,131 @@ class MasterUpsertService(
 
 		val result = upsertStoreRouteRows(tenantId, upload.id!!, storeRouteMasterExcelParser.parse(bytes))
 		return finishUpload(upload, result)
+	}
+
+	@Transactional
+	fun previewProductMasterUpload(
+		tenantId: Long,
+		file: MultipartFile,
+		uploadedBy: Long?,
+	): MasterUploadPreviewResponse {
+		validateTenant(tenantId)
+		validateExtension(file, "csv")
+
+		val bytes = file.bytes
+		val storedFile = storeMasterFile(tenantId, MasterType.PRODUCT, file)
+		val upload = masterUploadBatchRepository.saveAndFlush(
+			MasterUploadBatchEntity(
+				tenantId = tenantId,
+				masterType = MasterType.PRODUCT,
+				status = MasterUploadStatus.PROCESSING,
+				originalFileName = storedFile.originalFileName,
+				storedPath = storedFile.storedPath,
+				fileHash = storedFile.fileHash,
+				fileSize = storedFile.fileSize,
+				contentType = storedFile.contentType,
+				uploadedBy = uploadedBy,
+				requestId = RequestContext.getRequestId(),
+			),
+		)
+
+		val plan = buildProductUploadPlan(tenantId, productMasterCsvParser.parse(bytes))
+		savePreviewResult(upload, plan)
+		savePreviewFailures(upload, plan.failures)
+		return upload.toPreviewResponse(plan)
+	}
+
+	@Transactional
+	fun previewStoreRouteMasterUpload(
+		tenantId: Long,
+		file: MultipartFile,
+		uploadedBy: Long?,
+	): MasterUploadPreviewResponse {
+		validateTenant(tenantId)
+		validateExtension(file, "xlsx")
+
+		val bytes = file.bytes
+		val storedFile = storeMasterFile(tenantId, MasterType.STORE_ROUTE, file)
+		val upload = masterUploadBatchRepository.saveAndFlush(
+			MasterUploadBatchEntity(
+				tenantId = tenantId,
+				masterType = MasterType.STORE_ROUTE,
+				status = MasterUploadStatus.PROCESSING,
+				originalFileName = storedFile.originalFileName,
+				storedPath = storedFile.storedPath,
+				fileHash = storedFile.fileHash,
+				fileSize = storedFile.fileSize,
+				contentType = storedFile.contentType,
+				uploadedBy = uploadedBy,
+				requestId = RequestContext.getRequestId(),
+			),
+		)
+
+		val plan = buildStoreRouteUploadPlan(tenantId, storeRouteMasterExcelParser.parse(bytes))
+		savePreviewResult(upload, plan)
+		savePreviewFailures(upload, plan.failures)
+		return upload.toPreviewResponse(plan)
+	}
+
+	@Transactional
+	fun applyProductMasterUpload(
+		tenantId: Long,
+		uploadId: Long,
+	): MasterUploadSummaryResponse {
+		validateTenant(tenantId)
+		val upload = findReviewableUpload(tenantId, uploadId, MasterType.PRODUCT)
+		val rows = productMasterCsvParser.parse(readStoredMasterUpload(upload))
+		val result = upsertProductRows(tenantId, upload.id!!, rows)
+		return finishUpload(upload, result)
+	}
+
+	@Transactional
+	fun applyStoreRouteMasterUpload(
+		tenantId: Long,
+		uploadId: Long,
+	): MasterUploadSummaryResponse {
+		validateTenant(tenantId)
+		val upload = findReviewableUpload(tenantId, uploadId, MasterType.STORE_ROUTE)
+		val rows = storeRouteMasterExcelParser.parse(readStoredMasterUpload(upload))
+		val result = upsertStoreRouteRows(tenantId, upload.id!!, rows)
+		return finishUpload(upload, result)
+	}
+
+	@Transactional
+	fun cancelMasterUpload(
+		tenantId: Long,
+		uploadId: Long,
+		expectedType: MasterType,
+	): MasterUploadSummaryResponse {
+		validateTenant(tenantId)
+		val upload = masterUploadBatchRepository.findById(uploadId)
+			.orElseThrow { masterUploadNotFound() }
+		if (upload.tenantId != tenantId || upload.masterType != expectedType) {
+			throw masterUploadNotFound()
+		}
+		if (upload.status !in REVIEWABLE_MASTER_UPLOAD_STATUSES && upload.status != MasterUploadStatus.FAILED) {
+			throw invalidMasterUploadStatus()
+		}
+
+		upload.status = MasterUploadStatus.CANCELLED
+		upload.message = "cancelled before applying current master rows"
+		return upload.toSummaryResponse()
+	}
+
+	@Transactional(readOnly = true)
+	fun listMasterUploadRowFailures(
+		tenantId: Long,
+		uploadId: Long,
+		expectedType: MasterType,
+	): List<MasterUploadRowFailureResponse> {
+		validateTenant(tenantId)
+		val upload = masterUploadBatchRepository.findById(uploadId)
+			.orElseThrow { masterUploadNotFound() }
+		if (upload.tenantId != tenantId || upload.masterType != expectedType) {
+			throw masterUploadNotFound()
+		}
+		return masterUploadRowErrorRepository.findAllByMasterUploadBatchIdOrderByRowNoAscIdAsc(uploadId)
+			.map { it.toResponse(objectMapper) }
 	}
 
 	@Transactional(readOnly = true)
@@ -161,6 +289,107 @@ class MasterUpsertService(
 			.sortedBy { it.baljugoCode }
 			.map { it.toResponse() }
 			.toPage(page, size)
+
+	private fun buildProductUploadPlan(
+		tenantId: Long,
+		rows: List<ParsedProductMasterRow>,
+	): MasterUploadPreviewPlan {
+		val seenKeys = mutableSetOf<String>()
+		val validRows = mutableListOf<ParsedProductMasterRow>()
+		val failures = mutableListOf<MasterUploadRowFailureResponse>()
+
+		rows.forEach { row ->
+			val ezadminCode = row.ezadminCode?.trim()
+			when {
+				ezadminCode.isNullOrBlank() -> failures += row.toFailure(
+					columnName = "ezadmin_code",
+					errorCode = "MASTER_KEY_REQUIRED",
+					message = "상품코드가 비어 있습니다.",
+					originalValue = row.ezadminCode,
+					keyValue = null,
+				)
+				!seenKeys.add(ezadminCode) -> failures += row.toFailure(
+					columnName = "ezadmin_code",
+					errorCode = "DUPLICATE_MASTER_KEY",
+					message = "같은 CSV 안에 동일한 상품코드가 있습니다.",
+					originalValue = row.ezadminCode,
+					keyValue = ezadminCode,
+				)
+				else -> validRows += row
+			}
+		}
+
+		return buildPreviewPlan(rows.size, validRows, failures) { row ->
+			productMasterItemRepository.findByTenantIdAndEzadminCode(tenantId, row.ezadminCode!!.trim())
+				?.let { existing -> if (existing.hasSameContent(row)) CandidateRowAction.UNCHANGED else CandidateRowAction.UPDATE }
+				?: CandidateRowAction.INSERT
+		}
+	}
+
+	private fun buildStoreRouteUploadPlan(
+		tenantId: Long,
+		rows: List<ParsedStoreRouteMasterRow>,
+	): MasterUploadPreviewPlan {
+		val seenKeys = mutableSetOf<String>()
+		val validRows = mutableListOf<ParsedStoreRouteMasterRow>()
+		val failures = mutableListOf<MasterUploadRowFailureResponse>()
+
+		rows.forEach { row ->
+			val baljugoCode = row.baljugoCode?.trim()
+			when {
+				baljugoCode.isNullOrBlank() -> failures += row.toFailure(
+					columnName = "baljugo_code",
+					errorCode = "MASTER_KEY_REQUIRED",
+					message = "발주고코드가 비어 있습니다.",
+					originalValue = row.baljugoCode,
+					keyValue = null,
+				)
+				!seenKeys.add(baljugoCode) -> failures += row.toFailure(
+					columnName = "baljugo_code",
+					errorCode = "DUPLICATE_MASTER_KEY",
+					message = "같은 XLSX 안에 동일한 발주고코드가 있습니다.",
+					originalValue = row.baljugoCode,
+					keyValue = baljugoCode,
+				)
+				else -> validRows += row
+			}
+		}
+
+		return buildPreviewPlan(rows.size, validRows, failures) { row ->
+			storeRouteMasterItemRepository.findByTenantIdAndBaljugoCode(tenantId, row.baljugoCode!!.trim())
+				?.let { existing -> if (existing.hasSameContent(row)) CandidateRowAction.UNCHANGED else CandidateRowAction.UPDATE }
+				?: CandidateRowAction.INSERT
+		}
+	}
+
+	private fun <T> buildPreviewPlan(
+		rowCount: Int,
+		validRows: List<T>,
+		failures: List<MasterUploadRowFailureResponse>,
+		resolveAction: (T) -> CandidateRowAction,
+	): MasterUploadPreviewPlan {
+		var candidateInserted = 0
+		var candidateUpdated = 0
+		var candidateUnchanged = 0
+
+		validRows.forEach { row ->
+			when (resolveAction(row)) {
+				CandidateRowAction.INSERT -> candidateInserted++
+				CandidateRowAction.UPDATE -> candidateUpdated++
+				CandidateRowAction.UNCHANGED -> candidateUnchanged++
+			}
+		}
+
+		return MasterUploadPreviewPlan(
+			rowCount = rowCount,
+			validCount = validRows.size,
+			failedCount = failures.size,
+			candidateInsertedCount = candidateInserted,
+			candidateUpdatedCount = candidateUpdated,
+			candidateUnchangedCount = candidateUnchanged,
+			failures = failures,
+		)
+	}
 
 	private fun upsertProductRows(
 		tenantId: Long,
@@ -310,6 +539,73 @@ class MasterUpsertService(
 		return upload.toSummaryResponse()
 	}
 
+	private fun savePreviewResult(
+		upload: MasterUploadBatchEntity,
+		plan: MasterUploadPreviewPlan,
+	) {
+		upload.rowCount = plan.rowCount
+		upload.insertedCount = plan.candidateInsertedCount
+		upload.updatedCount = plan.candidateUpdatedCount
+		upload.unchangedCount = plan.candidateUnchangedCount
+		upload.failedCount = plan.failedCount
+		upload.status = plan.toStatus()
+		upload.message =
+			"preview inserted=${plan.candidateInsertedCount}, updated=${plan.candidateUpdatedCount}, unchanged=${plan.candidateUnchangedCount}, failed=${plan.failedCount}"
+	}
+
+	private fun savePreviewFailures(
+		upload: MasterUploadBatchEntity,
+		failures: List<MasterUploadRowFailureResponse>,
+	) {
+		val uploadId = upload.id ?: return
+		masterUploadRowErrorRepository.deleteAllByMasterUploadBatchId(uploadId)
+		if (failures.isEmpty()) {
+			return
+		}
+
+		masterUploadRowErrorRepository.saveAll(
+			failures.map { failure ->
+				MasterUploadRowErrorEntity(
+					tenantId = upload.tenantId,
+					masterUploadBatchId = uploadId,
+					masterType = upload.masterType,
+					rowNo = failure.rowNo,
+					columnName = failure.columnName,
+					errorCode = failure.errorCode,
+					message = failure.message,
+					originalValue = failure.originalValue,
+					keyValue = failure.keyValue,
+					rawRowJson = objectMapper.writeValueAsString(failure.rawRow),
+				)
+			},
+		)
+	}
+
+	private fun findReviewableUpload(
+		tenantId: Long,
+		uploadId: Long,
+		expectedType: MasterType,
+	): MasterUploadBatchEntity {
+		val upload = masterUploadBatchRepository.findById(uploadId)
+			.orElseThrow { masterUploadNotFound() }
+		if (upload.tenantId != tenantId || upload.masterType != expectedType) {
+			throw masterUploadNotFound()
+		}
+		if (upload.status !in REVIEWABLE_MASTER_UPLOAD_STATUSES) {
+			throw invalidMasterUploadStatus()
+		}
+		return upload
+	}
+
+	private fun readStoredMasterUpload(upload: MasterUploadBatchEntity): ByteArray {
+		val storedPath = upload.storedPath ?: throw OmsException(
+			errorCode = ErrorCode.FILE_UPLOAD_FAILED,
+			message = "저장된 마스터 업로드 파일 경로가 없습니다.",
+			status = HttpStatus.INTERNAL_SERVER_ERROR,
+		)
+		return Files.readAllBytes(Path.of(storedPath))
+	}
+
 	private fun validateTenant(tenantId: Long) {
 		if (!tenantRepository.existsById(tenantId)) {
 			throw OmsException(
@@ -319,6 +615,20 @@ class MasterUpsertService(
 			)
 		}
 	}
+
+	private fun masterUploadNotFound(): OmsException =
+		OmsException(
+			errorCode = ErrorCode.NOT_FOUND,
+			message = "마스터 업로드 이력을 찾을 수 없습니다.",
+			status = HttpStatus.NOT_FOUND,
+		)
+
+	private fun invalidMasterUploadStatus(): OmsException =
+		OmsException(
+			errorCode = ErrorCode.INVALID_BATCH_STATUS,
+			message = "현재 마스터 업로드 상태에서는 수행할 수 없습니다.",
+			status = HttpStatus.BAD_REQUEST,
+		)
 
 	private fun validateExtension(file: MultipartFile, expectedExtension: String) {
 		val fileName = file.originalFilename.orEmpty()
@@ -362,6 +672,34 @@ private data class UpsertCounts(
 		}
 }
 
+private data class MasterUploadPreviewPlan(
+	val rowCount: Int,
+	val validCount: Int,
+	val failedCount: Int,
+	val candidateInsertedCount: Int,
+	val candidateUpdatedCount: Int,
+	val candidateUnchangedCount: Int,
+	val failures: List<MasterUploadRowFailureResponse>,
+) {
+	fun toStatus(): MasterUploadStatus =
+		when {
+			failedCount == 0 -> MasterUploadStatus.READY_TO_APPLY
+			validCount > 0 -> MasterUploadStatus.REVIEW_REQUIRED
+			else -> MasterUploadStatus.FAILED
+		}
+}
+
+private enum class CandidateRowAction {
+	INSERT,
+	UPDATE,
+	UNCHANGED,
+}
+
+private val REVIEWABLE_MASTER_UPLOAD_STATUSES = setOf(
+	MasterUploadStatus.READY_TO_APPLY,
+	MasterUploadStatus.REVIEW_REQUIRED,
+)
+
 private fun ProductMasterItemEntity.hasSameContent(row: ParsedProductMasterRow): Boolean =
 	productName == row.productName &&
 		customerProductCode == row.customerProductCode &&
@@ -399,6 +737,19 @@ private fun MasterUploadBatchEntity.toSummaryResponse(): MasterUploadSummaryResp
 		unchangedCount = unchangedCount,
 		failedCount = failedCount,
 		status = status,
+	)
+
+private fun MasterUploadBatchEntity.toPreviewResponse(plan: MasterUploadPreviewPlan): MasterUploadPreviewResponse =
+	MasterUploadPreviewResponse(
+		uploadId = id ?: 0,
+		rowCount = plan.rowCount,
+		validCount = plan.validCount,
+		failedCount = plan.failedCount,
+		candidateInsertedCount = plan.candidateInsertedCount,
+		candidateUpdatedCount = plan.candidateUpdatedCount,
+		candidateUnchangedCount = plan.candidateUnchangedCount,
+		status = status,
+		failures = plan.failures,
 	)
 
 private fun MasterUploadBatchEntity.toHistoryResponse(): MasterUploadHistoryResponse =
@@ -447,6 +798,62 @@ private fun StoreRouteMasterItemEntity.toResponse(): StoreRouteMasterItemRespons
 		activeYn = activeYn,
 		rowNo = rowNo,
 	)
+
+private fun ParsedProductMasterRow.toFailure(
+	columnName: String,
+	errorCode: String,
+	message: String,
+	originalValue: String?,
+	keyValue: String?,
+): MasterUploadRowFailureResponse =
+	MasterUploadRowFailureResponse(
+		rowNo = rowNo,
+		columnName = columnName,
+		errorCode = errorCode,
+		message = message,
+		originalValue = originalValue,
+		keyValue = keyValue,
+		rawRow = rawRow,
+	)
+
+private fun ParsedStoreRouteMasterRow.toFailure(
+	columnName: String,
+	errorCode: String,
+	message: String,
+	originalValue: String?,
+	keyValue: String?,
+): MasterUploadRowFailureResponse =
+	MasterUploadRowFailureResponse(
+		rowNo = rowNo,
+		columnName = columnName,
+		errorCode = errorCode,
+		message = message,
+		originalValue = originalValue,
+		keyValue = keyValue,
+		rawRow = rawRow,
+	)
+
+private fun MasterUploadRowErrorEntity.toResponse(objectMapper: ObjectMapper): MasterUploadRowFailureResponse =
+	MasterUploadRowFailureResponse(
+		rowNo = rowNo,
+		columnName = columnName,
+		errorCode = errorCode,
+		message = message,
+		originalValue = originalValue,
+		keyValue = keyValue,
+		rawRow = rawRowJson.toStringMap(objectMapper),
+	)
+
+private fun String?.toStringMap(objectMapper: ObjectMapper): Map<String, String> =
+	this
+		?.let {
+			runCatching {
+				objectMapper.readValue(it, Map::class.java)
+					.entries
+					.associate { entry -> entry.key.toString() to (entry.value?.toString() ?: "") }
+			}.getOrDefault(emptyMap())
+		}
+		?: emptyMap()
 
 private fun <T> List<T>.toPage(page: Int, size: Int): PageResponse<T> {
 	val safePage = page.coerceAtLeast(0)

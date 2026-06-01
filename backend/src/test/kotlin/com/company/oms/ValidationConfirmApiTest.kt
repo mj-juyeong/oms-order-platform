@@ -5,6 +5,10 @@ import com.company.oms.common.scope.ClientEntity
 import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
 import com.company.oms.common.scope.TenantRepository
+import com.company.oms.master.ClientProductCodeMappingEntity
+import com.company.oms.master.ClientProductCodeMappingRepository
+import com.company.oms.master.ClientStoreCodeMappingEntity
+import com.company.oms.master.ClientStoreCodeMappingRepository
 import com.company.oms.master.ProductMasterItemEntity
 import com.company.oms.master.ProductMasterItemRepository
 import com.company.oms.master.StoreRouteMasterItemEntity
@@ -47,6 +51,8 @@ class ValidationConfirmApiTest @Autowired constructor(
 	private val clientRepository: ClientRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val clientProductCodeMappingRepository: ClientProductCodeMappingRepository,
+	private val clientStoreCodeMappingRepository: ClientStoreCodeMappingRepository,
 	private val uploadBatchRepository: UploadBatchRepository,
 	private val batchAuditLogRepository: BatchAuditLogRepository,
 ) {
@@ -139,6 +145,39 @@ class ValidationConfirmApiTest @Autowired constructor(
 		}.andExpect {
 			status { isBadRequest() }
 			jsonPath("$.error.code") { value("INVALID_BATCH_STATUS") }
+		}
+	}
+
+	@Test
+	fun validationUsesClientCodeMappingsWhenDirectMasterCodeDoesNotMatch() {
+		val scope = createScope()
+		seedMasters(scope.tenantId, productCode = "P-STD-001", storeCode = "STORE-STD-001", vehicleName = "차량1")
+		clientProductCodeMappingRepository.saveAndFlush(
+			ClientProductCodeMappingEntity(
+				tenantId = scope.tenantId,
+				clientId = scope.clientId,
+				clientProductCode = "WS-P-001",
+				ezadminCode = "P-STD-001",
+			),
+		)
+		clientStoreCodeMappingRepository.saveAndFlush(
+			ClientStoreCodeMappingEntity(
+				tenantId = scope.tenantId,
+				clientId = scope.clientId,
+				clientStoreCode = "WS-S-001",
+				baljugoCode = "STORE-STD-001",
+			),
+		)
+		val batchId = uploadWorkbook(scope, productCode = "WS-P-001", storeCode = "WS-S-001", vehicleName = "차량1")
+
+		mockMvc.post("/api/v1/order-excel-batches/$batchId/validate") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("READY_TO_CONFIRM") }
+			jsonPath("$.data.errorCount") { value(0) }
+			jsonPath("$.data.warningCount") { value(0) }
 		}
 	}
 

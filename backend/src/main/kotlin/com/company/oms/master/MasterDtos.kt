@@ -14,6 +14,28 @@ data class MasterUploadSummaryResponse(
 	val status: MasterUploadStatus,
 )
 
+data class MasterUploadPreviewResponse(
+	val uploadId: Long,
+	val rowCount: Int,
+	val validCount: Int,
+	val failedCount: Int,
+	val candidateInsertedCount: Int,
+	val candidateUpdatedCount: Int,
+	val candidateUnchangedCount: Int,
+	val status: MasterUploadStatus,
+	val failures: List<MasterUploadRowFailureResponse>,
+)
+
+data class MasterUploadRowFailureResponse(
+	val rowNo: Int,
+	val columnName: String,
+	val errorCode: String,
+	val message: String,
+	val originalValue: String?,
+	val keyValue: String?,
+	val rawRow: Map<String, String>,
+)
+
 data class MasterUploadHistoryResponse(
 	val id: Long,
 	val masterType: String,
@@ -56,6 +78,46 @@ data class StoreRouteMasterItemResponse(
 	val address: String?,
 	val activeYn: Boolean,
 	val rowNo: Int?,
+)
+
+data class ClientProductCodeMappingUpsertRequest(
+	val tenantId: Long,
+	val clientId: Long,
+	val clientProductCode: String,
+	val ezadminCode: String,
+	val activeYn: Boolean = true,
+	val memo: String? = null,
+)
+
+data class ClientProductCodeMappingResponse(
+	val id: Long,
+	val tenantId: Long,
+	val clientId: Long,
+	val clientProductCode: String,
+	val ezadminCode: String,
+	val productName: String?,
+	val activeYn: Boolean,
+	val memo: String?,
+)
+
+data class ClientStoreCodeMappingUpsertRequest(
+	val tenantId: Long,
+	val clientId: Long,
+	val clientStoreCode: String,
+	val baljugoCode: String,
+	val activeYn: Boolean = true,
+	val memo: String? = null,
+)
+
+data class ClientStoreCodeMappingResponse(
+	val id: Long,
+	val tenantId: Long,
+	val clientId: Long,
+	val clientStoreCode: String,
+	val baljugoCode: String,
+	val storeName: String?,
+	val activeYn: Boolean,
+	val memo: String?,
 )
 
 data class ParsedProductMasterRow(
