@@ -435,7 +435,7 @@ CREATE TABLE download_logs (
 -- upload_domain: SCAN, PL, LABEL, ORDER, MASTER
 -- sheet_type: SCAN_UPLOAD, PL_EA, PL_BOX, LABEL_EA, LABEL_BOX, IGNORED, UNKNOWN
 -- master_type: PRODUCT, STORE_ROUTE
--- master_upload_status: UPLOADED, PROCESSING, APPLIED, PARTIAL_FAILED, FAILED
+-- master_upload_status: UPLOADED, PROCESSING, READY_TO_APPLY, REVIEW_REQUIRED, APPLIED, PARTIAL_FAILED, FAILED, CANCELLED
 -- user_scope_type: SYSTEM, TENANT, CLIENT
 -- user_scope_type policy:
 --   SYSTEM: tenant_id NULL, client_id NULL
