@@ -193,7 +193,7 @@ export function UploadsPage() {
             omsApi.masters.clientMasters.products.list({ page: 0, size: 1 }),
             omsApi.masters.clientMasters.storeRoutes.list({ page: 0, size: 1 }),
             activeClientId
-              ? omsApi.batches.list({ tenantId, clientId: activeClientId, page: 0, size: 3 })
+              ? omsApi.batches.list({ tenantId, clientId: activeClientId, page: 0, size: 6 })
               : Promise.resolve({ items: [] as BackendBatchSummary[] }),
           ]);
 
@@ -201,7 +201,7 @@ export function UploadsPage() {
 
           setProductMasterCriteria({ rowCount: productPage.totalElements });
           setStoreRouteMasterCriteria({ rowCount: storeRoutePage.totalElements });
-          setRecentBatches(batchPage.items);
+          setRecentBatches(hideResolvedSupplementParents(batchPage.items).slice(0, 3));
           return;
         }
         const [productPage, productUploads, storeRoutePage, storeRouteUploads, batchPage] = await Promise.all([
@@ -210,7 +210,7 @@ export function UploadsPage() {
           omsApi.masters.storeRoutes.list({ tenantId, page: 0, size: 1 }),
           omsApi.masters.storeRoutes.uploads({ tenantId, page: 0, size: 1 }).catch(() => null),
           activeClientId
-            ? omsApi.batches.list({ tenantId, clientId: activeClientId, page: 0, size: 3 })
+            ? omsApi.batches.list({ tenantId, clientId: activeClientId, page: 0, size: 6 })
             : Promise.resolve({ items: [] as BackendBatchSummary[] }),
         ]);
 
@@ -218,7 +218,7 @@ export function UploadsPage() {
 
         setProductMasterCriteria(toMasterCriteria(productPage.totalElements, productUploads?.items[0]));
         setStoreRouteMasterCriteria(toMasterCriteria(storeRoutePage.totalElements, storeRouteUploads?.items[0]));
-        setRecentBatches(batchPage.items);
+        setRecentBatches(hideResolvedSupplementParents(batchPage.items).slice(0, 3));
       } catch (error) {
         if (!ignore) {
           setSidebarErrorMessage(formatUploadError(error));
@@ -480,7 +480,7 @@ export function UploadsPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5 overflow-x-hidden">
       {uploading ? (
         <FullScreenLoadingOverlay
           description="시트 구성과 데이터 건수를 확인하는 중입니다. 잠시만 기다려 주세요."
@@ -507,8 +507,8 @@ export function UploadsPage() {
 
       {supplementMode ? <SupplementUploadBanner batch={supplementBatch} loading={supplementLoading} /> : null}
 
-      <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
-        <div className="space-y-5">
+      <div className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
+        <div className="min-w-0 space-y-5">
           {phase === 'idle' ? (
             <FileUploadDropzone
               accept=".xlsm,.xlsx,.xls"
@@ -521,12 +521,12 @@ export function UploadsPage() {
           ) : null}
 
           {phase !== 'idle' ? (
-          <Card className="upload-phase-panel overflow-hidden" key={phase}>
+          <Card className="upload-phase-panel min-w-0 overflow-hidden" key={phase}>
             {selectedFile ? <SelectedFileSummary file={selectedFile} onRemove={phase === 'selected' ? handleFileRemove : undefined} prominent /> : null}
             <UploadStageHeader confirmationRequested={confirmationRequested} confirmed={confirmed} phase={phase} validationResult={validationResult} />
-            <div className="p-5">
-            <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
-              <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+            <div className="min-w-0 p-5">
+            <div className="grid min-w-0 gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
+              <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
                 <p className="text-xs font-semibold text-slate-500">업로드 기준</p>
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge tone="teal">{fakeCurrentUser.tenantName ?? '현재 물류사'}</Badge>
@@ -557,14 +557,14 @@ export function UploadsPage() {
             {uploadResult ? <UploadResultSummary result={uploadResult} validationResult={validationResult} /> : null}
             {phase === 'validated' && validationResult ? <ValidationOutcomeNotice canConfirm={canConfirm} confirmationRequested={confirmationRequested} confirmed={confirmed} result={validationResult} /> : null}
 
-            <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-              <div>
+            <div className="mt-5 flex min-w-0 flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
+              <div className="min-w-0">
                 <p className="text-sm font-semibold text-slate-900">{actionTitle(phase, loadingAction, canConfirm, confirmationRequested, confirmed)}</p>
                 {actionDescription(phase, loadingAction, canConfirm, confirmationRequested, confirmed) ? (
                   <p className="mt-1 text-sm text-slate-500">{actionDescription(phase, loadingAction, canConfirm, confirmationRequested, confirmed)}</p>
                 ) : null}
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="flex shrink-0 flex-wrap gap-2">
                 {phase === 'parsed' ? (
                   <Button disabled={validating} onClick={handleValidate} variant="primary">
                     {validating ? '검증 중' : '검증 실행'}
@@ -607,11 +607,13 @@ export function UploadsPage() {
           ) : null}
 
           {uploadResult ? (
-            <DataTable columns={columns} data={sheetResults} getRowKey={(item) => item.sheetName} />
+            <div className="min-w-0">
+              <DataTable columns={columns} data={sheetResults} getRowKey={(item) => item.sheetName} />
+            </div>
           ) : null}
         </div>
 
-        <aside className="space-y-5">
+        <aside className="min-w-0 space-y-5">
           <CurrentMasterCriteriaPanel
             errorMessage={sidebarErrorMessage}
             loading={sidebarLoading}
@@ -700,16 +702,17 @@ function UploadProgress({ phase }: { phase: UploadPhase }) {
   const currentIndex = phaseSteps.findIndex((step) => step.key === phase);
 
   return (
-    <Card className="p-4">
-      <div className="grid gap-3 md:grid-cols-4">
+    <Card className="min-w-0 p-3 sm:p-4">
+      <div className="grid min-w-0 grid-cols-4 gap-2 sm:gap-3">
         {phaseSteps.map((step, index) => {
           const done = index < currentIndex;
           const active = index === currentIndex;
+          const compactLabel = step.label.replace(/\s+/g, '');
 
           return (
             <div
               aria-current={active ? 'step' : undefined}
-              className={`rounded-md border px-4 py-3 transition-all duration-300 ${
+              className={`min-w-0 rounded-md border px-1 py-3 transition-all duration-300 sm:px-4 ${
                 active
                   ? 'upload-step-active border-teal-300 bg-teal-50 shadow-sm'
                   : done
@@ -718,9 +721,9 @@ function UploadProgress({ phase }: { phase: UploadPhase }) {
               }`}
               key={step.key}
             >
-              <div className="flex items-center gap-2">
+              <div className="flex min-w-0 flex-col items-center gap-2 text-center sm:flex-row sm:text-left">
                 <span
-                  className={`flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold transition-all duration-300 ${
+                  className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-bold transition-all duration-300 ${
                     done
                       ? 'upload-step-check bg-teal-700 text-white'
                       : active
@@ -730,9 +733,11 @@ function UploadProgress({ phase }: { phase: UploadPhase }) {
                 >
                   {done ? '✓' : index + 1}
                 </span>
-                <span className="text-sm font-semibold text-slate-950">{step.label}</span>
+                <span className="min-w-0 whitespace-nowrap text-[11px] font-semibold leading-tight text-slate-950 sm:text-sm" title={step.label}>
+                  {compactLabel}
+                </span>
               </div>
-              <p className="mt-2 text-xs text-slate-500">{step.description}</p>
+              <p className="mt-2 hidden text-xs text-slate-500 sm:block">{step.description}</p>
             </div>
           );
         })}
@@ -782,12 +787,14 @@ function UploadStageHeader({
 
   return (
     <div className="border-b border-slate-200 bg-slate-50 px-5 py-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+      <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
           <p className="text-base font-bold text-slate-950">{title}</p>
           <p className="mt-1 text-sm leading-6 text-slate-500">{description}</p>
         </div>
-        <Badge tone={tone}>{label}</Badge>
+        <div className="shrink-0">
+          <Badge tone={tone}>{label}</Badge>
+        </div>
       </div>
     </div>
   );
@@ -804,7 +811,7 @@ function SelectedFileSummary({
 }) {
   return (
     <div className={`${prominent ? 'upload-file-highlight border-b border-teal-100 bg-teal-50/70 px-5 py-4' : 'mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-4'}`}>
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex min-w-0 items-start gap-3">
         <div className="flex min-w-0 items-center gap-3">
           <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 shadow-sm">
             <FileSpreadsheet aria-hidden="true" size={24} strokeWidth={2.2} />
@@ -812,9 +819,13 @@ function SelectedFileSummary({
           <div className="min-w-0">
             <p className="text-xs font-semibold text-slate-500">선택된 파일</p>
             <p className="mt-1 break-all font-mono text-sm font-semibold text-slate-950">{file.name}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              <FileMetaChip label="크기" value={formatFileSize(file.size)} />
+              <FileMetaChip label="형식" value={(file.name.split('.').pop() ?? '-').toUpperCase()} />
+            </div>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 text-right sm:min-w-[220px]">
+        <div className="hidden">
           <div className="rounded-md bg-white px-3 py-2">
             <p className="text-xs font-semibold text-slate-500">크기</p>
             <p className="mt-1 font-mono text-sm font-bold text-slate-950">{formatFileSize(file.size)}</p>
@@ -827,7 +838,7 @@ function SelectedFileSummary({
         {onRemove ? (
           <button
             aria-label="선택한 파일 제거"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-base font-bold leading-none text-slate-500 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+            className="ml-auto flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white text-base font-bold leading-none text-slate-500 shadow-sm transition hover:border-red-200 hover:bg-red-50 hover:text-red-700"
             onClick={onRemove}
             type="button"
           >
@@ -836,6 +847,15 @@ function SelectedFileSummary({
         ) : null}
       </div>
     </div>
+  );
+}
+
+function FileMetaChip({ label, value }: { label: string; value: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2 py-1 text-xs leading-none text-slate-600">
+      <span className="font-semibold">{label}</span>
+      <span className="font-mono font-bold text-slate-900">{value}</span>
+    </span>
   );
 }
 
@@ -854,15 +874,15 @@ function UploadResultSummary({
   ];
 
   return (
-    <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
+    <div className="mt-4 min-w-0 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-3">
+        <div className="min-w-0">
           <p className="font-mono text-sm font-semibold text-slate-950">Batch #{result.batchId}</p>
-          <p className="mt-1 text-xs text-slate-500">
+          <p className="mt-1 break-all text-xs text-slate-500">
             {result.batchNo} · {result.fileName}
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {result.parentBatchId ? <Badge tone="blue">보완본 R{result.revisionNo}</Badge> : null}
           <BatchStatusBadge status={validationResult?.status ?? result.status} />
         </div>
@@ -1193,6 +1213,20 @@ function RecentUploadsPanel({
       </div>
     </Card>
   );
+}
+
+function hideResolvedSupplementParents(items: BackendBatchSummary[]) {
+  const confirmedSupplementParentIds = new Set(
+    items
+      .filter((item) => item.status === 'CONFIRMED' && item.parentBatchId)
+      .map((item) => item.parentBatchId as number),
+  );
+
+  if (confirmedSupplementParentIds.size === 0) {
+    return items;
+  }
+
+  return items.filter((item) => !(item.status === 'NEEDS_MORE_INFO' && confirmedSupplementParentIds.has(item.id)));
 }
 
 function toMasterCriteria(

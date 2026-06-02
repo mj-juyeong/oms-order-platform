@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
-import { useClientScope } from '../app/clientContext';
-import { omsApi, type BackendLabelLine } from '../api/oms';
-import { Badge, Button, Card, ErrorState, Input, LoadingState, ModalFrame } from '../components/common';
+import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { omsApi, type BackendBatchSummary, type BackendLabelLine } from '../api/oms';
+import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, ModalFrame } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { BatchStatusBadge, CodeCell } from '../components/domain';
+import { BatchSelectionPanel, BatchStatusBadge, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { LabelLine } from '../types/label';
 import { areFilterStatesEqual } from '../utils/filterState';
@@ -39,10 +40,9 @@ const initialFilters: LabelFilters = {
 };
 
 export function LabelLinesPage() {
-  const tenantId = fakeCurrentUser.tenantId ?? null;
-  const { clientId } = useClientScope();
-  const [filters, setFilters] = useState<LabelFilters>(initialFilters);
-  const [appliedFilters, setAppliedFilters] = useState<LabelFilters>(initialFilters);
+  const queryScope = useQueryScope();
+  const [filters, setFilters] = useState<LabelFilters>(() => labelFiltersForScope(queryScope.tenantId, queryScope.clientId));
+  const [appliedFilters, setAppliedFilters] = useState<LabelFilters>(() => labelFiltersForScope(queryScope.tenantId, queryScope.clientId));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [labelType, setLabelType] = useState<LabelTypeFilter>('ALL');
   const [appliedLabelType, setAppliedLabelType] = useState<LabelTypeFilter>('ALL');
@@ -53,10 +53,11 @@ export function LabelLinesPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+  const previousClientIdRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     void loadLines();
-  }, [appliedFilters, appliedLabelType, clientId, page, tenantId]);
+  }, [appliedFilters, appliedLabelType, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId]);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toLabelLine), [pageData]);
   const summary = useMemo(() => createLabelSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
@@ -65,20 +66,49 @@ export function LabelLinesPage() {
     () => !areFilterStatesEqual(filters, appliedFilters) || labelType !== appliedLabelType,
     [appliedFilters, appliedLabelType, filters, labelType],
   );
+  const needsBatchSelection = queryScope.canQuery && !parseNumericFilter(appliedFilters.batchId);
+  const selectedBatchSelection = useMemo(() => {
+    const batchId = parseNumericFilter(appliedFilters.batchId);
+    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    return selection && selection.batchId === batchId ? selection : null;
+  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
   const uniqueBatchIds = useMemo(() => uniqueVisibleBatchIds(lines), [lines]);
   const canDownloadCurrent = uniqueBatchIds.length === 1 && lines.length > 0 && lines.every((line) => line.batchStatus === 'CONFIRMED');
+
+  useEffect(() => {
+    const previousClientId = previousClientIdRef.current;
+    if (previousClientId !== undefined && previousClientId !== queryScope.clientId) {
+      const nextFilters = labelFiltersForScope(queryScope.tenantId, queryScope.clientId);
+      setPage(1);
+      setFilters(nextFilters);
+      setAppliedFilters(nextFilters);
+      setPageData(null);
+    }
+    previousClientIdRef.current = queryScope.clientId;
+  }, [queryScope.clientId, queryScope.tenantId]);
+
+  useEffect(() => {
+    const batchId = parseNumericFilter(appliedFilters.batchId);
+    if (queryScope.canQuery && queryScope.tenantId && queryScope.clientId && batchId) {
+      saveBatchIdContextSelection({
+        tenantId: queryScope.tenantId,
+        clientId: queryScope.clientId,
+        batchId,
+      });
+    }
+  }, [appliedFilters.batchId, queryScope.canQuery, queryScope.clientId, queryScope.tenantId]);
 
   async function loadLines() {
     setLoading(true);
     setError(null);
     try {
-      if (!tenantId) {
+      if (!queryScope.canQuery || needsBatchSelection) {
         setPageData({ items: [], page: page - 1, size: pageSize, totalElements: 0, totalPages: 0 });
         return;
       }
       const data = await omsApi.labelLines.list({
-        tenantId,
-        clientId,
+        tenantId: requireTenantId(queryScope.tenantId),
+        clientId: queryScope.clientId,
         page: page - 1,
         size: pageSize,
         batchId: parseNumericFilter(appliedFilters.batchId),
@@ -116,16 +146,33 @@ export function LabelLinesPage() {
   }
 
   function resetFilters() {
+    const nextFilters = labelFiltersForScope(queryScope.tenantId, queryScope.clientId);
     setPage(1);
-    setFilters(initialFilters);
-    setAppliedFilters(initialFilters);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
     setLabelType('ALL');
     setAppliedLabelType('ALL');
   }
 
+  function selectBatch(batch: BackendBatchSummary) {
+    const nextFilters: LabelFilters = { ...filters, batchId: String(batch.id) };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+  }
+
+  function chooseDifferentBatch() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    const nextFilters: LabelFilters = { ...filters, batchId: '' };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
   async function handleDownloadCurrent() {
     if (!canDownloadCurrent) {
-      setError('다운로드할 배치를 하나로 좁혀 주세요. 배치 ID를 입력하거나 같은 배치의 조회 결과에서 실행할 수 있습니다.');
+      setError('다운로드할 배치를 하나로 좁혀 주세요. 다시 배치를 선택하거나 같은 배치의 조회 결과에서 실행할 수 있습니다.');
       return;
     }
     await downloadLabels({
@@ -164,13 +211,13 @@ export function LabelLinesPage() {
     setError(null);
     setDownloadMessage(null);
     try {
-      if (!tenantId) {
+      if (!queryScope.tenantId) {
         setError('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
         return;
       }
       const downloaded = await omsApi.downloads.labels({
-        tenantId,
-        clientId,
+        tenantId: queryScope.tenantId,
+        clientId: queryScope.clientId,
         batchId,
         labelType: requestedLabelType === 'ALL' ? undefined : requestedLabelType,
         orderNo: textFilter(appliedFilters.orderNo),
@@ -191,6 +238,32 @@ export function LabelLinesPage() {
     }
   }
 
+  if (queryScope.needsClientSelection && queryScope.tenantId) {
+    return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
+  }
+
+  if (queryScope.blockedReason || !queryScope.tenantId) {
+    return (
+      <EmptyState
+        description={queryScope.blockedReason ?? '조회에 필요한 물류사 정보를 확인할 수 없습니다.'}
+        title="조회 범위를 확인해야 합니다."
+      />
+    );
+  }
+
+  if (needsBatchSelection && queryScope.clientId) {
+    return (
+      <BatchSelectionPanel
+        clientId={queryScope.clientId}
+        clientName={queryScope.clientName}
+        description="선택한 배치 기준으로 Label 데이터를 조회합니다."
+        onSelectBatch={selectBatch}
+        tenantId={queryScope.tenantId}
+        title="Label 데이터를 조회할 배치를 선택하세요"
+      />
+    );
+  }
+
   if (loading && !pageData) {
     return <LoadingState label="Label 데이터를 불러오는 중입니다." />;
   }
@@ -205,6 +278,14 @@ export function LabelLinesPage() {
       ) : null}
 
       <LabelSummaryCards summary={summary} />
+
+      <SelectedBatchScopeBar
+        batchId={appliedFilters.batchId}
+        batchNo={selectedBatchSelection?.batchNo}
+        clientName={queryScope.clientName}
+        deliveryDate={selectedBatchSelection?.deliveryDate}
+        onChooseBatch={chooseDifferentBatch}
+      />
 
       <LabelFilterPanel
         activeFilterCount={activeFilterCount}
@@ -265,24 +346,23 @@ export function LabelLinesPage() {
 
 function LabelSummaryCards({ summary }: { summary: ReturnType<typeof createLabelSummary> }) {
   const cards = [
-    { label: '검색 결과', value: summary.total, tone: 'teal' as const, description: '현재 조건의 전체 라벨 건수' },
-    { label: '현재 EA', value: summary.ea, tone: 'blue' as const, description: '현재 페이지의 EA 라벨 건수' },
-    { label: '현재 BOX', value: summary.box, tone: 'teal' as const, description: '현재 페이지의 BOX 라벨 건수' },
-    { label: '현재 QR 보유', value: summary.qrReady, tone: 'green' as const, description: '현재 페이지에서 QR코드가 있는 행' },
+    { label: '검색 결과', value: summary.total, description: '현재 조건의 전체 라벨 건수' },
+    { label: '현재 EA', value: summary.ea, description: '현재 페이지의 EA 라벨 건수' },
+    { label: '현재 BOX', value: summary.box, description: '현재 페이지의 BOX 라벨 건수' },
+    { label: '현재 QR 보유', value: summary.qrReady, description: '현재 페이지에서 QR코드가 있는 행' },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className="grid grid-cols-4 gap-2 md:gap-3">
       {cards.map((card) => (
-        <Card className="p-3 sm:p-4" key={card.label}>
-          <div className="flex items-start justify-between gap-3">
+        <Card className="min-w-0 px-2 py-3 md:p-4" key={card.label}>
+          <div className="min-w-0">
             <div>
-              <p className="text-sm font-semibold text-slate-600">{card.label}</p>
-              <p className="mt-2 text-2xl font-bold text-slate-950">{card.value.toLocaleString()}</p>
+              <p className="truncate text-xs font-semibold text-slate-600 md:text-sm">{card.label}</p>
+              <p className="mt-1 truncate text-xl font-bold text-slate-950 md:mt-2 md:text-2xl">{card.value.toLocaleString()}</p>
             </div>
-            <Badge tone={card.tone}>{card.label}</Badge>
           </div>
-          <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{card.description}</p>
+          <p className="mt-1 hidden text-xs leading-5 text-slate-500 md:block">{card.description}</p>
         </Card>
       ))}
     </div>
@@ -358,7 +438,7 @@ function LabelFilterPanel({
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
             {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
-          <p className="mt-1 hidden text-xs text-slate-500 sm:block">Label 유형, 배치 ID, 주문번호, 매칭코드, QR코드와 상품 정보를 조합해 데이터를 찾습니다.</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">Label 유형, 주문번호, 매칭코드, QR코드와 상품 정보를 조합해 데이터를 찾습니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
           <SegmentButton active={labelType === 'ALL'} onClick={() => setLabelType('ALL')}>전체</SegmentButton>
@@ -373,7 +453,6 @@ function LabelFilterPanel({
       {open ? (
         <div className="mt-4 border-t border-slate-100 pt-4">
           <div className="grid gap-3 lg:grid-cols-4">
-            <Input label="배치 ID" onChange={(event) => updateFilter('batchId', event.target.value)} placeholder="123" value={filters.batchId} />
             <Input label="주문번호" onChange={(event) => updateFilter('orderNo', event.target.value)} placeholder="2025..." value={filters.orderNo} />
             <Input label="매칭코드" onChange={(event) => updateFilter('matchingCode', event.target.value)} placeholder="M-" value={filters.matchingCode} />
             <Input label="QR코드" onChange={(event) => updateFilter('qrCode', event.target.value)} placeholder="QR-" value={filters.qrCode} />
@@ -622,7 +701,7 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function countActiveFilters(filters: LabelFilters) {
-  return Object.values(filters).filter((value) => value.trim().length > 0).length;
+  return Object.entries(filters).filter(([key, value]) => key !== 'batchId' && value.trim().length > 0).length;
 }
 
 function createLabelSummary(lines: LabelLine[], totalElements: number) {
@@ -673,7 +752,22 @@ function saveBlob(blob: Blob, fileName: string) {
   URL.revokeObjectURL(url);
 }
 
+function requireTenantId(tenantId: number | null) {
+  if (!tenantId) {
+    throw new Error('물류사 계정 정보가 없습니다.');
+  }
+  return tenantId;
+}
+
 function defaultFileName(batchId: number, labelType: LabelTypeFilter) {
   const suffix = labelType === 'ALL' ? 'ALL' : labelType;
   return `labels_batch_${batchId}_${suffix}.xlsx`;
+}
+
+function labelFiltersForScope(tenantId?: number | null, clientId?: number): LabelFilters {
+  const storedBatch = readBatchContextSelection(tenantId, clientId);
+  return {
+    ...initialFilters,
+    batchId: storedBatch ? String(storedBatch.batchId) : '',
+  };
 }

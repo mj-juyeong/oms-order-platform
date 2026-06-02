@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { omsApi } from '../api/oms';
+import { omsApi, type BackendBatchSummary } from '../api/oms';
+import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
 import { fakeCurrentUser } from '../app/auth';
-import { useClientScope } from '../app/clientContext';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   Badge,
   Button,
   Card,
   DateRangeQuickFilter,
+  EmptyState,
   ErrorState,
   Input,
   LoadingState,
@@ -15,10 +17,10 @@ import {
   Select,
 } from '../components/common';
 import { Pagination } from '../components/data/Pagination';
-import { BatchStatusBadge, CodeCell } from '../components/domain';
+import { BatchSelectionPanel, BatchStatusBadge, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { BackendOrderLine, OrderLine } from '../types/order';
-import { type DateRangeValue } from '../utils/dateRange';
+import { todayString, type DateRangeValue } from '../utils/dateRange';
 import { areFilterStatesEqual } from '../utils/filterState';
 
 type OrderViewMode = 'ALL' | 'BRANDS' | 'PRODUCTS' | 'STORES' | 'VEHICLES' | 'BATCHES';
@@ -64,7 +66,7 @@ const viewModeOptions: Array<{ label: string; value: OrderViewMode }> = [
 
 const initialFilters: OrderFilters = {
   batchId: '',
-  dueDateRange: { preset: 'ALL', from: '', to: '' },
+  dueDateRange: { preset: 'CUSTOM', from: todayString(), to: '' },
   orderNo: '',
   storeCode: '',
   storeName: '',
@@ -82,11 +84,10 @@ const unitOptions = [
 ];
 
 export function OrdersPage() {
-  const tenantId = fakeCurrentUser.tenantId ?? null;
-  const { clientId } = useClientScope();
+  const queryScope = useQueryScope();
   const [searchParams, setSearchParams] = useSearchParams();
-  const [filters, setFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams));
-  const [appliedFilters, setAppliedFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams));
+  const [filters, setFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams, queryScope.tenantId, queryScope.clientId));
+  const [appliedFilters, setAppliedFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams, queryScope.tenantId, queryScope.clientId));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewMode, setViewMode] = useState<OrderViewMode>('ALL');
   const [selectedGroup, setSelectedGroup] = useState<OrderGroupRow | null>(null);
@@ -96,6 +97,7 @@ export function OrdersPage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const previousClientIdRef = useRef<number | undefined>(undefined);
 
   const orders = useMemo(() => (response?.items ?? []).map(mapBackendOrderLine), [response]);
   const visibleOrders = orders;
@@ -104,13 +106,42 @@ export function OrdersPage() {
   const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
   const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
   const batchIdError = appliedFilters.batchId.trim() && !toNumberOrUndefined(appliedFilters.batchId) ? '배치 ID는 숫자로 입력해주세요.' : null;
+  const needsBatchSelection = queryScope.canQuery && !batchIdError && !toNumberOrUndefined(appliedFilters.batchId);
+  const selectedBatchSelection = useMemo(() => {
+    const batchId = toNumberOrUndefined(appliedFilters.batchId);
+    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    return selection && selection.batchId === batchId ? selection : null;
+  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
 
   useEffect(() => {
-    const nextFilters = orderFiltersFromSearchParams(searchParams);
+    const nextFilters = orderFiltersFromSearchParams(searchParams, queryScope.tenantId, queryScope.clientId);
     setPage(0);
     setFilters(nextFilters);
     setAppliedFilters(nextFilters);
-  }, [searchParams]);
+  }, [queryScope.clientId, queryScope.tenantId, searchParams]);
+
+  useEffect(() => {
+    const previousClientId = previousClientIdRef.current;
+    if (previousClientId !== undefined && previousClientId !== queryScope.clientId) {
+      const storedBatch = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+      setPage(0);
+      setFilters((current) => ({ ...current, batchId: storedBatch ? String(storedBatch.batchId) : '' }));
+      setAppliedFilters((current) => ({ ...current, batchId: storedBatch ? String(storedBatch.batchId) : '' }));
+      setResponse(null);
+    }
+    previousClientIdRef.current = queryScope.clientId;
+  }, [queryScope.clientId, queryScope.tenantId]);
+
+  useEffect(() => {
+    const batchId = toNumberOrUndefined(appliedFilters.batchId);
+    if (queryScope.canQuery && queryScope.tenantId && queryScope.clientId && batchId) {
+      saveBatchIdContextSelection({
+        tenantId: queryScope.tenantId,
+        clientId: queryScope.clientId,
+        batchId,
+      });
+    }
+  }, [appliedFilters.batchId, queryScope.canQuery, queryScope.clientId, queryScope.tenantId]);
 
   useEffect(() => {
     if (selectedGroup && !visibleGroups.some((item) => item.id === selectedGroup.id)) {
@@ -136,14 +167,14 @@ export function OrdersPage() {
     setLoading(true);
     setErrorMessage(null);
 
-    if (!tenantId) {
+    if (!queryScope.canQuery || needsBatchSelection) {
       setResponse({ items: [], page, size: pageSize, totalElements: 0, totalPages: 0 });
       setLoading(false);
       return;
     }
 
     omsApi.orders
-      .list(buildOrderQuery(appliedFilters, page, tenantId, clientId))
+      .list(buildOrderQuery(appliedFilters, page, queryScope.tenantId, queryScope.clientId))
       .then((data) => {
         if (!cancelled) {
           setResponse(data);
@@ -164,7 +195,7 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [appliedFilters, batchIdError, clientId, page, reloadSeq, tenantId]);
+  }, [appliedFilters, batchIdError, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq]);
 
   function updateFilter<TKey extends keyof OrderFilters>(key: TKey, value: OrderFilters[TKey]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -177,15 +208,71 @@ export function OrdersPage() {
   }
 
   function resetFilters() {
+    const nextFilters = orderFiltersFromSearchParams(new URLSearchParams(), queryScope.tenantId, queryScope.clientId);
     setPage(0);
-    setFilters(initialFilters);
-    setAppliedFilters(initialFilters);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
     setSearchParams({}, { replace: true });
+  }
+
+  function selectBatch(batch: BackendBatchSummary) {
+    const nextFilters: OrderFilters = { ...filters, batchId: String(batch.id), dueDateRange: { preset: 'ALL', from: '', to: '' } };
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.set('batchId', String(batch.id));
+    setPage(0);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function chooseDifferentBatch() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    const nextFilters: OrderFilters = { ...filters, batchId: '' };
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('batchId');
+    setPage(0);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setResponse(null);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  if (queryScope.needsClientSelection && queryScope.tenantId) {
+    return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
+  }
+
+  if (queryScope.blockedReason || !queryScope.tenantId) {
+    return (
+      <EmptyState
+        description={queryScope.blockedReason ?? '조회에 필요한 물류사 정보를 확인할 수 없습니다.'}
+        title="조회 범위를 확인해야 합니다."
+      />
+    );
+  }
+
+  if (needsBatchSelection && queryScope.clientId) {
+    return (
+      <BatchSelectionPanel
+        clientId={queryScope.clientId}
+        clientName={queryScope.clientName}
+        onSelectBatch={selectBatch}
+        tenantId={queryScope.tenantId}
+        title="주문을 조회할 배치를 선택하세요"
+      />
+    );
   }
 
   return (
     <div className="space-y-3 md:space-y-5">
       <SummaryCards loading={loading} summary={summary} />
+
+      <SelectedBatchScopeBar
+        batchId={appliedFilters.batchId}
+        batchNo={selectedBatchSelection?.batchNo}
+        clientName={queryScope.clientName}
+        deliveryDate={selectedBatchSelection?.deliveryDate}
+        onChooseBatch={chooseDifferentBatch}
+      />
 
       <OrderFilterPanel
         activeFilterCount={activeFilterCount}
@@ -265,10 +352,10 @@ export function OrdersPage() {
 
 function SummaryCards({ loading, summary }: { loading: boolean; summary: ReturnType<typeof createOrderSummary> }) {
   const cards = [
-    { label: '조회 주문', shortLabel: '조회', value: summary.total, tone: 'green' as const, description: '총 조회 건수' },
-    { label: '현재 페이지', shortLabel: '페이지', value: summary.loaded, tone: 'teal' as const, description: '표시 중인 건수' },
-    { label: '주문 수량', shortLabel: '수량', value: summary.totalQty, tone: 'blue' as const, description: '현재 페이지 합계' },
-    { label: '코드 보존', shortLabel: '코드', value: summary.codeSensitive, tone: 'amber' as const, description: '0 시작 코드' },
+    { label: '조회 주문', shortLabel: '조회', value: summary.total, description: '총 조회 건수' },
+    { label: '현재 페이지', shortLabel: '페이지', value: summary.loaded, description: '표시 중인 건수' },
+    { label: '주문 수량', shortLabel: '수량', value: summary.totalQty, description: '현재 페이지 합계' },
+    { label: '코드 보존', shortLabel: '코드', value: summary.codeSensitive, description: '0 시작 코드' },
   ];
 
   return (
@@ -283,9 +370,6 @@ function SummaryCards({ loading, summary }: { loading: boolean; summary: ReturnT
               </p>
               <p className="mt-1 truncate text-xl font-bold text-slate-950 md:mt-2 md:text-2xl">{loading ? '-' : card.value.toLocaleString()}</p>
             </div>
-            <span className="hidden md:inline-flex">
-              <Badge tone={card.tone}>{card.label}</Badge>
-            </span>
           </div>
           <p className="mt-1 hidden text-xs leading-5 text-slate-500 md:block">{card.description}</p>
         </Card>
@@ -342,7 +426,6 @@ function OrderFilterPanel({
       {open ? (
         <div className="mt-4 border-t border-slate-100 pt-4">
           <div className="grid gap-3 lg:grid-cols-5">
-            <Input label="배치 ID" onChange={(event) => updateFilter('batchId', event.target.value)} placeholder="예: 12" value={filters.batchId} />
             <DateRangeQuickFilter includeTomorrow label="납기일" onChange={(value) => updateFilter('dueDateRange', value)} value={filters.dueDateRange} />
             <Input label="주문번호" onChange={(event) => updateFilter('orderNo', event.target.value)} placeholder="0000000001" value={filters.orderNo} />
             <Input label="거래처코드" onChange={(event) => updateFilter('storeCode', event.target.value)} placeholder="BJ0133" value={filters.storeCode} />
@@ -808,21 +891,30 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
-function orderFiltersFromSearchParams(searchParams: URLSearchParams): OrderFilters {
+function orderFiltersFromSearchParams(
+  searchParams: URLSearchParams,
+  tenantId?: number | null,
+  clientId?: number,
+): OrderFilters {
+  const storedBatch = readBatchContextSelection(tenantId, clientId);
+  const batchId = searchParams.get('batchId') ?? (storedBatch ? String(storedBatch.batchId) : initialFilters.batchId);
   const dueDateFrom = searchParams.get('dueDateFrom') ?? '';
   const dueDateTo = searchParams.get('dueDateTo') ?? '';
 
   return {
     ...initialFilters,
+    batchId,
     dueDateRange: dueDateFrom || dueDateTo
       ? { preset: 'CUSTOM', from: dueDateFrom || dueDateTo, to: dueDateTo || dueDateFrom }
+      : batchId
+        ? { preset: 'ALL', from: '', to: '' }
       : initialFilters.dueDateRange,
   };
 }
 
-function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number, clientId?: number) {
+function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number | null, clientId?: number) {
   return {
-    tenantId,
+    tenantId: requireTenantId(tenantId),
     clientId,
     page,
     size: pageSize,
@@ -838,6 +930,13 @@ function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number, 
     unit: filters.unit === 'ALL' ? undefined : filters.unit,
     vehicleName: textOrUndefined(filters.vehicleName),
   };
+}
+
+function requireTenantId(tenantId: number | null) {
+  if (!tenantId) {
+    throw new Error('물류사 계정 정보가 없습니다.');
+  }
+  return tenantId;
 }
 
 function mapBackendOrderLine(row: BackendOrderLine): OrderLine {
@@ -965,6 +1064,10 @@ function uniqueValues(values: string[]) {
 
 function countActiveFilters(filters: OrderFilters) {
   return Object.entries(filters).filter(([key, value]) => {
+    if (key === 'batchId') {
+      return false;
+    }
+
     if (key === 'unit') {
       return value !== 'ALL';
     }

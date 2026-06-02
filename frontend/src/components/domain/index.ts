@@ -1,4 +1,6 @@
+export * from './BatchSelectionPanel';
 export * from './BatchStatusBadge';
+export * from './ClientSelectionPanel';
 export * from './CodeCell';
 export * from './ConfirmActionModal';
 export * from './FileUploadDropzone';
@@ -6,4 +8,5 @@ export * from './MasterUploadReviewPanel';
 export * from './MasterVersionSelector';
 export * from './MetricCard';
 export * from './SeverityBadge';
+export * from './SelectedBatchScopeBar';
 export * from './ValidationErrorPanel';

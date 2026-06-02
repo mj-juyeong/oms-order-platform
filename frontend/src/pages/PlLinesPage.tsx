@@ -1,23 +1,24 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
-import { omsApi, type BackendPlLine } from '../api/oms';
-import { fakeCurrentUser } from '../app/auth';
-import { useClientScope } from '../app/clientContext';
+import { omsApi, type BackendBatchSummary, type BackendPlLine } from '../api/oms';
+import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   Badge,
   Button,
   Card,
   DateRangeQuickFilter,
+  EmptyState,
   ErrorState,
   Input,
   LoadingState,
   ModalFrame,
 } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell } from '../components/domain';
+import { BatchSelectionPanel, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { PlLine } from '../types/pl';
-import { type DateRangeValue } from '../utils/dateRange';
+import { todayString, type DateRangeValue } from '../utils/dateRange';
 import { areFilterStatesEqual } from '../utils/filterState';
 
 interface PlFilters {
@@ -35,7 +36,7 @@ type PlTypeFilter = 'ALL' | PlLine['plType'];
 
 const initialFilters: PlFilters = {
   batchId: '',
-  dueDateRange: { preset: 'ALL', from: '', to: '' },
+  dueDateRange: { preset: 'CUSTOM', from: todayString(), to: '' },
   orderNo: '',
   productCode: '',
   productName: '',
@@ -47,10 +48,9 @@ const initialFilters: PlFilters = {
 const pageSize = 20;
 
 export function PlLinesPage() {
-  const tenantId = fakeCurrentUser.tenantId ?? null;
-  const { clientId } = useClientScope();
-  const [filters, setFilters] = useState<PlFilters>(initialFilters);
-  const [appliedFilters, setAppliedFilters] = useState<PlFilters>(initialFilters);
+  const queryScope = useQueryScope();
+  const [filters, setFilters] = useState<PlFilters>(() => plFiltersForScope(queryScope.tenantId, queryScope.clientId));
+  const [appliedFilters, setAppliedFilters] = useState<PlFilters>(() => plFiltersForScope(queryScope.tenantId, queryScope.clientId));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [plType, setPlType] = useState<PlTypeFilter>('ALL');
   const [appliedPlType, setAppliedPlType] = useState<PlTypeFilter>('ALL');
@@ -60,6 +60,7 @@ export function PlLinesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const previousClientIdRef = useRef<number | undefined>(undefined);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toPlLine), [pageData]);
   const summary = useMemo(() => createPlSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
@@ -68,11 +69,40 @@ export function PlLinesPage() {
     () => !areFilterStatesEqual(filters, appliedFilters) || plType !== appliedPlType,
     [appliedFilters, appliedPlType, filters, plType],
   );
+  const needsBatchSelection = queryScope.canQuery && !parseNumericFilter(appliedFilters.batchId);
+  const selectedBatchSelection = useMemo(() => {
+    const batchId = parseNumericFilter(appliedFilters.batchId);
+    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    return selection && selection.batchId === batchId ? selection : null;
+  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
+
+  useEffect(() => {
+    const previousClientId = previousClientIdRef.current;
+    if (previousClientId !== undefined && previousClientId !== queryScope.clientId) {
+      const nextFilters = plFiltersForScope(queryScope.tenantId, queryScope.clientId);
+      setPage(1);
+      setFilters(nextFilters);
+      setAppliedFilters(nextFilters);
+      setPageData(null);
+    }
+    previousClientIdRef.current = queryScope.clientId;
+  }, [queryScope.clientId, queryScope.tenantId]);
+
+  useEffect(() => {
+    const batchId = parseNumericFilter(appliedFilters.batchId);
+    if (queryScope.canQuery && queryScope.tenantId && queryScope.clientId && batchId) {
+      saveBatchIdContextSelection({
+        tenantId: queryScope.tenantId,
+        clientId: queryScope.clientId,
+        batchId,
+      });
+    }
+  }, [appliedFilters.batchId, queryScope.canQuery, queryScope.clientId, queryScope.tenantId]);
 
   useEffect(() => {
     void loadPlLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedFilters.batchId, appliedFilters.dueDateRange, appliedFilters.orderNo, appliedFilters.productCode, appliedFilters.storeCode, appliedFilters.vehicleName, appliedPlType, clientId, page, reloadSeq, tenantId]);
+  }, [appliedFilters.batchId, appliedFilters.dueDateRange, appliedFilters.orderNo, appliedFilters.productCode, appliedFilters.storeCode, appliedFilters.vehicleName, appliedPlType, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq]);
 
   useEffect(() => {
     if (selectedLine && !lines.some((line) => line.id === selectedLine.id)) {
@@ -85,18 +115,19 @@ export function PlLinesPage() {
     setError(null);
 
     try {
-      if (!tenantId) {
+      if (!queryScope.canQuery || needsBatchSelection) {
         setPageData({ items: [], page: page - 1, size: pageSize, totalElements: 0, totalPages: 0 });
         return;
       }
       const data = await omsApi.plLines.list({
-        tenantId,
-        clientId,
+        tenantId: requireTenantId(queryScope.tenantId),
+        clientId: queryScope.clientId,
         page: page - 1,
         size: pageSize,
         batchId: parseNumericFilter(appliedFilters.batchId),
         plType: appliedPlType === 'ALL' ? undefined : appliedPlType,
-        dueDate: exactDateFilter(appliedFilters.dueDateRange),
+        dueDateFrom: appliedFilters.dueDateRange.from || undefined,
+        dueDateTo: appliedFilters.dueDateRange.to || undefined,
         vehicleName: textFilter(appliedFilters.vehicleName),
         storeCode: textFilter(appliedFilters.storeCode),
         productCode: textFilter(appliedFilters.productCode),
@@ -116,9 +147,10 @@ export function PlLinesPage() {
   }
 
   function resetFilters() {
+    const nextFilters = plFiltersForScope(queryScope.tenantId, queryScope.clientId);
     setPage(1);
-    setFilters(initialFilters);
-    setAppliedFilters(initialFilters);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
     setPlType('ALL');
     setAppliedPlType('ALL');
   }
@@ -134,9 +166,59 @@ export function PlLinesPage() {
     setFiltersOpen(false);
   }
 
+  function selectBatch(batch: BackendBatchSummary) {
+    const nextFilters: PlFilters = { ...filters, batchId: String(batch.id), dueDateRange: { preset: 'ALL', from: '', to: '' } };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+  }
+
+  function chooseDifferentBatch() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    const nextFilters: PlFilters = { ...filters, batchId: '' };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  if (queryScope.needsClientSelection && queryScope.tenantId) {
+    return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
+  }
+
+  if (queryScope.blockedReason || !queryScope.tenantId) {
+    return (
+      <EmptyState
+        description={queryScope.blockedReason ?? '조회에 필요한 물류사 정보를 확인할 수 없습니다.'}
+        title="조회 범위를 확인해야 합니다."
+      />
+    );
+  }
+
+  if (needsBatchSelection && queryScope.clientId) {
+    return (
+      <BatchSelectionPanel
+        clientId={queryScope.clientId}
+        clientName={queryScope.clientName}
+        description="선택한 배치 기준으로 PL 데이터를 조회합니다."
+        onSelectBatch={selectBatch}
+        tenantId={queryScope.tenantId}
+        title="PL 데이터를 조회할 배치를 선택하세요"
+      />
+    );
+  }
+
   return (
     <div className="space-y-5">
       <PlSummaryCards summary={summary} />
+
+      <SelectedBatchScopeBar
+        batchId={appliedFilters.batchId}
+        batchNo={selectedBatchSelection?.batchNo}
+        clientName={queryScope.clientName}
+        deliveryDate={selectedBatchSelection?.deliveryDate}
+        onChooseBatch={chooseDifferentBatch}
+      />
 
       <PlFilterPanel
         activeFilterCount={activeFilterCount}
@@ -207,24 +289,23 @@ export function PlLinesPage() {
 
 function PlSummaryCards({ summary }: { summary: ReturnType<typeof createPlSummary> }) {
   const cards = [
-    { label: 'PL 행', value: summary.total, tone: 'teal' as const, description: '전체 PL 건수' },
-    { label: 'EA', value: summary.ea, tone: 'blue' as const, description: 'EA PL 건수' },
-    { label: 'BOX', value: summary.box, tone: 'teal' as const, description: 'BOX PL 건수' },
-    { label: '총 주문량', value: summary.qty, tone: 'amber' as const, description: 'PL 주문량 합계' },
+    { label: 'PL 행', value: summary.total, description: '전체 PL 건수' },
+    { label: 'EA', value: summary.ea, description: 'EA PL 건수' },
+    { label: 'BOX', value: summary.box, description: 'BOX PL 건수' },
+    { label: '총 주문량', value: summary.qty, description: 'PL 주문량 합계' },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+    <div className="grid grid-cols-4 gap-2 md:gap-3">
       {cards.map((card) => (
-        <Card className="p-3 sm:p-4" key={card.label}>
-          <div className="flex items-start justify-between gap-3">
+        <Card className="min-w-0 px-2 py-3 md:p-4" key={card.label}>
+          <div className="min-w-0">
             <div>
-              <p className="text-sm font-semibold text-slate-600">{card.label}</p>
-              <p className="mt-2 text-2xl font-bold text-slate-950">{card.value.toLocaleString()}</p>
+              <p className="truncate text-xs font-semibold text-slate-600 md:text-sm">{card.label}</p>
+              <p className="mt-1 truncate text-xl font-bold text-slate-950 md:mt-2 md:text-2xl">{card.value.toLocaleString()}</p>
             </div>
-            <Badge tone={card.tone}>{card.label}</Badge>
           </div>
-          <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{card.description}</p>
+          <p className="mt-1 hidden text-xs leading-5 text-slate-500 md:block">{card.description}</p>
         </Card>
       ))}
     </div>
@@ -281,7 +362,6 @@ function PlFilterPanel({
       {open ? (
         <div className="mt-4 border-t border-slate-100 pt-4">
           <div className="grid gap-3 lg:grid-cols-4">
-            <Input label="배치" onChange={(event) => updateFilter('batchId', event.target.value)} placeholder="BATCH-" value={filters.batchId} />
             <DateRangeQuickFilter
               includeTomorrow
               label="납기일"
@@ -492,7 +572,6 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 
 function countActiveFilters(filters: PlFilters) {
   return [
-    filters.batchId.trim(),
     filters.dueDateRange.preset !== 'ALL' ? filters.dueDateRange.preset : '',
     filters.orderNo.trim(),
     filters.productCode.trim(),
@@ -547,11 +626,23 @@ function textFilter(value: string) {
   return value.trim() || undefined;
 }
 
-function exactDateFilter(range: DateRangeValue) {
-  return range.from && range.from === range.to ? range.from : undefined;
-}
-
 function toNumber(value: number | string | null | undefined) {
   const numberValue = typeof value === 'number' ? value : Number(value ?? 0);
   return Number.isFinite(numberValue) ? numberValue : 0;
+}
+
+function requireTenantId(tenantId: number | null) {
+  if (!tenantId) {
+    throw new Error('물류사 계정 정보가 없습니다.');
+  }
+  return tenantId;
+}
+
+function plFiltersForScope(tenantId?: number | null, clientId?: number): PlFilters {
+  const storedBatch = readBatchContextSelection(tenantId, clientId);
+  return {
+    ...initialFilters,
+    batchId: storedBatch ? String(storedBatch.batchId) : '',
+    dueDateRange: storedBatch ? { preset: 'ALL', from: '', to: '' } : initialFilters.dueDateRange,
+  };
 }

@@ -98,8 +98,10 @@ export function BatchesPage() {
     };
   }, [appliedFilters.dateRange, appliedFilters.errorOnly, appliedFilters.keyword, appliedFilters.status, clientId, page, reloadSeq, tenantId]);
 
-  const batches = response?.items ?? [];
-  const summary = useMemo(() => createBatchSummary(response?.items ?? [], response?.totalElements ?? 0), [response]);
+  const batches = useMemo(() => hideResolvedSupplementParents(response?.items ?? []), [response]);
+  const hiddenResolvedParentCount = (response?.items.length ?? 0) - batches.length;
+  const visibleTotalElements = Math.max(0, (response?.totalElements ?? 0) - hiddenResolvedParentCount);
+  const summary = useMemo(() => createBatchSummary(batches, visibleTotalElements), [batches, visibleTotalElements]);
   const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
   const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
 
@@ -138,7 +140,7 @@ export function BatchesPage() {
         <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-sm font-semibold text-slate-900">
-              총 <span className="text-teal-700">{(response?.totalElements ?? 0).toLocaleString()}</span>건의 배치가 조회되었습니다.
+              총 <span className="text-teal-700">{visibleTotalElements.toLocaleString()}</span>건의 배치가 조회되었습니다.
             </p>
             <p className="mt-1 text-xs text-slate-500">현재 범위: {scopeLabel}</p>
           </div>
@@ -152,7 +154,7 @@ export function BatchesPage() {
 
       {errorMessage ? <ApiErrorCard message={errorMessage} onRetry={() => setReloadSeq((current) => current + 1)} /> : null}
       {loading ? <LoadingCard message="배치 목록을 불러오는 중입니다." /> : <BatchList items={batches} />}
-      <Pagination page={(response?.page ?? page) + 1} total={response?.totalElements ?? batches.length} totalPages={Math.max(1, response?.totalPages ?? 1)} />
+      <Pagination page={(response?.page ?? page) + 1} total={visibleTotalElements} totalPages={Math.max(1, response?.totalPages ?? 1)} />
     </div>
   );
 }
@@ -390,6 +392,20 @@ function createBatchSummary(items: BackendBatchSummary[], totalElements: number)
     readyToConfirm,
     total: totalElements,
   };
+}
+
+function hideResolvedSupplementParents(items: BackendBatchSummary[]) {
+  const confirmedSupplementParentIds = new Set(
+    items
+      .filter((item) => item.status === 'CONFIRMED' && item.parentBatchId)
+      .map((item) => item.parentBatchId as number),
+  );
+
+  if (confirmedSupplementParentIds.size === 0) {
+    return items;
+  }
+
+  return items.filter((item) => !(item.status === 'NEEDS_MORE_INFO' && confirmedSupplementParentIds.has(item.id)));
 }
 
 function ApiErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {
