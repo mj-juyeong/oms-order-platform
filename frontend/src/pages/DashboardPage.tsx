@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchSummary, type ClientSummary, type ValidationErrorItem } from '../api/oms';
@@ -7,22 +8,42 @@ import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelect
 import { Badge, Button, Card, Select } from '../components/common';
 import { FilterBar } from '../components/data';
 import { BatchStatusBadge } from '../components/domain';
+import type { BackendOrderLine } from '../types/order';
 import type { ValidationSeverity } from '../types/validation';
 
 type PeriodFilter = 'TODAY' | '7DAYS' | 'ALL';
 
 interface IssueSummary {
+  batchId?: number;
   label: string;
   count: number;
+  errorCode?: string;
   severity: ValidationSeverity;
 }
 
+interface DueDateSummaryRow {
+  dueDate: string;
+  confirmedLineCount: number;
+  errorCount: number;
+  orderLineCount: number;
+  orderNoCount: number;
+  productCount: number;
+  storeCount: number;
+  totalQty: number;
+  warningCount: number;
+}
+
 const dashboardBatchPageSize = 100;
+const dashboardOrderPageSize = 500;
 const issueBatchLimit = 8;
 
 export function DashboardPage() {
   if (fakeCurrentUser.userScopeType === 'SYSTEM') {
     return <PlatformAdminDashboard />;
+  }
+
+  if (fakeCurrentUser.userScopeType === 'CLIENT') {
+    return <ClientOperationsDashboard />;
   }
 
   return <TenantOperationsDashboard />;
@@ -260,7 +281,12 @@ function TenantOperationsDashboard() {
                 page: 0,
                 size: 50,
               })
-              .then((page) => page.items)
+              .then((page) =>
+                page.items.map((issue) => ({
+                  ...issue,
+                  batchId: issue.batchId ?? batch.id,
+                })),
+              )
               .catch(() => []),
           ),
         );
@@ -330,11 +356,10 @@ function TenantOperationsDashboard() {
               <span className="font-mono text-slate-900">{visibleBatches.length.toLocaleString()}개 배치</span>
             </div>
             <StackedStatusBar summary={summary} totalBatches={Math.max(visibleBatches.length, 1)} />
-            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-4">
-              <LegendDot color="bg-blue-900" label="확정 대기" value={summary.readyBatches.length} />
-              <LegendDot color="bg-emerald-500" label="확정 완료" value={summary.confirmedBatches.length} />
+            <div className="mt-4 grid grid-cols-2 gap-3 text-xs text-slate-600 sm:grid-cols-3">
+              <LegendDot color="bg-slate-700" label="확정 대기" value={summary.readyBatches.length} />
+              <LegendDot color="bg-teal-600" label="확정 완료" value={summary.confirmedBatches.length} />
               <LegendDot color="bg-red-500" label="Error" value={summary.blockedBatches.length} />
-              <LegendDot color="bg-amber-400" label="Warning" value={summary.warningOnlyBatches.length} />
             </div>
           </div>
         </Card>
@@ -353,7 +378,7 @@ function TenantOperationsDashboard() {
           <div className="mt-7 space-y-6">
             <SeverityBar label="Error" severityTotals={summary.severityTotals} tone="red" value={summary.severityTotals.ERROR} />
             <SeverityBar label="Warning" severityTotals={summary.severityTotals} tone="amber" value={summary.severityTotals.WARNING} />
-            <SeverityBar label="Info" severityTotals={summary.severityTotals} tone="blue" value={summary.severityTotals.INFO} />
+            <SeverityBar label="Info" severityTotals={summary.severityTotals} tone="neutral" value={summary.severityTotals.INFO} />
           </div>
 
           <div className="mt-7 rounded-md border border-red-100 bg-red-50 px-4 py-4">
@@ -400,7 +425,7 @@ function TenantOperationsDashboard() {
               issueSummary
                 .slice(0, 3)
                 .map((issue) => (
-                  <IssueBar count={issue.count} key={`${issue.severity}-${issue.label}`} label={issue.label} max={maxIssueCount} severity={issue.severity} />
+                  <IssueBar count={issue.count} key={`${issue.severity}-${issue.label}`} label={issue.label} max={maxIssueCount} severity={issue.severity} to={validationIssueLink(issue)} />
                 ))
             ) : (
               <DashboardEmpty message="표시할 검증 이슈가 없습니다." />
@@ -426,6 +451,351 @@ function TenantOperationsDashboard() {
   );
 }
 
+function ClientOperationsDashboard() {
+  const tenantId = fakeCurrentUser.tenantId ?? null;
+  const clientId = fakeCurrentUser.clientId ?? null;
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>('TODAY');
+  const [batches, setBatches] = useState<BackendBatchSummary[]>([]);
+  const [orders, setOrders] = useState<BackendOrderLine[]>([]);
+  const [validationIssues, setValidationIssues] = useState<ValidationErrorItem[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [issuesLoading, setIssuesLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const [calendarMonth, setCalendarMonth] = useState(monthKey(new Date()));
+  const [selectedDueDate, setSelectedDueDate] = useState('');
+  const [calendarOpen, setCalendarOpen] = useState(false);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClientDashboard() {
+      setLoading(true);
+      setErrorMessage(null);
+      try {
+        if (!tenantId || !clientId) {
+          setBatches([]);
+          setOrders([]);
+          return;
+        }
+
+        const batchPage = await omsApi.batches.list({ tenantId, clientId, page: 0, size: dashboardBatchPageSize });
+        const latestUploadDate = getLatestOperatingDate(batchPage.items);
+        const targetBatches = filterBatchesByPeriod(batchPage.items, periodFilter, latestUploadDate);
+        const orderItems = await loadDashboardOrdersForBatches(tenantId, clientId, targetBatches);
+
+        if (!ignore) {
+          setBatches(batchPage.items);
+          setOrders(orderItems);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setBatches([]);
+          setOrders([]);
+          setErrorMessage(formatApiError(error));
+        }
+      } finally {
+        if (!ignore) {
+          setLoading(false);
+        }
+      }
+    }
+
+    void loadClientDashboard();
+    return () => {
+      ignore = true;
+    };
+  }, [clientId, periodFilter, reloadSeq, tenantId]);
+
+  const latestOperatingDate = useMemo(() => getLatestOperatingDate(batches), [batches]);
+  const visibleBatches = useMemo(
+    () => filterBatchesByPeriod(batches, periodFilter, latestOperatingDate),
+    [batches, latestOperatingDate, periodFilter],
+  );
+  const visibleBatchIds = useMemo(() => new Set(visibleBatches.map((batch) => batch.id)), [visibleBatches]);
+  const visibleOrders = useMemo(() => orders.filter((order) => visibleBatchIds.has(order.batchId)), [orders, visibleBatchIds]);
+  const orderSummary = useMemo(() => createClientOrderSummary(visibleOrders), [visibleOrders]);
+  const requestSummary = useMemo(() => createClientRequestSummary(visibleBatches), [visibleBatches]);
+  const validationImpact = useMemo(() => createValidationImpactSummary(validationIssues, visibleBatches), [validationIssues, visibleBatches]);
+  const dueDateRows = useMemo(() => groupOrdersByDueDate(visibleOrders, validationIssues, visibleBatches), [validationIssues, visibleBatches, visibleOrders]);
+  const upcomingRows = dueDateRows.slice(0, 5);
+  const selectedDueDateRow = dueDateRows.find((row) => row.dueDate === selectedDueDate) ?? dueDateRows[0] ?? null;
+  const priorityItems = useMemo(() => priorityBatches(visibleBatches).slice(0, 3), [visibleBatches]);
+
+  useEffect(() => {
+    const firstDatedRow = dueDateRows.find((row) => isIsoDate(row.dueDate));
+    if (!firstDatedRow) {
+      setSelectedDueDate('');
+      return;
+    }
+
+    if (!selectedDueDate || !dueDateRows.some((row) => row.dueDate === selectedDueDate)) {
+      setSelectedDueDate(firstDatedRow.dueDate);
+    }
+    if (!dueDateRows.some((row) => isIsoDate(row.dueDate) && row.dueDate.startsWith(calendarMonth))) {
+      setCalendarMonth(monthKeyFromDateString(firstDatedRow.dueDate));
+    }
+  }, [calendarMonth, dueDateRows, selectedDueDate]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    async function loadClientIssueImpact() {
+      const targetBatches = visibleBatches
+        .filter((batch) => batch.errorCount > 0 || batch.warningCount > 0 || batch.infoCount > 0)
+        .slice(0, issueBatchLimit);
+
+      if (!tenantId || targetBatches.length === 0) {
+        setValidationIssues([]);
+        return;
+      }
+
+      setIssuesLoading(true);
+      try {
+        const responses = await Promise.all(
+          targetBatches.map((batch) =>
+            omsApi.batches
+              .validationErrors(batch.id, { tenantId, clientId: batch.clientId, page: 0, size: 50 })
+              .then((page) =>
+                page.items.map((issue) => ({
+                  ...issue,
+                  batchId: issue.batchId ?? batch.id,
+                })),
+              )
+              .catch(() => []),
+          ),
+        );
+        if (!ignore) {
+          setValidationIssues(responses.flat());
+        }
+      } finally {
+        if (!ignore) {
+          setIssuesLoading(false);
+        }
+      }
+    }
+
+    void loadClientIssueImpact();
+    return () => {
+      ignore = true;
+    };
+  }, [tenantId, visibleBatches]);
+
+  return (
+    <div className="space-y-6">
+      <FilterBar hideActions>
+        <Select
+          label="업로드 기간"
+          onChange={(event) => setPeriodFilter(event.target.value as PeriodFilter)}
+          options={[
+            { label: latestOperatingDate ? `최근 업로드일 배치 (${latestOperatingDate})` : '최근 업로드일 배치', value: 'TODAY' },
+            { label: '최근 7일 업로드 배치', value: '7DAYS' },
+            { label: '전체 배치', value: 'ALL' },
+          ]}
+          value={periodFilter}
+        />
+      </FilterBar>
+
+      {errorMessage ? <DashboardError message={errorMessage} onRetry={() => setReloadSeq((current) => current + 1)} /> : null}
+
+      <Card className="border-teal-100 bg-teal-50/70 p-5">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h2 className="text-base font-bold text-slate-950">고객사 업무 현황</h2>
+            <p className="mt-2 max-w-4xl text-sm leading-6 text-slate-700">
+              주문 현황, 확인이 필요한 오류, 확정 요청 진행 상태를 한눈에 확인합니다.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Link className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800" to="/batches">
+              내 배치 보기
+            </Link>
+            <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to="/orders">
+              주문 요약 보기
+            </Link>
+          </div>
+        </div>
+      </Card>
+
+      <section className="grid gap-5 2xl:grid-cols-[minmax(0,1.45fr)_minmax(420px,0.9fr)]">
+        <Card className="p-5">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h2 className="text-base font-bold text-slate-950">주문 현황</h2>
+              <p className="mt-1 text-sm text-slate-600">선택한 업로드 기간의 주문을 납기일 기준으로 확인합니다.</p>
+            </div>
+            <Badge tone={orderSummary.unconfirmedLineCount > 0 ? 'amber' : 'neutral'}>
+              {orderSummary.unconfirmedLineCount > 0 ? `확정 전 ${orderSummary.unconfirmedLineCount}건` : '확정 완료'}
+            </Badge>
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+            <ClientSmallStat label="주문 항목" value={orderSummary.orderLineCount} />
+            <ClientSmallStat label="납품처" value={orderSummary.storeCount} />
+            <ClientSmallStat label="품목" value={orderSummary.productCount} />
+            <ClientSmallStat label="총 수량" value={orderSummary.totalQty} />
+          </div>
+
+          <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+            <DueDateVolumeChart
+              loading={loading}
+              rows={dueDateRows}
+              selectedDueDate={selectedDueDateRow?.dueDate ?? ''}
+            />
+            <DueDateDetailPanel loading={loading} row={selectedDueDateRow} />
+          </div>
+
+          <div className="mt-5 flex justify-end">
+            <button
+              className="inline-flex h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+              onClick={() => setCalendarOpen((current) => !current)}
+              type="button"
+            >
+              {calendarOpen ? <ChevronUp aria-hidden="true" size={18} /> : <ChevronDown aria-hidden="true" size={18} />}
+              {calendarOpen ? '캘린더 접기' : '캘린더 펼치기'}
+            </button>
+          </div>
+
+          {calendarOpen ? (
+            <div className="mt-4">
+              <DueDateCalendar
+                month={calendarMonth}
+                rows={dueDateRows}
+                selectedDueDate={selectedDueDateRow?.dueDate ?? ''}
+                onMonthChange={setCalendarMonth}
+                onSelectDate={setSelectedDueDate}
+              />
+            </div>
+          ) : null}
+
+          <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
+            <div className="grid grid-cols-[1fr_84px_84px_84px] bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 sm:grid-cols-[1fr_96px_96px_96px]">
+              <span>최근 일정</span>
+              <span className="text-right">주문</span>
+              <span className="text-right">납품처</span>
+              <span className="text-right">항목</span>
+            </div>
+            {loading ? <DashboardEmpty message="주문 요약을 불러오는 중입니다." /> : null}
+            {!loading && upcomingRows.length === 0 ? <DashboardEmpty message="표시할 주문 현황이 없습니다." /> : null}
+            {!loading
+              ? upcomingRows.map((row) => (
+                  <Link
+                    className="grid grid-cols-[1fr_84px_84px_84px] items-center border-t border-slate-100 px-4 py-3 text-sm transition hover:bg-teal-50/50 sm:grid-cols-[1fr_96px_96px_96px]"
+                    key={row.dueDate}
+                    to={isIsoDate(row.dueDate) ? `/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}` : '/orders'}
+                  >
+                    <span className="font-semibold text-slate-950">{row.dueDate || '-'}</span>
+                    <span className="text-right font-mono text-slate-900">{row.orderNoCount.toLocaleString()}</span>
+                    <span className="text-right font-mono text-slate-900">{row.storeCount.toLocaleString()}</span>
+                    <span className="text-right font-mono text-slate-900">{row.orderLineCount.toLocaleString()}</span>
+                  </Link>
+                ))
+              : null}
+          </div>
+        </Card>
+
+        <Card className="flex flex-col p-5">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-950">확인 필요 오류</h2>
+              <p className="mt-1 text-sm text-slate-600">우선 확인할 오류가 어떤 주문, 납품처, 품목에 영향을 주는지 보여줍니다.</p>
+            </div>
+            {issuesLoading ? <Badge>조회 중</Badge> : <Badge tone={validationImpact.errorCount > 0 ? 'red' : 'neutral'}>Error {validationImpact.errorCount}</Badge>}
+          </div>
+
+          <div className="mt-5 grid grid-cols-3 gap-3">
+            <ClientSmallStat label="영향 주문" tone={validationImpact.errorCount > 0 ? 'red' : validationImpact.warningCount > 0 ? 'amber' : 'slate'} value={validationImpact.affectedOrderNoCount} />
+            <ClientSmallStat label="영향 납품처" value={validationImpact.affectedStoreCount} />
+            <ClientSmallStat label="영향 품목" value={validationImpact.affectedProductCount} />
+          </div>
+
+          <div className="mt-5 flex-1 space-y-3">
+            {validationImpact.topReasons.length > 0 ? (
+              validationImpact.topReasons.map((reason) => (
+                <Link
+                  className="block rounded-md border border-slate-200 px-3 py-3 transition hover:border-teal-300 hover:bg-teal-50/50"
+                  key={`${reason.severity}-${reason.label}`}
+                  to={validationIssueLink(reason)}
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="truncate text-sm font-semibold text-slate-900">{reason.label}</p>
+                    <Badge tone={reason.severity === 'ERROR' ? 'red' : reason.severity === 'WARNING' ? 'amber' : 'neutral'}>{reason.count}건</Badge>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <DashboardEmpty message="확인 필요 오류가 없습니다." />
+            )}
+          </div>
+
+          <Link
+            className="mt-5 inline-flex h-9 w-full items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
+            to={firstErrorLink(visibleBatches.filter((batch) => batch.errorCount > 0 || batch.warningCount > 0 || batch.infoCount > 0))}
+          >
+            전체 오류 보기
+          </Link>
+        </Card>
+      </section>
+
+      <section className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-5">
+        <ClientMetricCard label="업로드 배치" loading={loading} value={visibleBatches.length} />
+        <ClientMetricCard label="주문 건수" loading={loading} value={orderSummary.orderNoCount} />
+        <ClientMetricCard label="오류 영향 주문" loading={loading} tone={validationImpact.errorCount > 0 ? 'red' : validationImpact.warningCount > 0 ? 'amber' : 'default'} value={validationImpact.affectedOrderNoCount} />
+        <ClientMetricCard label="확정 요청 가능" loading={loading} tone="primary" value={requestSummary.readyToRequest} />
+        <ClientMetricCard label="확정 완료" loading={loading} value={requestSummary.confirmed} />
+      </section>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+        <Card className="p-5">
+          <div className="mb-5 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-950">확정 요청 상태</h2>
+              <p className="mt-1 hidden text-sm text-slate-600 sm:block">검증 후 확정 요청 가능한 파일과 처리 완료 파일을 확인합니다.</p>
+            </div>
+            <Link className="text-sm font-semibold text-teal-700 hover:underline" to="/batches">
+              전체 보기
+            </Link>
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            <ClientRequestTile label="검증 필요" value={requestSummary.needsValidation} />
+            <ClientRequestTile label="요청 가능" tone="primary" value={requestSummary.readyToRequest} />
+            <ClientRequestTile label="요청/검토 중" tone="amber" value={requestSummary.inReview} />
+            <ClientRequestTile label="확정 완료" value={requestSummary.confirmed} />
+          </div>
+        </Card>
+
+        <Card className="p-5">
+          <div className="mb-5 flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-base font-bold text-slate-950">우선 확인 배치</h2>
+              <p className="mt-1 text-sm text-slate-600">오류가 있거나 확정 검토가 필요한 배치입니다.</p>
+            </div>
+          </div>
+          {loading ? <DashboardEmpty message="배치 데이터를 불러오는 중입니다." /> : null}
+          {!loading && priorityItems.length === 0 ? <DashboardEmpty message="우선 확인할 배치가 없습니다." /> : null}
+          <div className="space-y-3">
+            {!loading
+              ? priorityItems.map((batch) => (
+                  <Link
+                    className="flex items-center justify-between gap-3 rounded-md border border-slate-200 px-3 py-3 transition hover:border-teal-200 hover:bg-teal-50/40"
+                    key={batch.id}
+                    to={batch.errorCount > 0 ? `/batches/${batch.id}/validation?severity=ERROR` : `/batches/${batch.id}`}
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate font-mono text-sm font-bold text-slate-950">{batch.batchNo}</p>
+                      <p className="mt-1 text-xs text-slate-500">업로드 {formatDateTime(batch.uploadedAt)}</p>
+                    </div>
+                    <BatchStatusBadge status={batch.status} />
+                  </Link>
+                ))
+              : null}
+          </div>
+        </Card>
+      </section>
+    </div>
+  );
+}
+
 function PlatformMetric({
   label,
   loading,
@@ -439,8 +809,8 @@ function PlatformMetric({
 }) {
   const toneClasses = {
     default: 'border-teal-100 bg-teal-50 text-teal-900',
-    green: 'border-emerald-100 bg-emerald-50 text-emerald-900',
-    blue: 'border-blue-100 bg-blue-50 text-blue-900',
+    green: 'border-teal-100 bg-teal-50 text-teal-900',
+    blue: 'border-slate-200 bg-slate-50 text-slate-900',
     slate: 'border-slate-200 bg-slate-50 text-slate-900',
   };
 
@@ -476,9 +846,9 @@ function SummaryNumber({
   value: number;
 }) {
   const toneClasses = {
-    default: 'bg-blue-50 text-blue-800',
-    navy: 'bg-blue-900 text-white',
-    green: 'bg-emerald-50 text-emerald-800',
+    default: 'bg-slate-50 text-slate-800',
+    navy: 'bg-slate-100 text-slate-800',
+    green: 'bg-teal-50 text-teal-800',
     slate: 'bg-slate-100 text-slate-800',
   };
 
@@ -498,10 +868,9 @@ function StackedStatusBar({
   totalBatches: number;
 }) {
   const segments = [
-    { label: '확정 대기', value: summary.readyBatches.length, className: 'bg-blue-900 text-white' },
-    { label: '확정 완료', value: summary.confirmedBatches.length, className: 'bg-emerald-500 text-white' },
+    { label: '확정 대기', value: summary.readyBatches.length, className: 'bg-slate-700 text-white' },
+    { label: '확정 완료', value: summary.confirmedBatches.length, className: 'bg-teal-600 text-white' },
     { label: 'Error', value: summary.blockedBatches.length, className: 'bg-red-500 text-white' },
-    { label: 'Warning', value: summary.warningOnlyBatches.length, className: 'bg-amber-400 text-amber-950' },
   ].filter((segment) => segment.value > 0);
 
   if (segments.length === 0) {
@@ -540,20 +909,35 @@ function SeverityBar({
 }: {
   label: string;
   severityTotals: Record<ValidationSeverity, number>;
-  tone: 'red' | 'amber' | 'blue';
+  tone: 'red' | 'amber' | 'neutral';
   value: number;
 }) {
   const total = Math.max(severityTotals.ERROR + severityTotals.WARNING + severityTotals.INFO, 1);
   const colors = {
-    red: 'bg-red-600 text-red-700 border-red-100',
-    amber: 'bg-amber-500 text-amber-800 border-amber-100',
-    blue: 'bg-blue-500 text-blue-700 border-blue-100',
+    red: {
+      accentColor: '',
+      barColor: 'bg-red-600',
+      borderColor: 'border-red-100',
+      textColor: 'text-red-700',
+    },
+    amber: {
+      accentColor: '',
+      barColor: 'bg-amber-300',
+      borderColor: 'border-amber-100',
+      textColor: 'text-amber-700',
+    },
+    neutral: {
+      accentColor: '',
+      barColor: 'bg-slate-500',
+      borderColor: 'border-slate-100',
+      textColor: 'text-slate-700',
+    },
   };
-  const [barColor, textColor, borderColor] = colors[tone].split(' ');
+  const { accentColor, barColor, borderColor, textColor } = colors[tone];
   const width = Math.max((value / total) * 100, value > 0 ? 10 : 0);
 
   return (
-    <div className={`rounded-lg border ${borderColor} bg-white px-3 py-3 shadow-sm`}>
+    <div className={`rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm`}>
       <div className="mb-2 flex items-center justify-between text-sm">
         <span className="font-semibold text-slate-800">{label}</span>
         <span className={`font-mono text-sm font-bold ${textColor}`}>{value.toLocaleString()}건</span>
@@ -571,12 +955,32 @@ function SeverityBar({
   );
 }
 
-function IssueBar({ count, label, max, severity }: { count: number; label: string; max: number; severity: ValidationSeverity }) {
-  const color = severity === 'ERROR' ? 'bg-red-600 text-red-700 border-red-100' : severity === 'WARNING' ? 'bg-amber-500 text-amber-800 border-amber-100' : 'bg-blue-500 text-blue-700 border-blue-100';
-  const [barColor, textColor, borderColor] = color.split(' ');
+function IssueBar({ count, label, max, severity, to }: { count: number; label: string; max: number; severity: ValidationSeverity; to: string }) {
+  const color =
+    severity === 'ERROR'
+      ? {
+          accentColor: '',
+          barColor: 'bg-red-600',
+          borderColor: 'border-red-100',
+          textColor: 'text-red-700',
+        }
+      : severity === 'WARNING'
+        ? {
+            accentColor: '',
+            barColor: 'bg-amber-300',
+            borderColor: 'border-amber-100',
+            textColor: 'text-amber-700',
+          }
+        : {
+            accentColor: '',
+            barColor: 'bg-slate-500',
+            borderColor: 'border-slate-100',
+            textColor: 'text-slate-700',
+          };
+  const { accentColor, barColor, borderColor, textColor } = color;
 
   return (
-    <div className={`rounded-lg border ${borderColor} bg-white px-3 py-3 shadow-sm`}>
+    <Link className={`block rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm transition hover:border-teal-300 hover:bg-teal-50/40`} to={to}>
       <div className="mb-2 flex items-center justify-between gap-3 text-sm">
         <span className="truncate font-semibold text-slate-800">{label}</span>
         <span className={`shrink-0 whitespace-nowrap font-mono text-sm font-bold ${textColor}`}>{count.toLocaleString()}건</span>
@@ -587,7 +991,7 @@ function IssueBar({ count, label, max, severity }: { count: number; label: strin
           style={{ width: `${Math.max((count / max) * 100, 14)}%` }}
         />
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -595,7 +999,7 @@ function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
   const hasError = batch.errorCount > 0;
 
   return (
-    <div className={`rounded-lg border bg-white px-4 py-4 shadow-sm ${hasError ? 'border-red-200 border-l-4 border-l-red-500' : 'border-blue-100 border-l-4 border-l-blue-800'}`}>
+    <div className={`rounded-lg border bg-white px-4 py-4 shadow-sm ${hasError ? 'border-red-200 border-l-4 border-l-red-500' : 'border-slate-200 border-l-4 border-l-slate-500'}`}>
       <div className="flex items-center justify-between gap-3">
         <Link className="font-mono text-sm font-bold text-slate-950 hover:text-teal-700" to={`/batches/${batch.id}`}>
           {batch.batchNo}
@@ -620,12 +1024,269 @@ function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
 }
 
 function ExternalStatusTile({ label, tone, value }: { label: string; tone: 'green' | 'amber'; value: number }) {
-  const toneClasses = tone === 'green' ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-900';
+  const toneClasses =
+    tone === 'green'
+      ? 'border-teal-200 bg-teal-50 text-teal-800'
+      : value > 0
+        ? 'border-amber-200 bg-amber-50 text-amber-900'
+        : 'border-slate-200 bg-slate-50 text-slate-700';
 
   return (
     <div className={`rounded-lg border px-4 py-3 ${toneClasses}`}>
       <p className="text-xs font-semibold opacity-80">{label}</p>
       <p className="mt-2 font-mono text-2xl font-bold">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function ClientMetricCard({
+  label,
+  loading,
+  tone = 'default',
+  value,
+}: {
+  label: string;
+  loading: boolean;
+  tone?: 'amber' | 'default' | 'primary' | 'red';
+  value: number;
+}) {
+  const toneClasses = {
+    amber: 'border-amber-200 bg-amber-50 text-amber-900',
+    default: 'border-slate-200 bg-white text-slate-950',
+    primary: 'border-teal-200 bg-teal-50 text-teal-900',
+    red: 'border-red-200 bg-red-50 text-red-900',
+  };
+
+  return (
+    <Card className={`p-3 sm:p-4 ${toneClasses[tone]}`}>
+      <p className="text-xs font-semibold opacity-75">{label}</p>
+      <p className="mt-2 text-2xl font-bold tracking-normal sm:text-3xl">{loading ? '-' : value.toLocaleString()}</p>
+    </Card>
+  );
+}
+
+function ClientSmallStat({ label, tone = 'slate', value }: { label: string; tone?: 'amber' | 'red' | 'slate'; value: number }) {
+  const toneClass = {
+    amber: 'bg-amber-50 text-amber-800',
+    red: 'bg-red-50 text-red-800',
+    slate: 'bg-slate-50 text-slate-800',
+  }[tone];
+
+  return (
+    <div className={`rounded-md px-3 py-3 ${toneClass}`}>
+      <p className="text-xs font-semibold opacity-75">{label}</p>
+      <p className="mt-1 font-mono text-xl font-bold">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function ClientRequestTile({ label, tone = 'slate', value }: { label: string; tone?: 'amber' | 'primary' | 'slate'; value: number }) {
+  const toneClass = {
+    amber: 'border-amber-200 bg-amber-50 text-amber-900',
+    primary: 'border-teal-200 bg-teal-50 text-teal-900',
+    slate: 'border-slate-200 bg-slate-50 text-slate-900',
+  }[tone];
+
+  return (
+    <div className={`rounded-md border px-4 py-4 ${toneClass}`}>
+      <p className="text-xs font-semibold opacity-75">{label}</p>
+      <p className="mt-2 font-mono text-2xl font-bold">{value.toLocaleString()}</p>
+    </div>
+  );
+}
+
+function DueDateVolumeChart({
+  loading,
+  rows,
+  selectedDueDate,
+}: {
+  loading: boolean;
+  rows: DueDateSummaryRow[];
+  selectedDueDate: string;
+}) {
+  const chartRows = rows.filter((row) => isIsoDate(row.dueDate)).slice(0, 7);
+  const maxOrders = Math.max(...chartRows.map((row) => row.orderNoCount), 1);
+
+  if (loading) {
+    return <DashboardEmpty message="주문량을 불러오는 중입니다." />;
+  }
+
+  if (chartRows.length === 0) {
+    return <DashboardEmpty message="표시할 주문량이 없습니다." />;
+  }
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-bold text-slate-950">날짜별 주문량</p>
+          <p className="mt-1 text-xs text-slate-500">가까운 날짜의 주문량과 확인 필요 상태를 비교합니다.</p>
+        </div>
+        <Badge tone="neutral">날짜 {chartRows.length}개</Badge>
+      </div>
+
+      <div className="mt-5 space-y-3">
+        {chartRows.map((row) => {
+          const selected = row.dueDate === selectedDueDate;
+          const width = Math.max((row.orderNoCount / maxOrders) * 100, 10);
+          const issueTone = row.errorCount > 0 ? 'red' : row.warningCount > 0 ? 'amber' : 'teal';
+          const issueText = row.errorCount > 0 ? `Error ${row.errorCount}` : row.warningCount > 0 ? `Warning ${row.warningCount}` : '정상';
+
+          return (
+            <Link
+              className={`grid min-h-20 w-full grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-lg border p-3 text-left transition sm:grid-cols-[88px_minmax(0,1fr)_104px] sm:items-center ${
+                selected ? 'border-teal-500 bg-teal-50 ring-2 ring-inset ring-teal-500' : 'border-slate-200 bg-white hover:border-teal-200 hover:bg-teal-50/50'
+              }`}
+              key={row.dueDate}
+              to={`/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}`}
+            >
+              <div>
+                <p className="font-mono text-base font-bold text-slate-950">{formatCompactDate(row.dueDate)}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{formatWeekday(row.dueDate)}</p>
+              </div>
+
+              <div className="min-w-0">
+                <div className="flex items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-slate-900">주문 {row.orderNoCount.toLocaleString()}건</p>
+                  <p className="shrink-0 text-xs text-slate-500">납품처 {row.storeCount.toLocaleString()}곳</p>
+                </div>
+                <div className="mt-2 h-4 overflow-hidden rounded-full bg-slate-100 ring-1 ring-inset ring-slate-200">
+                  <div
+                    className={`h-full rounded-full ${
+                      issueTone === 'red' ? 'bg-red-500' : issueTone === 'amber' ? 'bg-amber-400' : 'bg-teal-600'
+                    }`}
+                    style={{ width: `${width}%` }}
+                  />
+                </div>
+                <p className="mt-2 text-xs text-slate-500">주문 항목 {row.orderLineCount.toLocaleString()}건 · 품목 {row.productCount.toLocaleString()}개</p>
+              </div>
+
+              <div className="col-span-2 flex items-center justify-between gap-2 sm:col-span-1 sm:justify-end">
+                <Badge tone={issueTone}>{issueText}</Badge>
+                <span className="text-xs font-semibold text-teal-700">주문 보기</span>
+              </div>
+            </Link>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DueDateCalendar({
+  month,
+  onMonthChange,
+  onSelectDate,
+  rows,
+  selectedDueDate,
+}: {
+  month: string;
+  onMonthChange: (month: string) => void;
+  onSelectDate: (date: string) => void;
+  rows: DueDateSummaryRow[];
+  selectedDueDate: string;
+}) {
+  const rowMap = useMemo(() => new Map(rows.map((row) => [row.dueDate, row])), [rows]);
+  const cells = useMemo(() => createMonthCalendarCells(month), [month]);
+
+  return (
+    <div className="rounded-lg border border-slate-200">
+      <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
+        <button
+          aria-label="이전 달"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+          onClick={() => onMonthChange(shiftMonth(month, -1))}
+          type="button"
+        >
+          <ChevronLeft aria-hidden="true" size={16} />
+        </button>
+        <p className="font-semibold text-slate-950">{formatMonthLabel(month)}</p>
+        <button
+          aria-label="다음 달"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-slate-200 text-slate-700 hover:bg-slate-50"
+          onClick={() => onMonthChange(shiftMonth(month, 1))}
+          type="button"
+        >
+          <ChevronRight aria-hidden="true" size={16} />
+        </button>
+      </div>
+      <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50 text-center text-xs font-semibold text-slate-500">
+        {['일', '월', '화', '수', '목', '금', '토'].map((day) => (
+          <div className="py-2" key={day}>{day}</div>
+        ))}
+      </div>
+      <div className="grid grid-cols-7">
+        {cells.map((cell) => {
+          const row = cell.date ? rowMap.get(cell.date) : null;
+          const selected = cell.date === selectedDueDate;
+          const hasIssue = Boolean(row && (row.errorCount > 0 || row.warningCount > 0));
+
+          return (
+            <button
+              className={`min-h-24 border-b border-r border-slate-100 p-2 text-left transition last:border-r-0 ${
+                selected ? 'bg-teal-50 ring-2 ring-inset ring-teal-500' : row ? 'bg-white hover:bg-teal-50/50' : 'bg-slate-50/70 text-slate-400'
+              }`}
+              disabled={!row}
+              key={cell.key}
+              onClick={() => row && onSelectDate(row.dueDate)}
+              type="button"
+            >
+              <span className="text-xs font-semibold">{cell.dayLabel}</span>
+              {row ? (
+                <span className="mt-2 block">
+                  <span className="block font-mono text-lg font-bold text-slate-950">{row.orderNoCount}</span>
+                  <span className="block text-xs text-slate-500">주문</span>
+                  <span className={`mt-1 inline-flex h-1.5 w-1.5 rounded-full ${row.errorCount > 0 ? 'bg-red-500' : hasIssue ? 'bg-amber-400' : 'bg-teal-500'}`} />
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function DueDateDetailPanel({ loading, row }: { loading: boolean; row: DueDateSummaryRow | null }) {
+  if (loading) {
+    return <DashboardEmpty message="납기일 정보를 불러오는 중입니다." />;
+  }
+
+  if (!row) {
+    return <DashboardEmpty message="선택할 납기일 데이터가 없습니다." />;
+  }
+
+  const statusTone = row.errorCount > 0 ? 'red' : row.warningCount > 0 ? 'amber' : row.confirmedLineCount === row.orderLineCount ? 'teal' : 'neutral';
+  const statusText = row.errorCount > 0 ? `Error ${row.errorCount}` : row.warningCount > 0 ? `Warning ${row.warningCount}` : row.confirmedLineCount === row.orderLineCount ? '확정 완료' : '확정 전';
+
+  return (
+    <div className="rounded-lg border border-slate-200 p-4">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold text-slate-500">선택 납기일</p>
+          <p className="mt-1 font-mono text-xl font-bold text-slate-950">{row.dueDate}</p>
+        </div>
+        <Badge tone={statusTone}>{statusText}</Badge>
+      </div>
+
+      <div className="mt-5 grid grid-cols-2 gap-3">
+        <ClientSmallStat label="주문 건수" value={row.orderNoCount} />
+        <ClientSmallStat label="주문 항목" value={row.orderLineCount} />
+        <ClientSmallStat label="납품처" value={row.storeCount} />
+        <ClientSmallStat label="품목" value={row.productCount} />
+      </div>
+
+      <div className="mt-4 rounded-md bg-slate-50 px-3 py-3">
+        <p className="text-xs font-semibold text-slate-500">총 수량</p>
+        <p className="mt-1 font-mono text-2xl font-bold text-slate-950">{row.totalQty.toLocaleString()}</p>
+      </div>
+
+      <Link
+        className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white transition hover:bg-teal-800"
+        to={isIsoDate(row.dueDate) ? `/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}` : '/orders'}
+      >
+        해당 납기일 주문 보기
+      </Link>
     </div>
   );
 }
@@ -659,6 +1320,139 @@ function DashboardEmpty({ message }: { message: string }) {
       {message}
     </div>
   );
+}
+
+async function loadDashboardOrdersForBatches(tenantId: number, clientId: number, batches: BackendBatchSummary[]) {
+  if (batches.length === 0) {
+    return [];
+  }
+
+  const batchOrders = await Promise.all(
+    batches.map((batch) => loadDashboardOrdersForBatch(tenantId, clientId, batch.id)),
+  );
+  return batchOrders.flat();
+}
+
+async function loadDashboardOrdersForBatch(tenantId: number, clientId: number, batchId: number) {
+  const firstPage = await omsApi.orders.list({
+    tenantId,
+    clientId,
+    batchId,
+    confirmedOnly: false,
+    page: 0,
+    size: dashboardOrderPageSize,
+  });
+
+  if (firstPage.totalPages <= 1) {
+    return firstPage.items;
+  }
+
+  const remainingPages = await Promise.all(
+    Array.from({ length: firstPage.totalPages - 1 }, (_, index) =>
+      omsApi.orders.list({
+        tenantId,
+        clientId,
+        batchId,
+        confirmedOnly: false,
+        page: index + 1,
+        size: dashboardOrderPageSize,
+      }),
+    ),
+  );
+
+  return [firstPage, ...remainingPages].flatMap((page) => page.items);
+}
+
+function createClientOrderSummary(orders: BackendOrderLine[]) {
+  return {
+    orderLineCount: orders.length,
+    orderNoCount: uniqueDefinedValues(orders.map((order) => order.orderNo)).length,
+    productCount: uniqueDefinedValues(orders.map((order) => order.productCode)).length,
+    storeCount: uniqueDefinedValues(orders.map((order) => order.storeCode)).length,
+    totalQty: orders.reduce((sum, order) => sum + toNumber(order.orderQty), 0),
+    unconfirmedLineCount: orders.filter((order) => !order.confirmed).length,
+  };
+}
+
+function createClientRequestSummary(batches: BackendBatchSummary[]) {
+  return {
+    confirmed: batches.filter((batch) => batch.status === 'CONFIRMED').length,
+    inReview: batches.filter((batch) => batch.status === 'CONFIRMATION_REQUESTED' || batch.status === 'NEEDS_MORE_INFO').length,
+    needsValidation: batches.filter((batch) => batch.status === 'UPLOADED' || batch.status === 'VALIDATION_FAILED' || batch.errorCount > 0).length,
+    readyToRequest: batches.filter((batch) => batch.status === 'READY_TO_CONFIRM' && batch.errorCount === 0).length,
+  };
+}
+
+function createValidationImpactSummary(issues: ValidationErrorItem[], batches: BackendBatchSummary[]) {
+  const errorCount = batches.reduce((sum, batch) => sum + batch.errorCount, 0);
+  const warningCount = batches.reduce((sum, batch) => sum + batch.warningCount, 0);
+  const topReasons = createIssueSummary(issues, batches).slice(0, 4);
+
+  return {
+    affectedOrderNoCount: uniqueDefinedValues(issues.map((issue) => issue.orderNo)).length || (errorCount + warningCount > 0 ? Math.min(errorCount + warningCount, batches.length) : 0),
+    affectedProductCount: uniqueDefinedValues(issues.map((issue) => issue.productCode)).length,
+    affectedStoreCount: uniqueDefinedValues(issues.map((issue) => issue.storeCode)).length,
+    errorCount,
+    topReasons,
+    warningCount,
+  };
+}
+
+function groupOrdersByDueDate(orders: BackendOrderLine[], issues: ValidationErrorItem[], batches: BackendBatchSummary[]): DueDateSummaryRow[] {
+  const issueImpactByDate = createIssueImpactByDate(orders, issues);
+  const batchStatusById = new Map(batches.map((batch) => [batch.id, batch]));
+  const grouped = new Map<string, BackendOrderLine[]>();
+
+  orders.forEach((order) => {
+    const dueDate = order.dueDate || '납기일 없음';
+    grouped.set(dueDate, [...(grouped.get(dueDate) ?? []), order]);
+  });
+
+  return [...grouped.entries()]
+    .map(([dueDate, items]) => {
+      const impact = issueImpactByDate.get(dueDate);
+      const batchErrorCount = uniqueDefinedValues(items.map((item) => item.batchId))
+        .map((batchId) => batchStatusById.get(Number(batchId)))
+        .filter(Boolean)
+        .reduce((sum, batch) => sum + (batch?.errorCount ?? 0), 0);
+      const batchWarningCount = uniqueDefinedValues(items.map((item) => item.batchId))
+        .map((batchId) => batchStatusById.get(Number(batchId)))
+        .filter(Boolean)
+        .reduce((sum, batch) => sum + (batch?.warningCount ?? 0), 0);
+
+      return {
+        confirmedLineCount: items.filter((item) => item.confirmed).length,
+        dueDate,
+        errorCount: impact?.errorCount ?? batchErrorCount,
+        orderLineCount: items.length,
+        orderNoCount: uniqueDefinedValues(items.map((item) => item.orderNo)).length,
+        productCount: uniqueDefinedValues(items.map((item) => item.productCode)).length,
+        storeCount: uniqueDefinedValues(items.map((item) => item.storeCode)).length,
+        totalQty: items.reduce((sum, item) => sum + toNumber(item.orderQty), 0),
+        warningCount: impact?.warningCount ?? batchWarningCount,
+      };
+    })
+    .sort((left, right) => {
+      if (isIsoDate(left.dueDate) && isIsoDate(right.dueDate)) return left.dueDate.localeCompare(right.dueDate);
+      if (isIsoDate(left.dueDate)) return -1;
+      if (isIsoDate(right.dueDate)) return 1;
+      return left.dueDate.localeCompare(right.dueDate);
+    });
+}
+
+function createIssueImpactByDate(orders: BackendOrderLine[], issues: ValidationErrorItem[]) {
+  const dueDateByOrderNo = new Map(orders.map((order) => [order.orderNo, order.dueDate || '납기일 없음']));
+  const result = new Map<string, { errorCount: number; warningCount: number }>();
+
+  issues.forEach((issue) => {
+    const dueDate = dueDateByOrderNo.get(issue.orderNo) ?? '납기일 없음';
+    const current = result.get(dueDate) ?? { errorCount: 0, warningCount: 0 };
+    if (issue.severity === 'ERROR') current.errorCount += 1;
+    if (issue.severity === 'WARNING') current.warningCount += 1;
+    result.set(dueDate, current);
+  });
+
+  return result;
 }
 
 function createDashboardSummary(batches: BackendBatchSummary[]) {
@@ -707,8 +1501,10 @@ function createIssueSummary(issues: ValidationErrorItem[], batches: BackendBatch
       const label = issue.message || issue.userTitle || issue.errorCode || issue.severity;
       const key = `${issue.severity}:${label}`;
       acc[key] = {
+        batchId: acc[key]?.batchId ?? issue.batchId,
         label,
         count: (acc[key]?.count ?? 0) + 1,
+        errorCode: acc[key]?.errorCode ?? issue.errorCode,
         severity: issue.severity,
       };
       return acc;
@@ -716,11 +1512,11 @@ function createIssueSummary(issues: ValidationErrorItem[], batches: BackendBatch
   ).sort((left, right) => right.count - left.count);
 }
 
-function fallbackIssuesFromBatch(batch: BackendBatchSummary): Array<Pick<ValidationErrorItem, 'errorCode' | 'message' | 'severity' | 'userTitle'>> {
+function fallbackIssuesFromBatch(batch: BackendBatchSummary): Array<Pick<ValidationErrorItem, 'batchId' | 'errorCode' | 'message' | 'severity' | 'userTitle'>> {
   return [
-    ...Array.from({ length: batch.errorCount }, () => ({ errorCode: 'ERROR', message: 'Error 검증 항목', severity: 'ERROR' as const, userTitle: 'Error' })),
-    ...Array.from({ length: batch.warningCount }, () => ({ errorCode: 'WARNING', message: 'Warning 검증 항목', severity: 'WARNING' as const, userTitle: 'Warning' })),
-    ...Array.from({ length: batch.infoCount }, () => ({ errorCode: 'INFO', message: 'Info 검증 항목', severity: 'INFO' as const, userTitle: 'Info' })),
+    ...Array.from({ length: batch.errorCount }, () => ({ batchId: batch.id, errorCode: 'ERROR', message: 'Error 검증 항목', severity: 'ERROR' as const, userTitle: 'Error' })),
+    ...Array.from({ length: batch.warningCount }, () => ({ batchId: batch.id, errorCode: 'WARNING', message: 'Warning 검증 항목', severity: 'WARNING' as const, userTitle: 'Warning' })),
+    ...Array.from({ length: batch.infoCount }, () => ({ batchId: batch.id, errorCode: 'INFO', message: 'Info 검증 항목', severity: 'INFO' as const, userTitle: 'Info' })),
   ];
 }
 
@@ -755,8 +1551,26 @@ function dashboardScopeText(period: PeriodFilter, latestOperatingDate: string) {
   return `${label}${latestOperatingDate ? ` 기준 ${latestOperatingDate}` : ''} 배치와 확정 가능 배치를 먼저 확인합니다.`;
 }
 
-function firstErrorLink(blockedBatches: BackendBatchSummary[]) {
-  return blockedBatches[0] ? `/batches/${blockedBatches[0].id}/validation?severity=ERROR` : '/batches';
+function firstErrorLink(issueBatches: BackendBatchSummary[]) {
+  const batch = issueBatches[0];
+  if (!batch) {
+    return '/batches';
+  }
+
+  const severity = batch.errorCount > 0 ? 'ERROR' : batch.warningCount > 0 ? 'WARNING' : 'INFO';
+  return `/batches/${batch.id}/validation?severity=${severity}`;
+}
+
+function validationIssueLink(issue: IssueSummary) {
+  if (!issue.batchId) {
+    return '/batches';
+  }
+
+  const searchParams = new URLSearchParams({ severity: issue.severity });
+  if (issue.errorCode && !['ERROR', 'WARNING', 'INFO'].includes(issue.errorCode)) {
+    searchParams.set('errorCode', issue.errorCode);
+  }
+  return `/batches/${issue.batchId}/validation?${searchParams.toString()}`;
 }
 
 function formatApiError(error: unknown) {
@@ -796,4 +1610,86 @@ function dedupeClientsByName(clients: ClientSummary[]) {
     seen.add(key);
     return true;
   });
+}
+
+function uniqueDefinedValues(values: Array<number | string | null | undefined>) {
+  return [...new Set(values.filter((value): value is number | string => value !== null && value !== undefined && String(value).trim() !== ''))];
+}
+
+function toNumber(value?: number | string | null) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : 0;
+  if (typeof value === 'string') {
+    const parsed = Number(value.replace(/,/g, ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+  return 0;
+}
+
+function isIsoDate(value?: string | null) {
+  return Boolean(value && /^\d{4}-\d{2}-\d{2}$/.test(value));
+}
+
+function formatCompactDate(value: string) {
+  if (!isIsoDate(value)) return value;
+  return value.slice(5).replace('-', '/');
+}
+
+function formatWeekday(value: string) {
+  if (!isIsoDate(value)) return '';
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return '';
+  return new Intl.DateTimeFormat('ko-KR', { weekday: 'short' }).format(date);
+}
+
+function monthKey(date: Date) {
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}`;
+}
+
+function monthKeyFromDateString(date: string) {
+  return date.slice(0, 7);
+}
+
+function shiftMonth(month: string, delta: number) {
+  const [year, monthIndex] = parseMonthKey(month);
+  return monthKey(new Date(year, monthIndex - 1 + delta, 1));
+}
+
+function formatMonthLabel(month: string) {
+  const [year, monthIndex] = parseMonthKey(month);
+  return `${year}년 ${monthIndex}월`;
+}
+
+function createMonthCalendarCells(month: string) {
+  const [year, monthIndex] = parseMonthKey(month);
+  const firstDate = new Date(year, monthIndex - 1, 1);
+  const lastDate = new Date(year, monthIndex, 0);
+  const cells: Array<{ date: string | null; dayLabel: string; key: string }> = [];
+
+  for (let i = 0; i < firstDate.getDay(); i += 1) {
+    cells.push({ date: null, dayLabel: '', key: `blank-start-${i}` });
+  }
+
+  for (let day = 1; day <= lastDate.getDate(); day += 1) {
+    const date = `${year}-${pad2(monthIndex)}-${pad2(day)}`;
+    cells.push({ date, dayLabel: String(day), key: date });
+  }
+
+  while (cells.length % 7 !== 0) {
+    cells.push({ date: null, dayLabel: '', key: `blank-end-${cells.length}` });
+  }
+
+  return cells;
+}
+
+function parseMonthKey(month: string): [number, number] {
+  const [year, monthIndex] = month.split('-').map(Number);
+  const fallback = new Date();
+  return [
+    Number.isFinite(year) ? year : fallback.getFullYear(),
+    Number.isFinite(monthIndex) && monthIndex >= 1 && monthIndex <= 12 ? monthIndex : fallback.getMonth() + 1,
+  ];
+}
+
+function pad2(value: number) {
+  return String(value).padStart(2, '0');
 }

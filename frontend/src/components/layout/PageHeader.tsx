@@ -44,7 +44,7 @@ export function PageHeader({ description, notice, primaryAction, secondaryAction
         ) : null}
       </div>
       {notice ? (
-        <div className="mt-4 rounded-md border border-blue-200 bg-blue-50 px-4 py-3 text-sm leading-6 text-blue-800">
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-700">
           {notice}
         </div>
       ) : null}

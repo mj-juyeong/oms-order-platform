@@ -22,7 +22,7 @@ class ClientScopeService(
 	@Transactional(readOnly = true)
 	fun listClients(tenantId: Long): List<ClientSummaryResponse> {
 		val resolvedTenantId = accessScopeService.requireTenantAccess(tenantId)
-		return activeClients(resolvedTenantId)
+		return visibleClients(resolvedTenantId)
 			.map { it.toResponse() }
 	}
 
@@ -46,7 +46,7 @@ class ClientScopeService(
 			}
 		}
 
-		val clients = activeClients(resolvedTenantId)
+		val clients = visibleClients(resolvedTenantId)
 		val aliasesByClientId = clientAliasRepository.findAllByTenantIdAndActiveYn(resolvedTenantId, true)
 			.groupBy { it.clientId }
 
@@ -257,6 +257,18 @@ class ClientScopeService(
 			.groupBy { normalizeClientText(it.name) }
 			.values
 			.mapNotNull { clients -> clients.minByOrNull { it.id ?: Long.MAX_VALUE } }
+
+	private fun visibleClients(tenantId: Long): List<ClientEntity> {
+		val currentUser = accessScopeService.requireUser()
+		val clients = activeClients(tenantId)
+		if (currentUser.userScopeType != UserScopeType.CLIENT) {
+			return clients
+		}
+
+		val clientId = currentUser.clientId ?: throwForbidden("CLIENT 사용자에 clientId가 없습니다.")
+		accessScopeService.requireClientAccess(tenantId, clientId)
+		return clients.filter { it.id == clientId }
+	}
 }
 
 private data class MatchField(

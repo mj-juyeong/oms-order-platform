@@ -202,7 +202,7 @@ export function ExternalApiGuidePage() {
               <Badge tone="blue">API Key 인증</Badge>
             </div>
             <h2 className="mt-3 text-xl font-bold text-slate-950">물류 OMS 외부 API</h2>
-            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600">
+            <p className="mt-2 hidden max-w-3xl text-sm leading-6 text-slate-600 sm:block">
               WOS와 PL 연동 시스템에서 확정 완료된 운영 데이터를 조회하는 API입니다. 예시는 호출 도구별 코드 대신 요청 주소와 파라미터만 보여줍니다.
             </p>
           </div>
@@ -213,9 +213,9 @@ export function ExternalApiGuidePage() {
         </div>
       </Card>
 
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         {serviceInfo.map((item) => (
-          <Card className="p-4" key={item.label}>
+          <Card className="p-3 sm:p-4" key={item.label}>
             <p className="text-sm font-semibold text-slate-500">{item.label}</p>
             <p className="mt-2 text-base font-bold text-slate-950">{item.value}</p>
           </Card>
@@ -311,13 +311,13 @@ export function ExternalApiGuidePage() {
 
 function RequestConditionGroups() {
   return (
-    <div className="space-y-4 p-5">
+    <div className="space-y-3 p-3 sm:space-y-4 sm:p-5">
       {requestConditionGroups.map((group) => (
         <div className="overflow-hidden rounded-lg border border-slate-200" key={group.title}>
           <div className="flex flex-col gap-2 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex min-w-0 flex-wrap items-center gap-2">
               <Badge tone={group.tone}>{group.title}</Badge>
-              <p className="text-sm font-semibold text-slate-900">{group.description}</p>
+              <p className="hidden text-sm font-semibold text-slate-900 sm:block">{group.description}</p>
             </div>
             <p className="text-xs font-semibold text-slate-500">{group.items.length}개 조건</p>
           </div>
@@ -361,8 +361,19 @@ function RequestExample({ example, path }: { example: ApiExample; path: string }
           <CopyableCode value={`X-Api-Key: ${apiKeyPlaceholder}`} />
         </div>
 
-        <div className="mt-4 overflow-x-auto rounded-lg border border-slate-200">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <div className="mt-4 grid gap-2 sm:hidden">
+          {example.params.map((param) => (
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3" key={param.name}>
+              <div className="flex flex-wrap items-center gap-2">
+                <CodeCell value={param.name} />
+                <CodeCell maxWidthClass="max-w-[180px]" value={param.value} />
+              </div>
+              <p className="mt-2 text-xs leading-5 text-slate-600">{param.description}</p>
+            </div>
+          ))}
+        </div>
+        <div className="oms-table-scroll mt-4 hidden overflow-x-auto rounded-lg border border-slate-200 sm:block">
+          <table className="oms-responsive-table min-w-full divide-y divide-slate-200 text-sm">
             <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
               <tr>
                 <th className="px-4 py-3">파라미터</th>
@@ -436,28 +447,50 @@ function CopyButton({ dark = false, value }: { dark?: boolean; value: string }) 
 
 function GuideTable({ codeColumns = [], columns, rows }: { codeColumns?: number[]; columns: string[]; rows: string[][] }) {
   return (
-    <div className="overflow-x-auto">
-      <table className="min-w-full divide-y divide-slate-200 text-sm">
-        <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
-          <tr>
-            {columns.map((column) => (
-              <th className="px-5 py-3" key={column}>{column}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 bg-white">
-          {rows.map((row) => (
-            <tr key={row.join('-')}>
-              {row.map((cell, index) => (
-                <td className={`px-5 py-3 ${index === 0 ? 'font-semibold text-slate-900' : 'text-slate-600'}`} key={`${row[0]}-${cell}`}>
-                  {codeColumns.includes(index) ? <CodeCell maxWidthClass="max-w-[280px]" value={cell} /> : cell}
-                </td>
+    <>
+      <div className="grid gap-2 p-3 sm:hidden">
+        {rows.map((row) => (
+          <div className="rounded-lg border border-slate-200 bg-white p-3" key={row.join('-')}>
+            <p className="text-sm font-bold text-slate-950">{row[0]}</p>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              {row.slice(1).map((cell, index) => {
+                const columnIndex = index + 1;
+                return (
+                  <div className="min-w-0 rounded-md border border-slate-100 bg-slate-50 px-3 py-2" key={`${row[0]}-${columns[columnIndex]}`}>
+                    <p className="text-[11px] font-semibold text-slate-500">{columns[columnIndex]}</p>
+                    <div className="mt-1 min-w-0 truncate text-xs font-semibold text-slate-800" title={cell}>
+                      {codeColumns.includes(columnIndex) ? <CodeCell maxWidthClass="max-w-full" value={cell} /> : cell}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="oms-table-scroll hidden overflow-x-auto sm:block">
+        <table className="oms-responsive-table min-w-full divide-y divide-slate-200 text-sm">
+          <thead className="bg-slate-50 text-left text-xs font-semibold text-slate-500">
+            <tr>
+              {columns.map((column) => (
+                <th className="px-5 py-3" key={column}>{column}</th>
               ))}
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-slate-100 bg-white">
+            {rows.map((row) => (
+              <tr key={row.join('-')}>
+                {row.map((cell, index) => (
+                  <td className={`px-5 py-3 ${index === 0 ? 'font-semibold text-slate-900' : 'text-slate-600'}`} key={`${row[0]}-${cell}`}>
+                    {codeColumns.includes(index) ? <CodeCell maxWidthClass="max-w-[280px]" value={cell} /> : cell}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

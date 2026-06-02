@@ -38,6 +38,8 @@ class UserManagementService(
 			tenantId = currentUser.tenantId,
 			clientId = currentUser.clientId,
 			roles = currentUser.roles,
+			tenantName = currentUser.tenantId?.let { tenantRepository.findById(it).orElse(null)?.name },
+			clientName = currentUser.clientId?.let { clientRepository.findById(it).orElse(null)?.name },
 		)
 	}
 
@@ -271,7 +273,7 @@ class UserManagementService(
 			when (targetScope) {
 				UserScopeType.SYSTEM -> targetRoles == setOf(UserRole.SYSTEM_ADMIN)
 				UserScopeType.TENANT -> targetRoles.all { it in tenantUserRoles }
-				UserScopeType.CLIENT -> targetRoles == setOf(UserRole.VIEWER)
+				UserScopeType.CLIENT -> targetRoles.size == 1 && targetRoles.single() in clientUserRoles
 			}
 		if (!valid) {
 			throwForbidden("Requested roles are not allowed for $targetScope users.")
@@ -372,5 +374,6 @@ class UserManagementService(
 
 	companion object {
 		private val tenantUserRoles = setOf(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)
+		private val clientUserRoles = setOf(UserRole.OPERATOR, UserRole.VIEWER)
 	}
 }

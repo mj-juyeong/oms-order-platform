@@ -77,10 +77,11 @@ final permission = userScopeType data boundary + role action permission
 | `TENANT_ADMIN` | `TENANT` | `ADMIN` | 특정 물류사 관리자 |
 | `TENANT_OPERATOR` | `TENANT` | `OPERATOR` | 특정 물류사 운영 실무자 |
 | `TENANT_VIEWER` | `TENANT` | `VIEWER` | 특정 물류사 조회 사용자 |
+| `CLIENT_OPERATOR` | `CLIENT` | `OPERATOR` | 특정 고객사 업로드, 검증, 확정 요청 담당자 |
 | `CLIENT_VIEWER` | `CLIENT` | `VIEWER` | 특정 고객사 조회 사용자 |
 
-1차 MVP에서 `CLIENT + OPERATOR`, `CLIENT + ADMIN`은 허용하지 않는다.
-필요성이 확인되면 별도 요구사항으로 확장한다.
+`CLIENT + OPERATOR`, `CLIENT + VIEWER`는 허용한다.
+`CLIENT + ADMIN`과 CLIENT 사용자의 복수 role 조합은 허용하지 않는다.
 
 ## 5. 사용자 생성 정책
 
@@ -96,7 +97,7 @@ SYSTEM_ADMIN
 TENANT_ADMIN
 → 자기 물류사의 고객사(Client) 생성
 → 고객사 선택
-→ 해당 고객사의 CLIENT_VIEWER 생성
+→ 해당 고객사의 CLIENT_OPERATOR / CLIENT_VIEWER 생성
 ```
 
 - `SYSTEM_ADMIN`은 `/tenants`에서 물류사를 생성/관리한다.
@@ -112,6 +113,7 @@ TENANT_ADMIN
 - `TENANT + ADMIN`
 - `TENANT + OPERATOR`
 - `TENANT + VIEWER`
+- `CLIENT + OPERATOR`
 - `CLIENT + VIEWER`
 
 ### TENANT_ADMIN이 생성할 수 있는 사용자
@@ -121,6 +123,7 @@ TENANT_ADMIN
 - `TENANT + ADMIN`
 - `TENANT + OPERATOR`
 - `TENANT + VIEWER`
+- `CLIENT + OPERATOR`
 - `CLIENT + VIEWER`
 
 ### TENANT_ADMIN이 생성할 수 없는 사용자
@@ -128,7 +131,6 @@ TENANT_ADMIN
 - `SYSTEM` 사용자
 - 다른 `tenant_id`의 사용자
 - `CLIENT + ADMIN`
-- `CLIENT + OPERATOR`
 - `SYSTEM_ADMIN` role 사용자
 
 ### CLIENT 사용자의 사용자 관리
@@ -137,30 +139,31 @@ TENANT_ADMIN
 
 ## 6. Page Access Matrix
 
-| Page | SYSTEM_ADMIN | TENANT_ADMIN | TENANT_OPERATOR | TENANT_VIEWER | CLIENT_VIEWER |
-|---|---:|---:|---:|---:|---:|
-| Dashboard | O | O | O | O | O |
-| Tenant Management | O | X | X | X | X |
-| Client Management | O | O | X | X | X |
-| OIS Upload | Support/Restricted | O | O | X | X |
-| Batch List | Support/Read | O | O | O | O |
-| Batch Detail | Support/Read | O | O | O | O |
-| Validation Results | Support/Read | O | O | O | O |
-| Batch Validate | X | O | O | X | X |
-| Batch Confirm | X | O | O | X | X |
-| Batch Cancel/Rollback | X | O | X | X | X |
-| Orders | Support/Read | O | O | O | O |
-| Scan Lines | Support/Read | O | O | O | O |
-| PL Lines | Support/Read | O | O | O | O |
-| Label Lines | Support/Read | O | O | O | O |
-| Label Download | Support/Read | O | O | Read/Optional | O |
-| Product Master | Support/Read | O | X | Read/Optional | X |
-| Store/Route Master | Support/Read | O | X | Read/Optional | X |
-| External API Guide | O | O | O | O | O |
-| External API Status | Support/Read | O | O | O | Own client only |
-| API Key Management | O | O | X | X | X |
-| User Management | O | O | X | X | X |
-| Audit Logs | O | O | X | X | X |
+| Page | SYSTEM_ADMIN | TENANT_ADMIN | TENANT_OPERATOR | TENANT_VIEWER | CLIENT_OPERATOR | CLIENT_VIEWER |
+|---|---:|---:|---:|---:|---:|---:|
+| Dashboard | O | O | O | O | O | O |
+| Tenant Management | O | X | X | X | X | X |
+| Client Management | O | O | X | X | X | X |
+| OIS Upload | Support/Restricted | O | O | X | O | X |
+| Batch List | Support/Read | O | O | O | Own client | Own client |
+| Batch Detail | Support/Read | O | O | O | Own client | Own client |
+| Validation Results | Support/Read | O | O | O | Own client | Own client |
+| Batch Validate | X | O | O | X | Own client | X |
+| Batch Confirmation Request | X | O | O | X | Own client | X |
+| Batch Final Confirm | X | O | O | X | X | X |
+| Batch Cancel/Rollback | X | O | X | X | X | X |
+| Orders | Support/Read | O | O | O | Own client | Own client |
+| Scan Lines | Support/Read | O | O | O | Own client | Own client |
+| PL Lines | Support/Read | O | O | O | Own client | Own client |
+| Label Lines | Support/Read | O | O | O | Own client | Own client |
+| Label Download | Support/Read | O | O | Read/Optional | Own client | Own client |
+| Product Master | Support/Read | O | X | Read/Optional | Public view | Public view |
+| Store/Route Master | Support/Read | O | X | Read/Optional | Public view | Public view |
+| External API Guide | O | O | O | O | O | O |
+| External API Status | Support/Read | O | O | O | Own client only | Own client only |
+| API Key Management | O | O | X | X | X | X |
+| User Management | O | O | X | X | X | X |
+| Audit Logs | O | O | X | X | X | X |
 
 `Support/Read`는 SYSTEM_ADMIN이 tenant/client를 명시적으로 선택한 지원 모드에서 조회만 가능하다는 의미다.
 1차 구현에서 지원 모드가 없다면 SYSTEM_ADMIN의 운영 페이지 접근은 제한한다.
@@ -178,22 +181,23 @@ TENANT_ADMIN
 
 ### 내부 API 권한 기준
 
-| API 영역 | SYSTEM_ADMIN | TENANT_ADMIN | TENANT_OPERATOR | TENANT_VIEWER | CLIENT_VIEWER |
-|---|---:|---:|---:|---:|---:|
-| `/api/v1/auth/me` | O | O | O | O | O |
-| `/api/v1/users` | O | Same tenant | X | X | X |
-| `/api/v1/order-excel-batches` GET | Support/Read | O | O | O | Own client |
-| `/api/v1/order-excel-batches` POST | X | O | O | X | X |
-| batch validate | X | O | O | X | X |
-| batch confirm | X | O | O | X | X |
-| batch cancel | X | O | X | X | X |
-| batch rollback | X | O | X | X | X |
-| order/scan/pl/label query | Support/Read | O | O | O | Own client |
-| label download | Support/Read | O | O | Optional | Own client |
-| master upload/upsert | X | O | X | X | X |
-| master query | Support/Read | O | O | O | X |
-| API Key management | O | O | X | X | X |
-| audit query | O | O | X | X | X |
+| API 영역 | SYSTEM_ADMIN | TENANT_ADMIN | TENANT_OPERATOR | TENANT_VIEWER | CLIENT_OPERATOR | CLIENT_VIEWER |
+|---|---:|---:|---:|---:|---:|---:|
+| `/api/v1/auth/me` | O | O | O | O | O | O |
+| `/api/v1/users` | O | Same tenant | X | X | X | X |
+| `/api/v1/order-excel-batches` GET | Support/Read | O | O | O | Own client | Own client |
+| `/api/v1/order-excel-batches` POST | X | O | O | X | Own client | X |
+| batch validate | X | O | O | X | Own client | X |
+| batch confirmation request | X | O | O | X | Own client | X |
+| batch final confirm | X | O | O | X | X | X |
+| batch cancel | X | O | X | X | X | X |
+| batch rollback | X | O | X | X | X | X |
+| order/scan/pl/label query | Support/Read | O | O | O | Own client | Own client |
+| label download | Support/Read | O | O | Optional | Own client | Own client |
+| master upload/upsert | X | O | X | X | X | X |
+| client public master query | Support/Read | O | O | O | Own client | Own client |
+| API Key management | O | O | X | X | X | X |
+| audit query | O | O | X | X | X | X |
 
 ## 8. Frontend 적용 정책
 
@@ -264,8 +268,9 @@ fun requireClientAccess(tenantId: Long, clientId: Long)
 
 - 기본 운영 사용자는 `TENANT` scope다.
 - 물류사 관리자는 `TENANT + ADMIN`이다.
-- 고객사 사용자는 1차 MVP에서 `CLIENT + VIEWER`만 허용한다.
-- `CLIENT` 사용자는 업로드, 배치 확정, 마스터 관리, API Key 관리, 사용자 관리를 할 수 없다.
+- 고객사 사용자는 `CLIENT + OPERATOR` 또는 `CLIENT + VIEWER` 중 하나의 role을 가진다.
+- `CLIENT + OPERATOR`는 자기 고객사의 OIS 업로드, 검증, 배치 확정 요청을 할 수 있다.
+- `CLIENT` 사용자는 최종 배치 확정, 마스터 관리, API Key 관리, 사용자 관리를 할 수 없다.
 - `SYSTEM_ADMIN`은 물류사를 관리하는 플랫폼 관리자다.
 - `SYSTEM_ADMIN`의 운영 데이터 직접 처리 권한은 기본 허용하지 않는다.
 

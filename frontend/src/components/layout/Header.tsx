@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { omsApi, type ClientSummary } from '../../api/oms';
 import { clearAuthSession, fakeCurrentUser } from '../../app/auth';
@@ -10,6 +11,7 @@ import {
   subscribeClientContextSelection,
 } from '../../app/clientContext';
 import { Button, Select } from '../common';
+import { NotificationBell } from '../domain/NotificationBell';
 
 interface HeaderProps {
   onMenuClick: () => void;
@@ -25,7 +27,7 @@ export function Header({ onMenuClick }: HeaderProps) {
   useEffect(() => subscribeClientContextSelection(setSelection), []);
 
   useEffect(() => {
-    if (!tenantId || clientContextLocked) {
+    if (!tenantId) {
       setClients([]);
       return;
     }
@@ -36,8 +38,13 @@ export function Header({ onMenuClick }: HeaderProps) {
         if (!ignore) {
           const uniqueClients = dedupeClientsByName(items);
           setClients(uniqueClients);
-          if (selection.mode === 'client' && !uniqueClients.some((client) => client.id === selection.clientId)) {
-            saveClientContextSelection({ mode: 'all' });
+          if (!clientContextLocked && selection.mode === 'client') {
+            const matchedClient = uniqueClients.find((client) => client.id === selection.clientId);
+            if (!matchedClient) {
+              saveClientContextSelection({ mode: 'all' });
+            } else if (selection.clientName !== matchedClient.name) {
+              saveClientContextSelection({ mode: 'client', clientId: matchedClient.id, clientName: matchedClient.name });
+            }
           }
         }
       })
@@ -49,12 +56,19 @@ export function Header({ onMenuClick }: HeaderProps) {
     };
   }, [clientContextLocked, selection, tenantId]);
 
+  const lockedClient = clients.find((client) => client.id === fakeCurrentUser.clientId);
+  const lockedClientName =
+    lockedClient?.name ??
+    fakeCurrentUser.clientName ??
+    (selection.mode === 'client' ? selection.clientName ?? `고객사 #${selection.clientId}` : '고객사');
+
   const clientOptions = useMemo(() => {
     return [
       { label: '전체 고객사', value: 'all' },
       ...clients.map((client) => ({ label: `고객사: ${client.name}`, value: String(client.id) })),
     ];
   }, [clients]);
+  const userDisplayName = fakeCurrentUser.name ?? fakeCurrentUser.loginId ?? '-';
 
   async function handleLogout() {
     try {
@@ -68,9 +82,9 @@ export function Header({ onMenuClick }: HeaderProps) {
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-4 py-3 backdrop-blur sm:px-6 lg:px-8">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-x-4 gap-y-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3 text-sm text-slate-600">
+    <header className="sticky top-0 z-20 border-b border-slate-200 bg-white/95 px-3 py-3 backdrop-blur sm:px-6 lg:px-8">
+      <div className="mx-auto flex max-w-[1600px] flex-nowrap items-center justify-between gap-2">
+        <div className="flex min-w-0 shrink items-center gap-2 text-sm text-slate-600 sm:gap-3">
           <button
             aria-label="사이드바 열기"
             className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50 lg:hidden"
@@ -79,30 +93,35 @@ export function Header({ onMenuClick }: HeaderProps) {
           >
             <MenuIcon className="h-5 w-5" />
           </button>
-          <span className="font-semibold text-slate-950">OMS Logistics</span>
-          <span className="h-4 w-px bg-slate-200" aria-hidden="true" />
-          <span className="truncate">{fakeCurrentUser.tenantName}</span>
+          <span className="shrink-0 font-semibold text-slate-950">OMS</span>
+          {fakeCurrentUser.tenantName ? <span className="hidden h-4 w-px bg-slate-200 sm:inline-block" aria-hidden="true" /> : null}
+          {fakeCurrentUser.tenantName ? <span className="hidden truncate sm:inline">{fakeCurrentUser.tenantName}</span> : null}
         </div>
-        <div className="ml-auto flex min-w-fit flex-wrap items-center justify-end gap-3">
+        <div className="ml-auto flex min-w-0 shrink-0 items-center justify-end gap-2 sm:gap-3">
           {clientContextLocked ? (
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700">
-              {fakeCurrentUser.clientName ?? (selection.mode === 'client' ? selection.clientName ?? `client-${selection.clientId}` : 'Client')}
+            <span className="max-w-[112px] truncate rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 sm:max-w-[220px]">
+              <span className="hidden sm:inline">고객사: </span>{lockedClientName}
             </span>
           ) : (
             <Select
               aria-label="client-context"
-              className="w-44 sm:w-52"
+              className="w-32 sm:w-52"
               disabled={!tenantId}
               onChange={(event) => saveClientContextSelection(clientSelectionFromValue(event.target.value, clients))}
               options={clientOptions}
               value={clientSelectionValue(selection)}
             />
           )}
-          <div className="flex items-center text-sm">
-            <span className="font-semibold text-slate-900">{fakeCurrentUser.name ?? fakeCurrentUser.loginId}</span>
+          <NotificationBell />
+          <div className="hidden min-w-0 items-center text-sm sm:flex">
+            <span className="truncate font-semibold text-slate-900">
+              <span className="font-medium text-slate-500">사용자: </span>
+              {userDisplayName}
+            </span>
           </div>
-          <Button onClick={handleLogout} size="sm" variant="ghost">
-            로그아웃
+          <Button aria-label="로그아웃" className="h-9 w-9 px-0 sm:w-auto sm:px-3" onClick={handleLogout} size="sm" title="로그아웃" variant="ghost">
+            <LogOut aria-hidden="true" className="h-4 w-4 sm:hidden" />
+            <span className="hidden sm:inline">로그아웃</span>
           </Button>
         </div>
       </div>

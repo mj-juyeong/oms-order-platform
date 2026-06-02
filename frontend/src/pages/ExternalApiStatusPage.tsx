@@ -16,6 +16,7 @@ import { DataTable, Pagination, type DataTableColumn } from '../components/data'
 import { CodeCell } from '../components/domain';
 import type { ExternalApiChannel, ExternalApiStatusRow } from '../types/externalApi';
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 interface StatusFilters {
   batchId: string;
@@ -46,6 +47,7 @@ export function ExternalApiStatusPage() {
   const requestedBatchId = searchParams.get('batchId') ?? '';
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [filters, setFilters] = useState<StatusFilters>(() => ({ ...initialFilters, batchId: requestedBatchId }));
+  const [appliedFilters, setAppliedFilters] = useState<StatusFilters>(() => ({ ...initialFilters, batchId: requestedBatchId }));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [rows, setRows] = useState<ExternalApiStatusRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -102,11 +104,11 @@ export function ExternalApiStatusPage() {
     omsApi.externalApi.status({
       tenantId,
       clientId: selectedClientId,
-      batchId: /^\d+$/.test(filters.batchId.trim()) ? Number(filters.batchId.trim()) : undefined,
-      channel: filters.channel === 'ALL' ? undefined : filters.channel,
+      batchId: /^\d+$/.test(appliedFilters.batchId.trim()) ? Number(appliedFilters.batchId.trim()) : undefined,
+      channel: appliedFilters.channel === 'ALL' ? undefined : appliedFilters.channel,
       deliveryDate:
-        filters.deliveryDateRange.from && filters.deliveryDateRange.from === filters.deliveryDateRange.to
-          ? filters.deliveryDateRange.from
+        appliedFilters.deliveryDateRange.from && appliedFilters.deliveryDateRange.from === appliedFilters.deliveryDateRange.to
+          ? appliedFilters.deliveryDateRange.from
           : undefined,
       page: 0,
       size: 100,
@@ -135,22 +137,30 @@ export function ExternalApiStatusPage() {
     return () => {
       ignore = true;
     };
-  }, [filters.batchId, filters.channel, filters.deliveryDateRange.from, filters.deliveryDateRange.to, selectedClientId, tenantId]);
+  }, [appliedFilters.batchId, appliedFilters.channel, appliedFilters.deliveryDateRange.from, appliedFilters.deliveryDateRange.to, selectedClientId, tenantId]);
 
   useEffect(() => {
     setFilters((current) => (current.batchId === requestedBatchId ? current : { ...current, batchId: requestedBatchId }));
+    setAppliedFilters((current) => (current.batchId === requestedBatchId ? current : { ...current, batchId: requestedBatchId }));
   }, [requestedBatchId]);
 
-  const filteredRows = useMemo(() => filterRows(rows, filters), [filters, rows]);
+  const filteredRows = useMemo(() => filterRows(rows, appliedFilters), [appliedFilters, rows]);
   const summary = useMemo(() => createSummary(filteredRows), [filteredRows]);
-  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
+  const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
 
   function updateFilter<TKey extends keyof StatusFilters>(key: TKey, value: StatusFilters[TKey]) {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function applyFilters() {
+    setAppliedFilters(filters);
+    setFiltersOpen(false);
+  }
+
   function resetFilters() {
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
   }
 
   return (
@@ -194,7 +204,9 @@ export function ExternalApiStatusPage() {
       <ExternalApiFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
         loadError={loadError}
+        onApply={applyFilters}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
@@ -209,7 +221,7 @@ export function ExternalApiStatusPage() {
               <Badge tone="teal">확정 배치만 제공</Badge>
               <Badge tone="blue">X-Api-Key</Badge>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">
               총 <span className="font-semibold text-teal-700">{filteredRows.length.toLocaleString()}</span>건입니다.
               행을 선택하면 호출 방법, 제공 조건과 API Key 상태를 확인합니다.
             </p>
@@ -227,9 +239,10 @@ export function ExternalApiStatusPage() {
           getRowClassName={(item) => (rowKey(item) === (selectedRow ? rowKey(selectedRow) : '') ? 'bg-teal-50/80' : '')}
           getRowKey={rowKey}
           onRowClick={setSelectedRow}
+          renderMobileCard={renderExternalApiMobileCard}
         />
         <div className="px-5 py-4">
-          <p className="text-xs text-slate-500">{loading ? 'API 제공 현황을 갱신하는 중입니다.' : '라벨은 API가 아니라 라벨 다운로드 화면에서 제공합니다.'}</p>
+          <p className="hidden text-xs text-slate-500 sm:block">{loading ? 'API 제공 현황을 갱신하는 중입니다.' : '라벨은 API가 아니라 라벨 다운로드 화면에서 제공합니다.'}</p>
           <div className="mt-3">
             <Pagination page={1} total={filteredRows.length} totalPages={Math.max(1, Math.ceil(filteredRows.length / 20))} />
           </div>
@@ -244,7 +257,9 @@ export function ExternalApiStatusPage() {
 function ExternalApiFilterPanel({
   activeFilterCount,
   filters,
+  hasPendingFilters,
   loadError,
+  onApply,
   onReset,
   onToggleOpen,
   open,
@@ -252,7 +267,9 @@ function ExternalApiFilterPanel({
 }: {
   activeFilterCount: number;
   filters: StatusFilters;
+  hasPendingFilters: boolean;
   loadError: string | null;
+  onApply: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
   open: boolean;
@@ -268,12 +285,16 @@ function ExternalApiFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
             {loadError ? <Badge tone="red">조회 실패</Badge> : <Badge tone="green">API 연결</Badge>}
           </div>
-          <p className="mt-1 text-xs text-slate-500">WOS/PL 채널, 제공 상태, 배송일과 endpoint 조건으로 API 제공 대상을 찾습니다.</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">WOS/PL 채널, 제공 상태, 배송일과 endpoint 조건으로 API 제공 대상을 찾습니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+            검색
+          </Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">
             초기화
           </Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">
@@ -284,7 +305,7 @@ function ExternalApiFilterPanel({
 
       {open ? (
         <div className="mt-4 border-t border-slate-100 pt-4">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Select
               label="제공 채널"
               onChange={(event) => updateFilter('channel', event.target.value as StatusFilters['channel'])}
@@ -319,6 +340,11 @@ function ExternalApiFilterPanel({
             />
             <Input label="검색" onChange={(event) => updateFilter('keyword', event.target.value)} placeholder="배치, endpoint, scope" value={filters.keyword} />
           </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
+            </Button>
+          </div>
         </div>
       ) : null}
 
@@ -340,9 +366,9 @@ function SummaryCards({ summary }: { summary: ReturnType<typeof createSummary> }
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((card) => (
-        <Card className="p-4" key={card.label}>
+        <Card className="p-3 sm:p-4" key={card.label}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-slate-600">{card.label}</p>
@@ -350,7 +376,7 @@ function SummaryCards({ summary }: { summary: ReturnType<typeof createSummary> }
             </div>
             <Badge tone={card.tone}>{card.label}</Badge>
           </div>
-          <p className="mt-3 text-xs leading-5 text-slate-500">{card.description}</p>
+          <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{card.description}</p>
         </Card>
       ))}
     </div>
@@ -438,38 +464,74 @@ function ApiKeyCell({ row }: { row: ExternalApiStatusRow }) {
   );
 }
 
+function renderExternalApiMobileCard(row: ExternalApiStatusRow) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <ChannelBadge channel={row.channel} />
+            <Badge tone={row.providable ? 'green' : 'amber'}>{row.providable ? '제공 가능' : '제공 제외'}</Badge>
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={row.endpoint}>{row.endpoint}</p>
+          <p className="mt-1 truncate text-xs text-slate-500" title={clientDisplayName(row)}>{clientDisplayName(row)}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-bold text-slate-950">{row.providedRowCount.toLocaleString()}</p>
+          <p className="text-xs font-semibold text-slate-500">rows</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <MobileFact label="배치" value={<CodeCell value={String(row.batchId)} />} />
+        <MobileFact label="Scope" value={<CodeCell value={row.requiredScope} />} />
+        <MobileFact label="API Key" value={`${row.activeApiKeyCount.toLocaleString()}개 활성`} />
+        <MobileFact label="소스" value={row.sourceSheets.join(', ') || '-'} />
+      </div>
+    </div>
+  );
+}
+
+function MobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
 function StatusDetailModal({ onClose, row }: { onClose: () => void; row: ExternalApiStatusRow | null }) {
   if (!row) {
     return null;
   }
 
   return (
-    <ModalFrame onClose={onClose} panelClassName="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+    <ModalFrame onClose={onClose} panelClassName="flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-lg font-bold text-slate-950">API 제공 상세</p>
               <ChannelBadge channel={row.channel} />
               <Badge tone={row.providable ? 'green' : 'amber'}>{row.providable ? '제공 가능' : '제공 제외'}</Badge>
             </div>
-            <p className="mt-1 text-sm text-slate-500">WOS/PL 연동 대상 배치의 호출 방법, 제공 조건과 최근 호출 결과입니다.</p>
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">WOS/PL 연동 대상 배치의 호출 방법, 제공 조건과 최근 호출 결과입니다.</p>
           </div>
           <Button aria-label="API 제공 상세 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
         </div>
 
-        <div className="overflow-y-auto bg-slate-50 px-6 py-5">
-          <div className={`rounded-lg border p-4 ${row.providable ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+        <div className="overflow-y-auto bg-slate-50 px-4 py-4 sm:px-6 sm:py-5">
+          <div className={`rounded-lg border p-4 ${row.providable ? 'border-teal-200 bg-teal-50' : 'border-amber-200 bg-amber-50'}`}>
             <div className="flex flex-wrap items-center gap-2">
               <CodeCell value={row.endpoint} />
               <CodeCell value={row.requiredScope} />
               <span className="text-sm font-semibold text-slate-900">{row.batchNo}</span>
             </div>
-            <p className={`mt-3 text-sm leading-6 ${row.providable ? 'text-emerald-800' : 'text-amber-800'}`}>
+            <p className={`mt-3 hidden text-sm leading-6 sm:block ${row.providable ? 'text-teal-800' : 'text-amber-800'}`}>
               {row.providable ? '현재 배치는 외부 시스템이 API로 조회할 수 있습니다.' : row.excludedReason ?? '제공 제외 사유를 확인해야 합니다.'}
             </p>
           </div>
 
-          <div className="mt-5 grid gap-4 xl:grid-cols-4">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <DetailSection description="외부 연동에 필요한 정보입니다." title="호출 방법">
               <DetailItem label="Method" value={<Badge tone="neutral">GET</Badge>} />
               <DetailItem label="Endpoint" value={<CodeCell value={row.endpoint} />} />
@@ -524,7 +586,7 @@ function DetailSection({ children, description, title }: { children: ReactNode; 
     <section className="rounded-lg border border-slate-200 bg-white">
       <div className="border-b border-slate-100 px-4 py-3">
         <p className="font-semibold text-slate-950">{title}</p>
-        <p className="mt-1 text-xs text-slate-500">{description}</p>
+        <p className="mt-1 hidden text-xs text-slate-500 sm:block">{description}</p>
       </div>
       <div className="divide-y divide-slate-100">{children}</div>
     </section>
@@ -533,9 +595,9 @@ function DetailSection({ children, description, title }: { children: ReactNode; 
 
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="grid grid-cols-[120px_minmax(0,1fr)] gap-3 px-4 py-3 text-sm">
+    <div className="grid min-w-0 grid-cols-[80px_minmax(0,1fr)] gap-3 px-3 py-3 text-sm sm:grid-cols-[120px_minmax(0,1fr)] sm:px-4">
       <span className="text-slate-500">{label}</span>
-      <div className="min-w-0 font-medium text-slate-900">{value}</div>
+      <div className="min-w-0 overflow-hidden font-medium text-slate-900">{value}</div>
     </div>
   );
 }

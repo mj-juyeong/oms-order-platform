@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import { omsApi, type ApiKeyItem, type ClientSummary, type CreatedApiKey } from '../api/oms';
 import { canManageApiKeys, fakeCurrentUser } from '../app/auth';
 import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelection, useClientScope } from '../app/clientContext';
@@ -118,7 +118,7 @@ export function ApiKeysPage() {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 md:grid-cols-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
         <Metric label="활성 Key" value={activeCount} description="외부 API 호출 가능 상태" tone="green" />
         <Metric label="WOS 권한" value={wosScopeCount} description="WOS_SCAN_READ scope 보유" tone="teal" />
         <Metric label="PL 권한" value={plScopeCount} description="PL_READ scope 보유" tone="blue" />
@@ -131,7 +131,7 @@ export function ApiKeysPage() {
               <p className="text-sm font-semibold text-slate-900">API Key 조회</p>
               {loadError ? <Badge tone="red">조회 실패</Badge> : <Badge tone="green">API 연결</Badge>}
             </div>
-            <p className="mt-1 text-xs text-slate-500">외부 시스템이 X-Api-Key 헤더로 사용하는 Key의 상태와 권한을 관리합니다.</p>
+            <p className="mt-1 hidden text-xs text-slate-500 sm:block">외부 시스템이 X-Api-Key 헤더로 사용하는 Key의 상태와 권한을 관리합니다.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex min-w-0 items-center gap-2">
@@ -148,7 +148,7 @@ export function ApiKeysPage() {
               aria-pressed={activeOnly}
               className={`inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-semibold transition ${
                 activeOnly
-                  ? 'border-emerald-700 bg-emerald-700 text-white hover:bg-emerald-800'
+                  ? 'border-teal-700 bg-teal-700 text-white hover:bg-teal-800'
                   : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50'
               }`}
               onClick={() => setActiveOnly((current) => !current)}
@@ -184,7 +184,7 @@ export function ApiKeysPage() {
             <p className="text-base font-bold text-slate-950">API Key 목록</p>
             <Badge tone="blue">원문 Key 재조회 불가</Badge>
           </div>
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 hidden text-sm text-slate-500 sm:block">
             발급된 Key 값은 생성 직후 1회만 전달하고, 이후 화면에서는 이름, 상태, 권한, 만료와 사용 이력만 확인합니다.
           </p>
         </div>
@@ -194,9 +194,10 @@ export function ApiKeysPage() {
           emptyDescription={loadError ? '백엔드 API 응답을 확인한 뒤 다시 조회해 주세요.' : '상태 조건을 변경하거나 API Key 발급 여부를 확인해 주세요.'}
           emptyTitle={loadError ? 'API Key 목록을 불러오지 못했습니다.' : '표시할 API Key가 없습니다.'}
           getRowKey={(item) => String(item.id)}
+          renderMobileCard={renderApiKeyMobileCard}
         />
         <div className="px-5 py-4">
-          <p className="mb-3 text-xs text-slate-500">{loading ? 'API Key 목록을 갱신하는 중입니다.' : '외부 API 호출자는 발급받은 Key를 X-Api-Key 헤더에 넣어 호출합니다.'}</p>
+          <p className="mb-3 hidden text-xs text-slate-500 sm:block">{loading ? 'API Key 목록을 갱신하는 중입니다.' : '외부 API 호출자는 발급받은 Key를 X-Api-Key 헤더에 넣어 호출합니다.'}</p>
           <Pagination page={1} total={filteredKeys.length} totalPages={Math.max(1, Math.ceil(filteredKeys.length / 20))} />
         </div>
       </Card>
@@ -315,12 +316,12 @@ function CreateApiKeyModal({
     <Modal onClose={resetAndClose} open={open} title={createdKey ? 'API Key 발급 완료' : 'API Key 신규 발급'}>
       {createdKey ? (
         <div className="space-y-5">
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
+          <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge tone="green">발급 완료</Badge>
               <CodeCell value={`KEY-${createdKey.id}`} />
             </div>
-            <p className="mt-3 text-sm leading-6 text-emerald-800">
+            <p className="mt-3 text-sm leading-6 text-teal-800">
               API Key 원문은 지금 한 번만 확인할 수 있습니다. 외부 시스템 담당자에게 전달하기 전에 반드시 복사해 주세요.
             </p>
           </div>
@@ -351,9 +352,9 @@ function CreateApiKeyModal({
         </div>
       ) : (
         <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="rounded-lg border border-blue-200 bg-blue-50 p-4">
-            <p className="text-sm font-semibold text-blue-900">이 Key는 특정 배치에 묶이지 않습니다.</p>
-            <p className="mt-2 text-sm leading-6 text-blue-800">
+          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-slate-900">이 Key는 특정 배치에 묶이지 않습니다.</p>
+            <p className="mt-2 text-sm leading-6 text-slate-700">
               발급된 Key는 선택한 권한 범위 안에서 확정 완료된 데이터를 조회합니다. 배치 선택은 외부 API 호출 시 batchId 또는 deliveryDate 파라미터로 정합니다.
             </p>
           </div>
@@ -498,6 +499,40 @@ function ScopeList({ scopes }: { scopes: string[] }) {
   );
 }
 
+function renderApiKeyMobileCard(item: ApiKeyItem) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <Badge tone={item.status === 'ACTIVE' ? 'green' : 'neutral'}>{statusLabel(item.status)}</Badge>
+            <CodeCell muted value={`KEY-${item.id}`} />
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={item.name}>{item.name}</p>
+          <p className="mt-1 truncate text-xs text-slate-500" title={clientDisplayName(item)}>{clientDisplayName(item)}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-xs font-semibold text-slate-500">만료</p>
+          <p className="text-sm font-bold text-slate-950">{formatDateTime(item.expiresAt)}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <MobileFact label="권한" value={item.allowedScope.join(', ') || '-'} />
+        <MobileFact label="마지막 사용" value={formatDateTime(item.lastUsedAt)} />
+      </div>
+    </div>
+  );
+}
+
+function MobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
 function clientDisplayName(item: ApiKeyItem) {
   if (item.clientName?.trim()) {
     return item.clientName;
@@ -510,7 +545,7 @@ function clientDisplayName(item: ApiKeyItem) {
 
 function Metric({ description, label, tone, value }: { description: string; label: string; tone: 'blue' | 'green' | 'teal'; value: number }) {
   return (
-    <Card className="p-4">
+    <Card className="p-3 sm:p-4">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-slate-600">{label}</p>
@@ -518,7 +553,7 @@ function Metric({ description, label, tone, value }: { description: string; labe
         </div>
         <Badge tone={tone}>{label}</Badge>
       </div>
-      <p className="mt-3 text-xs leading-5 text-slate-500">{description}</p>
+      <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{description}</p>
     </Card>
   );
 }

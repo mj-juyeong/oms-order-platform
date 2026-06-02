@@ -7,10 +7,10 @@ const severityLabels: Record<ValidationSeverity, string> = {
   INFO: 'Info',
 };
 
-const severityTones: Record<ValidationSeverity, 'red' | 'amber' | 'blue'> = {
+const severityTones: Record<ValidationSeverity, 'red' | 'amber' | 'neutral'> = {
   ERROR: 'red',
   WARNING: 'amber',
-  INFO: 'blue',
+  INFO: 'neutral',
 };
 
 export function SeverityBadge({ severity }: { severity: ValidationSeverity }) {

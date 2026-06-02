@@ -41,10 +41,10 @@ export function AppShell() {
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900">
       <Sidebar mobileOpen={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
-      <div className="min-h-screen lg:pl-[260px]">
+      <div className="min-h-screen min-w-0 lg:pl-[260px]">
         <Header onMenuClick={() => setMobileSidebarOpen(true)} />
-        <main className="px-4 py-5 sm:px-6 lg:px-8">
-          <div className="mx-auto flex max-w-[1600px] flex-col gap-5">
+        <main className="min-w-0 px-4 py-5 sm:px-6 lg:px-8">
+          <div className="mx-auto flex min-w-0 max-w-[1600px] flex-col gap-5">
             <Breadcrumb items={meta.breadcrumbs} />
             <PageHeader {...meta} />
             <Outlet />

@@ -1,9 +1,11 @@
 import { Link, useLocation } from 'react-router-dom';
 import { useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
+import { omsApi } from '../../api/oms';
 import { fakeCurrentUser, hasAnyRole, hasAnyScope } from '../../app/auth';
 import { navigationGroups, navigationItems } from '../../app/navigation';
 import type { NavigationIconName } from '../../app/navigation';
+import type { WorkItemSummary } from '../../types/notification';
 
 interface SidebarProps {
   mobileOpen: boolean;
@@ -12,6 +14,7 @@ interface SidebarProps {
 
 export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const location = useLocation();
+  const [workItemSummary, setWorkItemSummary] = useState<WorkItemSummary | null>(null);
   const visibleItems = useMemo(
     () =>
       navigationItems.filter(
@@ -43,6 +46,34 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     setOpenGroups((current) => (current.includes(activeGroup) ? current : [...current, activeGroup]));
   }, [activeGroup]);
 
+  useEffect(() => {
+    const tenantId = fakeCurrentUser.tenantId ?? undefined;
+    if (!tenantId) {
+      setWorkItemSummary(null);
+      return;
+    }
+
+    let ignore = false;
+    async function loadSummary() {
+      try {
+        const result = await omsApi.workItems.summary({
+          tenantId,
+          clientId: fakeCurrentUser.userScopeType === 'CLIENT' ? fakeCurrentUser.clientId ?? undefined : undefined,
+        });
+        if (!ignore) setWorkItemSummary(result);
+      } catch {
+        if (!ignore) setWorkItemSummary(null);
+      }
+    }
+
+    loadSummary();
+    const intervalId = window.setInterval(loadSummary, 20_000);
+    return () => {
+      ignore = true;
+      window.clearInterval(intervalId);
+    };
+  }, []);
+
   function toggleGroup(group: string) {
     setOpenGroups((current) => (current.includes(group) ? current.filter((item) => item !== group) : [...current, group]));
   }
@@ -51,11 +82,11 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     <>
       {mobileOpen ? <button aria-label="사이드바 닫기" className="fixed inset-0 z-40 bg-slate-950/45 lg:hidden" onClick={onClose} type="button" /> : null}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 w-[280px] border-r border-[#c5c5d3] bg-[#0d1c2f] text-[#d5e3fd] shadow-2xl transition-transform duration-200 lg:z-30 lg:w-[260px] lg:translate-x-0 lg:shadow-none ${
+        className={`fixed inset-y-0 left-0 z-50 h-dvh max-h-dvh w-[280px] border-r border-[#c5c5d3] bg-[#0d1c2f] text-[#d5e3fd] shadow-2xl transition-transform duration-200 lg:z-30 lg:w-[260px] lg:translate-x-0 lg:shadow-none ${
           mobileOpen ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        <div className="flex min-h-full flex-col lg:h-full">
+        <div className="flex h-full min-h-0 flex-col">
           <div className="flex items-start justify-between gap-3 border-b border-[#d5e3fd]/15 px-5 py-5">
             <Link className="block min-w-0" onClick={onClose} to="/dashboard">
               <p className="text-lg font-bold text-white">OMS Admin</p>
@@ -70,7 +101,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
               <CloseIcon className="h-5 w-5" />
             </button>
           </div>
-          <nav className="flex-1 space-y-2 overflow-y-auto py-4">
+          <nav className="min-h-0 flex-1 space-y-2 overflow-y-auto overscroll-contain py-4">
             {groupedItems.map((group) => {
               const groupOpen = openGroups.includes(group.group);
               const groupActive = activeGroup === group.group;
@@ -100,6 +131,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                       <div className="mt-1 space-y-1">
                         {group.items.map((item) => {
                           const active = isActiveItem(location.pathname, item.path, item.matchPaths);
+                          const badgeCount = item.badgeKey && workItemSummary ? workItemSummary[item.badgeKey] : 0;
 
                           return (
                             <Link
@@ -115,6 +147,7 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                             >
                               <SidebarIcon className="h-5 w-5 shrink-0" name={item.icon} />
                               <span className="truncate">{item.label}</span>
+                              {badgeCount > 0 ? <SidebarCountBadge count={badgeCount} /> : null}
                             </Link>
                           );
                         })}
@@ -131,6 +164,14 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
         </div>
       </aside>
     </>
+  );
+}
+
+function SidebarCountBadge({ count }: { count: number }) {
+  return (
+    <span className="ml-auto inline-flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-amber-400 px-1.5 text-xs font-bold leading-none text-slate-950">
+      {count > 99 ? '99+' : count}
+    </span>
   );
 }
 

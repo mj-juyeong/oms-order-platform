@@ -27,6 +27,8 @@ data class CurrentUserResponse(
 	val tenantId: Long?,
 	val clientId: Long?,
 	val roles: Set<UserRole>,
+	val tenantName: String? = null,
+	val clientName: String? = null,
 )
 
 data class UserResponse(

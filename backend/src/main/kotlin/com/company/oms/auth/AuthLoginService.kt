@@ -2,6 +2,8 @@ package com.company.oms.auth
 
 import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
+import com.company.oms.common.scope.ClientRepository
+import com.company.oms.common.scope.TenantRepository
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.security.crypto.password.PasswordEncoder
@@ -18,6 +20,8 @@ class AuthLoginService(
 	private val authUserFactory: AuthUserFactory,
 	private val tokenProvider: TokenProvider,
 	private val authGuard: AuthGuard,
+	private val tenantRepository: TenantRepository,
+	private val clientRepository: ClientRepository,
 ) {
 
 	@Transactional
@@ -67,5 +71,7 @@ class AuthLoginService(
 			tenantId = tenantId,
 			clientId = clientId,
 			roles = roles,
+			tenantName = tenantId?.let { tenantRepository.findById(it).orElse(null)?.name },
+			clientName = clientId?.let { clientRepository.findById(it).orElse(null)?.name },
 		)
 }

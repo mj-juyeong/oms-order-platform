@@ -7,6 +7,7 @@ import { downloadsApi } from './downloads';
 import { externalApi } from './externalApi';
 import { labelsApi } from './labels';
 import { mastersApi } from './masters';
+import { notificationsApi, workItemsApi } from './notifications';
 import { ordersApi } from './orders';
 import { plApi } from './pl';
 import { scanApi } from './scan';
@@ -35,6 +36,8 @@ export const omsApi = {
   downloads: downloadsApi,
   externalApi,
   audit: auditApi,
+  notifications: notificationsApi,
+  workItems: workItemsApi,
 };
 
 export type { ListParams } from './types';
@@ -43,6 +46,8 @@ export type { BackendApiCallLog, BackendAuditDownloadLog, BackendBatchAuditLog }
 export type {
   BackendBatchDetail,
   BackendBatchSummary,
+  BatchConfirmationRequest,
+  BatchSupplementRequestType,
   OisSheetResult,
   OisUploadResponse,
 } from '../types/batch';
@@ -51,4 +56,10 @@ export type { BackendPlLine } from '../types/pl';
 export type { BackendScanLine } from '../types/scan';
 export type { BatchValidationResult, ValidationErrorItem } from '../types/validation';
 export type { ClientResolveCandidate, ClientSummary } from '../types/client';
+export type { NotificationItem, WorkItemSummary } from '../types/notification';
+export type {
+  ClientMasterVisibilitySetting,
+  ClientPublicProductMasterItem,
+  ClientPublicStoreRouteMasterItem,
+} from '../types/master';
 export type { TenantSummary } from '../types/tenant';
