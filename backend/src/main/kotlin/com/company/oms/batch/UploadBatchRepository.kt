@@ -17,6 +17,8 @@ interface UploadBatchRepository : JpaRepository<UploadBatchEntity, Long>, JpaSpe
 		batchNo: String,
 	): UploadBatchEntity?
 
+	fun findAllByParentBatchId(parentBatchId: Long): List<UploadBatchEntity>
+
 	fun findAllByTenantIdAndClientIdAndStatus(
 		tenantId: Long,
 		clientId: Long,
@@ -28,4 +30,26 @@ interface UploadBatchRepository : JpaRepository<UploadBatchEntity, Long>, JpaSpe
 		clientId: Long,
 		deliveryDate: LocalDate,
 	): List<UploadBatchEntity>
+
+	fun countByTenantIdAndStatus(
+		tenantId: Long,
+		status: BatchStatus,
+	): Long
+
+	fun countByTenantIdAndClientIdAndStatus(
+		tenantId: Long,
+		clientId: Long,
+		status: BatchStatus,
+	): Long
+
+	fun countByTenantIdAndStatusNotIn(
+		tenantId: Long,
+		statuses: Collection<BatchStatus>,
+	): Long
+
+	fun countByTenantIdAndClientIdAndStatusNotIn(
+		tenantId: Long,
+		clientId: Long,
+		statuses: Collection<BatchStatus>,
+	): Long
 }

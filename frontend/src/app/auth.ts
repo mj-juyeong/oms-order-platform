@@ -74,7 +74,10 @@ export function hasAnyScope(userScopeType: UserScopeType | null | undefined, req
 }
 
 export function canOperateBatches(user: CurrentUser = fakeCurrentUser) {
-  return user.userScopeType === 'TENANT' && hasAnyRole(user.roles, ['ADMIN', 'OPERATOR']);
+  return (
+    (user.userScopeType === 'TENANT' && hasAnyRole(user.roles, ['ADMIN', 'OPERATOR'])) ||
+    (user.userScopeType === 'CLIENT' && hasAnyRole(user.roles, ['OPERATOR']))
+  );
 }
 
 export function canAdministerBatches(user: CurrentUser = fakeCurrentUser) {

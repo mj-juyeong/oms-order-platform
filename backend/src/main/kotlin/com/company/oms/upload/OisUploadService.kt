@@ -1,9 +1,12 @@
 package com.company.oms.upload
 
+import com.company.oms.batch.BatchConfirmationRequestEntity
+import com.company.oms.batch.BatchConfirmationRequestRepository
 import com.company.oms.batch.UploadBatchEntity
 import com.company.oms.batch.UploadBatchRepository
 import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
+import com.company.oms.common.persistence.BatchConfirmationRequestStatus
 import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.response.PageResponse
 import com.company.oms.common.scope.ClientRepository
@@ -53,6 +56,7 @@ class OisUploadService(
 	private val plLineRepository: PlLineRepository,
 	private val labelLineRepository: LabelLineRepository,
 	private val orderLineRepository: OrderLineRepository,
+	private val confirmationRequestRepository: BatchConfirmationRequestRepository,
 	private val fileStorage: FileStorage,
 	private val oisExcelParser: OisExcelParser,
 	private val objectMapper: ObjectMapper,
@@ -65,9 +69,12 @@ class OisUploadService(
 		file: MultipartFile,
 		memo: String?,
 		uploadedBy: Long?,
+		parentBatchId: Long?,
+		reuploadReason: String?,
 	): OisUploadResponse {
 		validateScope(tenantId, clientId)
 		validateExtension(file)
+		val supplement = resolveSupplementBatch(tenantId, clientId, parentBatchId, reuploadReason)
 
 		val bytes = file.bytes
 		val parsed = oisExcelParser.parse(bytes)
@@ -77,10 +84,13 @@ class OisUploadService(
 				tenantId = tenantId,
 				clientId = clientId,
 				batchNo = generateBatchNo(),
+				parentBatchId = supplement?.parentBatchId,
+				revisionNo = supplement?.revisionNo ?: 1,
+				reuploadReason = supplement?.reuploadReason,
 				status = BatchStatus.UPLOADED,
 				deliveryDate = deliveryDate,
 				uploadedBy = uploadedBy,
-				memo = memo,
+				memo = supplement?.memo ?: memo,
 			),
 		)
 		val batchId = batch.id!!
@@ -135,6 +145,8 @@ class OisUploadService(
 			batchId = batchId,
 			tenantId = tenantId,
 			clientId = clientId,
+			parentBatchId = batch.parentBatchId,
+			revisionNo = batch.revisionNo,
 			status = batch.status,
 			batchNo = batch.batchNo,
 			deliveryDate = batch.deliveryDate,
@@ -195,6 +207,53 @@ class OisUploadService(
 		return batch.toDetailResponse(
 			files = uploadedFileRepository.findAllByBatchId(batchId),
 			sheets = excelSheetResultRepository.findAllByBatchId(batchId),
+			confirmationRequest = findLatestConfirmationRequestForDetail(batch),
+		)
+	}
+
+	private fun findLatestConfirmationRequestForDetail(batch: UploadBatchEntity): BatchConfirmationRequestEntity? {
+		val batchId = batch.id ?: return null
+		val status = when (batch.status) {
+			BatchStatus.NEEDS_MORE_INFO -> BatchConfirmationRequestStatus.NEEDS_MORE_INFO
+			BatchStatus.REJECTED -> BatchConfirmationRequestStatus.REJECTED
+			BatchStatus.CONFIRMED -> BatchConfirmationRequestStatus.APPROVED
+			BatchStatus.CONFIRMATION_REQUESTED -> BatchConfirmationRequestStatus.REQUESTED
+			else -> null
+		}
+		return status?.let {
+			confirmationRequestRepository.findFirstByBatchIdAndStatusOrderByReviewedAtDesc(batchId, it)
+		} ?: confirmationRequestRepository.findFirstByBatchIdOrderByRequestedAtDesc(batchId)
+	}
+
+	private fun resolveSupplementBatch(
+		tenantId: Long,
+		clientId: Long,
+		parentBatchId: Long?,
+		reuploadReason: String?,
+	): SupplementUploadContext? {
+		parentBatchId ?: return null
+		val parentBatch =
+			uploadBatchRepository.findById(parentBatchId)
+				.filter { it.tenantId == tenantId && it.clientId == clientId }
+				.orElseThrow {
+					OmsException(ErrorCode.BATCH_NOT_FOUND, status = HttpStatus.NOT_FOUND)
+				}
+		if (parentBatch.status != BatchStatus.NEEDS_MORE_INFO) {
+			throw OmsException(
+				errorCode = ErrorCode.INVALID_BATCH_STATUS,
+				message = "보완 요청 상태의 배치에 대해서만 보완본을 업로드할 수 있습니다.",
+				status = HttpStatus.BAD_REQUEST,
+			)
+		}
+
+		val normalizedReason = reuploadReason?.trim()?.takeIf { it.isNotBlank() } ?: "고객사 보완본 업로드"
+		val nextRevisionNo =
+			(uploadBatchRepository.findAllByParentBatchId(parentBatchId).maxOfOrNull { it.revisionNo } ?: parentBatch.revisionNo) + 1
+		return SupplementUploadContext(
+			parentBatchId = parentBatchId,
+			revisionNo = nextRevisionNo,
+			reuploadReason = normalizedReason,
+			memo = "보완본 R$nextRevisionNo: ${parentBatch.batchNo} - $normalizedReason",
 		)
 	}
 
@@ -354,8 +413,10 @@ private fun UploadBatchEntity.toSummaryResponse(): OisBatchSummaryResponse =
 	OisBatchSummaryResponse(
 		id = id ?: 0,
 		tenantId = tenantId,
-		clientId = clientId,
-		batchNo = batchNo,
+			clientId = clientId,
+			parentBatchId = parentBatchId,
+			revisionNo = revisionNo,
+			batchNo = batchNo,
 		status = status,
 		deliveryDate = deliveryDate,
 		uploadedAt = uploadedAt,
@@ -368,6 +429,7 @@ private fun UploadBatchEntity.toSummaryResponse(): OisBatchSummaryResponse =
 private fun UploadBatchEntity.toDetailResponse(
 	files: List<UploadedFileEntity>,
 	sheets: List<ExcelSheetResultEntity>,
+	confirmationRequest: BatchConfirmationRequestEntity?,
 ): OisBatchDetailResponse =
 	OisBatchDetailResponse(
 		id = id ?: 0,
@@ -375,6 +437,9 @@ private fun UploadBatchEntity.toDetailResponse(
 		clientId = clientId,
 		batchNo = batchNo,
 		status = status,
+		parentBatchId = parentBatchId,
+		revisionNo = revisionNo,
+		reuploadReason = reuploadReason,
 		deliveryDate = deliveryDate,
 		uploadedAt = uploadedAt,
 		uploadedFiles = files.map { it.toResponse() },
@@ -383,6 +448,20 @@ private fun UploadBatchEntity.toDetailResponse(
 		warningCount = warningCount,
 		infoCount = infoCount,
 		memo = memo,
+		latestConfirmationRequest = confirmationRequest?.toSummaryResponse(),
+	)
+
+private fun BatchConfirmationRequestEntity.toSummaryResponse(): OisBatchConfirmationRequestSummaryResponse =
+	OisBatchConfirmationRequestSummaryResponse(
+		id = id ?: 0,
+		status = status,
+		requestedBy = requestedBy,
+		requestedAt = requestedAt,
+		requestMemo = requestMemo,
+		reviewedBy = reviewedBy,
+		reviewedAt = reviewedAt,
+		reviewComment = reviewComment,
+		supplementType = supplementType,
 	)
 
 private fun UploadedFileEntity.toResponse(): OisUploadedFileResponse =
@@ -415,7 +494,7 @@ private fun batchSearchSpec(
 	deliveryDateTo: LocalDate?,
 	errorOnly: Boolean,
 ): Specification<UploadBatchEntity> =
-	Specification { root, _, criteriaBuilder ->
+	Specification { root, query, criteriaBuilder ->
 		val predicates = mutableListOf(
 			criteriaBuilder.equal(root.get<Long>("tenantId"), tenantId),
 		)
@@ -450,6 +529,18 @@ private fun batchSearchSpec(
 			}
 			predicates += criteriaBuilder.or(*keywordPredicates.toTypedArray())
 		}
+		val confirmedSupplementParents = query.subquery(Long::class.java)
+		val childBatch = confirmedSupplementParents.from(UploadBatchEntity::class.java)
+		confirmedSupplementParents
+			.select(childBatch.get<Long>("parentBatchId"))
+			.where(
+				criteriaBuilder.isNotNull(childBatch.get<Long>("parentBatchId")),
+				criteriaBuilder.equal(childBatch.get<BatchStatus>("status"), BatchStatus.CONFIRMED),
+			)
+		predicates += criteriaBuilder.or(
+			criteriaBuilder.notEqual(root.get<BatchStatus>("status"), BatchStatus.NEEDS_MORE_INFO),
+			criteriaBuilder.not(root.get<Long>("id").`in`(confirmedSupplementParents)),
+		)
 
 		criteriaBuilder.and(*predicates.toTypedArray())
 	}
@@ -462,3 +553,10 @@ private fun <TEntity : Any, TResponse> Page<TEntity>.toResponsePage(mapper: (TEn
 		totalElements = totalElements,
 		totalPages = totalPages,
 	)
+
+private data class SupplementUploadContext(
+	val parentBatchId: Long,
+	val revisionNo: Int,
+	val reuploadReason: String,
+	val memo: String,
+)

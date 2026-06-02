@@ -22,10 +22,27 @@ export const endpoints = {
     list: '/order-excel-batches',
     detail: (batchId: number) => `/order-excel-batches/${batchId}`,
     validate: (batchId: number) => `/order-excel-batches/${batchId}/validate`,
+    requestConfirmation: (batchId: number) => `/order-excel-batches/${batchId}/confirmation-requests`,
     confirm: (batchId: number) => `/order-excel-batches/${batchId}/confirm`,
     cancel: (batchId: number) => `/order-excel-batches/${batchId}/cancel`,
     rollback: (batchId: number) => `/order-excel-batches/${batchId}/rollback`,
     validationErrors: (batchId: number) => `/order-excel-batches/${batchId}/validation-errors`,
+  },
+  batchConfirmationRequests: {
+    list: '/batch-confirmation-requests',
+    detail: (requestId: number) => `/batch-confirmation-requests/${requestId}`,
+    approve: (requestId: number) => `/batch-confirmation-requests/${requestId}/approve`,
+    reject: (requestId: number) => `/batch-confirmation-requests/${requestId}/reject`,
+    needsMoreInfo: (requestId: number) => `/batch-confirmation-requests/${requestId}/needs-more-info`,
+  },
+  notifications: {
+    list: '/notifications',
+    unreadCount: '/notifications/unread-count',
+    markRead: (notificationId: number) => `/notifications/${notificationId}/read`,
+    markAllRead: '/notifications/read-all',
+  },
+  workItems: {
+    summary: '/work-items/summary',
   },
   orders: '/orders',
   scanLines: '/scan-lines',
@@ -50,6 +67,15 @@ export const endpoints = {
     storeRouteUploadRowErrors: (uploadId: number | string) => `/masters/store-routes/uploads/${uploadId}/row-errors`,
     clientProductCodeMappings: '/masters/client-product-code-mappings',
     clientStoreCodeMappings: '/masters/client-store-code-mappings',
+  },
+  clientMasterVisibility: {
+    settings: '/client-master-visibility/settings',
+    productScopes: '/client-master-visibility/product-scopes',
+    storeRouteScopes: '/client-master-visibility/store-route-scopes',
+  },
+  clientMasters: {
+    products: '/client-masters/products',
+    storeRoutes: '/client-masters/store-routes',
   },
   audit: {
     batches: '/audit/batches',

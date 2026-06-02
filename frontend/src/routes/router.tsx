@@ -2,14 +2,18 @@ import { Navigate, createBrowserRouter } from 'react-router-dom';
 import { AppShell, GuestRoute, ProtectedRoute } from '../components/layout';
 import { AuditPage } from '../pages/AuditPage';
 import { ApiKeysPage } from '../pages/ApiKeysPage';
+import { BatchConfirmationRequestsPage } from '../pages/BatchConfirmationRequestsPage';
 import { BatchDetailPage } from '../pages/BatchDetailPage';
 import { BatchesPage } from '../pages/BatchesPage';
+import { ClientMasterVisibilitySettingsPage } from '../pages/ClientMasterVisibilitySettingsPage';
+import { ClientPublicMasterPage } from '../pages/ClientPublicMasterPage';
 import { DashboardPage } from '../pages/DashboardPage';
 import { ExternalApiStatusPage } from '../pages/ExternalApiStatusPage';
 import { ExternalApiGuidePage } from '../pages/ExternalApiGuidePage';
 import { ClientManagementPage } from '../pages/ClientManagementPage';
 import { LabelWorkspacePage } from '../pages/LabelWorkspacePage';
 import { LoginPage } from '../pages/LoginPage';
+import { NotificationsPage } from '../pages/NotificationsPage';
 import { OrdersPage } from '../pages/OrdersPage';
 import { PlLinesPage } from '../pages/PlLinesPage';
 import { ProductMasterPage } from '../pages/ProductMasterPage';
@@ -37,9 +41,17 @@ export const router = createBrowserRouter([
         children: [
           { path: '/dashboard', element: <DashboardPage /> },
           {
+            path: '/notifications',
+            element: (
+              <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
+                <NotificationsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
             path: '/uploads',
             element: (
-              <ProtectedRoute requiredRoles={['OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
+              <ProtectedRoute requiredRoles={['OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
                 <UploadsPage />
               </ProtectedRoute>
             ),
@@ -49,6 +61,14 @@ export const router = createBrowserRouter([
             element: (
               <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
                 <BatchesPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: '/batch-confirmation-requests',
+            element: (
+              <ProtectedRoute requiredRoles={['OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
+                <BatchConfirmationRequestsPage />
               </ProtectedRoute>
             ),
           },
@@ -145,6 +165,22 @@ export const router = createBrowserRouter([
             element: (
               <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
                 <StoreRouteMasterPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: '/client-masters',
+            element: (
+              <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
+                <ClientPublicMasterPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: '/masters/client-visibility',
+            element: (
+              <ProtectedRoute requiredRoles={['ADMIN']} requiredScopes={['TENANT']}>
+                <ClientMasterVisibilitySettingsPage />
               </ProtectedRoute>
             ),
           },

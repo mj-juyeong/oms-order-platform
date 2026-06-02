@@ -173,6 +173,25 @@ class Phase8AuthLogApiTest @Autowired constructor(
 			contentType = org.springframework.http.MediaType.APPLICATION_JSON
 			content = """
 				{
+				  "loginId": "client-admin-${UUID.randomUUID()}",
+				  "name": "Client Admin",
+				  "userScopeType": "CLIENT",
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "password": "secret",
+				  "roleCodes": ["ADMIN"]
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+
+		mockMvc.post("/api/v1/users") {
+			header("X-User-Id", adminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
 				  "loginId": "other-tenant-${UUID.randomUUID()}",
 				  "name": "Other Tenant User",
 				  "userScopeType": "TENANT",
@@ -202,8 +221,9 @@ class Phase8AuthLogApiTest @Autowired constructor(
 				}
 			""".trimIndent()
 		}.andExpect {
-			status { isForbidden() }
-			jsonPath("$.error.code") { value("FORBIDDEN") }
+			status { isOk() }
+			jsonPath("$.data.id") { exists() }
+			jsonPath("$.data.updated") { value(false) }
 		}
 
 		mockMvc.post("/api/v1/users") {
@@ -261,6 +281,88 @@ class Phase8AuthLogApiTest @Autowired constructor(
 			header("X-User-Id", clientViewerUserId.toString())
 			param("tenantId", otherScope.tenantId.toString())
 			param("clientId", otherScope.clientId.toString())
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+	}
+
+	@Test
+	fun internalMasterApisRequireAuthenticationAndRejectClientScope() {
+		val scope = createScope()
+		val clientOperatorUserId = createUser(scope, "OPERATOR", UserScopeType.CLIENT, scope.clientId)
+
+		mockMvc.get("/api/v1/masters/products") {
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isUnauthorized() }
+			jsonPath("$.error.code") { value("UNAUTHORIZED") }
+		}
+
+		mockMvc.get("/api/v1/masters/products") {
+			header("X-User-Id", clientOperatorUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+	}
+
+	@Test
+	fun clientListReturnsOnlyOwnClientForClientScope() {
+		val scope = createScope()
+		clientRepository.saveAndFlush(
+			ClientEntity(
+				tenantId = scope.tenantId,
+				code = "client-${UUID.randomUUID()}",
+				name = "Other Client",
+			),
+		)
+		val clientViewerUserId = createUser(scope, "VIEWER", UserScopeType.CLIENT, scope.clientId)
+
+		mockMvc.get("/api/v1/clients") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.length()") { value(1) }
+			jsonPath("$.data[0].id") { value(scope.clientId.toInt()) }
+		}
+	}
+
+	@Test
+	fun tenantAdminCannotReadAuditLogsFromAnotherTenant() {
+		val scope = createScope()
+		val otherScope = createScope()
+		val adminUserId = createUser(scope, "ADMIN")
+
+		mockMvc.get("/api/v1/audit/batches") {
+			header("X-User-Id", adminUserId.toString())
+			param("tenantId", otherScope.tenantId.toString())
+		}.andExpect {
+			status { isForbidden() }
+			jsonPath("$.error.code") { value("FORBIDDEN") }
+		}
+	}
+
+	@Test
+	fun clientOperatorCanRequestConfirmationButCannotFinalizeBatch() {
+		val scope = createScope()
+		val clientOperatorUserId = createUser(scope, "OPERATOR", UserScopeType.CLIENT, scope.clientId)
+		val batch = createBatch(scope, BatchStatus.READY_TO_CONFIRM, "CLIENT-REQUEST")
+
+		mockMvc.post("/api/v1/order-excel-batches/${batch.id}/confirmation-requests") {
+			header("X-User-Id", clientOperatorUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("REQUESTED") }
+			jsonPath("$.data.batchStatus") { value("CONFIRMATION_REQUESTED") }
+		}
+
+		mockMvc.post("/api/v1/order-excel-batches/${batch.id}/confirm") {
+			header("X-User-Id", clientOperatorUserId.toString())
+			param("tenantId", scope.tenantId.toString())
 		}.andExpect {
 			status { isForbidden() }
 			jsonPath("$.error.code") { value("FORBIDDEN") }

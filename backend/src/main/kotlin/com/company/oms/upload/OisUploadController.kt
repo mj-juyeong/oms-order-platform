@@ -2,6 +2,9 @@ package com.company.oms.upload
 
 import com.company.oms.auth.AccessScopeService
 import com.company.oms.auth.UserRole
+import com.company.oms.batch.BatchConfirmationRequestCreateRequest
+import com.company.oms.batch.BatchConfirmationRequestResponse
+import com.company.oms.batch.BatchConfirmationRequestService
 import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.common.persistence.ValidationSeverity
 import com.company.oms.common.response.PageResponse
@@ -30,6 +33,7 @@ class OisUploadController(
 	private val accessScopeService: AccessScopeService,
 	private val oisUploadService: OisUploadService,
 	private val batchValidationService: BatchValidationService,
+	private val confirmationRequestService: BatchConfirmationRequestService,
 ) {
 
 	@PostMapping(consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
@@ -38,9 +42,11 @@ class OisUploadController(
 		@RequestParam clientId: Long,
 		@RequestParam(required = false) memo: String?,
 		@RequestParam(required = false) uploadedBy: Long?,
+		@RequestParam(required = false) parentBatchId: Long?,
+		@RequestParam(required = false) reuploadReason: String?,
 		@RequestParam file: MultipartFile,
 	): OisUploadResponse {
-		accessScopeService.requireTenantOperator()
+		accessScopeService.requireAnyRole(UserRole.ADMIN, UserRole.OPERATOR)
 		val scope = accessScopeService.requireClientAccess(tenantId, clientId)
 		return oisUploadService.uploadOrderExcel(
 			tenantId = scope.tenantId,
@@ -48,6 +54,8 @@ class OisUploadController(
 			file = file,
 			memo = memo,
 			uploadedBy = uploadedBy,
+			parentBatchId = parentBatchId,
+			reuploadReason = reuploadReason,
 		)
 	}
 
@@ -108,7 +116,7 @@ class OisUploadController(
 		@RequestParam(required = false) memo: String?,
 		@RequestParam(required = false) actorId: Long?,
 	): BatchValidationResponse {
-		accessScopeService.requireTenantOperator()
+		accessScopeService.requireAnyRole(UserRole.ADMIN, UserRole.OPERATOR)
 		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
 		return batchValidationService.validateBatch(
 			tenantId = scope.tenantId,
@@ -116,6 +124,24 @@ class OisUploadController(
 			batchId = batchId,
 			memo = memo,
 			actorId = actorId,
+		)
+	}
+
+	@PostMapping("/{batchId}/confirmation-requests")
+	fun requestConfirmation(
+		@RequestParam tenantId: Long,
+		@RequestParam(required = false) clientId: Long?,
+		@PathVariable batchId: Long,
+		@RequestBody(required = false) request: BatchConfirmationRequestCreateRequest?,
+	): BatchConfirmationRequestResponse {
+		val currentUser = accessScopeService.requireAnyRole(UserRole.ADMIN, UserRole.OPERATOR)
+		val scope = accessScopeService.resolveClientScope(tenantId, clientId)
+		return confirmationRequestService.requestConfirmation(
+			tenantId = scope.tenantId,
+			clientId = scope.clientId,
+			batchId = batchId,
+			actorId = request?.actorId ?: currentUser.userId,
+			memo = request?.memo,
 		)
 	}
 

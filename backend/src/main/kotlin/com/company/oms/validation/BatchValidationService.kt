@@ -56,7 +56,7 @@ class BatchValidationService(
 		actorId: Long?,
 	): BatchValidationResponse {
 		val batch = getBatchForScope(tenantId, clientId, batchId)
-		if (batch.status !in setOf(BatchStatus.UPLOADED, BatchStatus.VALIDATION_FAILED, BatchStatus.READY_TO_CONFIRM)) {
+		if (batch.status !in setOf(BatchStatus.UPLOADED, BatchStatus.VALIDATION_FAILED, BatchStatus.READY_TO_CONFIRM, BatchStatus.NEEDS_MORE_INFO, BatchStatus.REJECTED)) {
 			throw invalidBatchStatus("검증할 수 없는 배치 상태입니다.")
 		}
 
@@ -134,7 +134,7 @@ class BatchValidationService(
 		request: BatchActionRequest,
 	): BatchStatusChangeResponse {
 		val batch = getBatchForScope(tenantId, clientId, batchId)
-		if (batch.status !in setOf(BatchStatus.UPLOADED, BatchStatus.VALIDATING, BatchStatus.VALIDATION_FAILED, BatchStatus.READY_TO_CONFIRM)) {
+		if (batch.status !in setOf(BatchStatus.UPLOADED, BatchStatus.VALIDATING, BatchStatus.VALIDATION_FAILED, BatchStatus.READY_TO_CONFIRM, BatchStatus.CONFIRMATION_REQUESTED, BatchStatus.NEEDS_MORE_INFO, BatchStatus.REJECTED)) {
 			throw invalidBatchStatus("취소할 수 없는 배치 상태입니다.")
 		}
 
@@ -493,6 +493,7 @@ private fun ValidationErrorEntity.toResponse(context: ValidationTargetContext): 
 
 	return ValidationErrorResponse(
 		id = id ?: 0,
+		batchId = batchId,
 		severity = severity,
 		errorCode = errorCode,
 		userTitle = userTitle(targetCode),

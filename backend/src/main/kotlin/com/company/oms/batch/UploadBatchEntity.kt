@@ -24,6 +24,15 @@ class UploadBatchEntity(
 	@Column(name = "batch_no", nullable = false, length = 64)
 	var batchNo: String = "",
 
+	@Column(name = "parent_batch_id")
+	var parentBatchId: Long? = null,
+
+	@Column(name = "revision_no", nullable = false)
+	var revisionNo: Int = 1,
+
+	@Column(name = "reupload_reason", length = 1000)
+	var reuploadReason: String? = null,
+
 	@Enumerated(EnumType.STRING)
 	@Column(name = "status", nullable = false, length = 32)
 	var status: BatchStatus = BatchStatus.UPLOADED,
@@ -74,4 +83,3 @@ class UploadBatchEntity(
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	var id: Long? = null
 }
-

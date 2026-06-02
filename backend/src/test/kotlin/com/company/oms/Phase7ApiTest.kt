@@ -95,6 +95,7 @@ class Phase7ApiTest @Autowired constructor(
 		}.andExpect {
 			status { isOk() }
 			jsonPath("$.data.items[0].batchId") { value(batchId.toInt()) }
+			jsonPath("$.data.items[0].clientName") { value("Client") }
 			jsonPath("$.data.items[0].orderNo") { value("0000000001") }
 			jsonPath("$.data.items[0].brandName") { value("브랜드A") }
 			jsonPath("$.data.items[0].productCode") { value("001234") }

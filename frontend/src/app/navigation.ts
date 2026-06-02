@@ -21,6 +21,7 @@ export interface NavigationItem {
   group: 'dashboard' | 'upload' | 'data' | 'external' | 'master' | 'admin' | 'audit';
   icon: NavigationIconName;
   description: string;
+  badgeKey?: 'incompleteBatches' | 'pendingConfirmationRequests' | 'needsMoreInfoBatches' | 'rejectedConfirmationRequests' | 'validationErrorBatches';
   matchPaths?: string[];
   roles?: UserRole[];
   scopes?: UserScopeType[];
@@ -35,7 +36,7 @@ export const navigationItems: NavigationItem[] = [
     icon: 'upload',
     description: '파일 업로드',
     roles: ['OPERATOR', 'ADMIN'],
-    scopes: ['TENANT'],
+    scopes: ['TENANT', 'CLIENT'],
   },
   {
     label: '배치 목록',
@@ -43,9 +44,20 @@ export const navigationItems: NavigationItem[] = [
     group: 'upload',
     icon: 'batch',
     description: '상태/검증 결과',
+    badgeKey: 'incompleteBatches',
     matchPaths: ['/batches/'],
     roles: ['VIEWER', 'OPERATOR', 'ADMIN'],
     scopes: ['TENANT', 'CLIENT'],
+  },
+  {
+    label: '배치 확정 요청',
+    path: '/batch-confirmation-requests',
+    badgeKey: 'pendingConfirmationRequests',
+    group: 'upload',
+    icon: 'batch',
+    description: '물류사 검토 대기',
+    roles: ['OPERATOR', 'ADMIN'],
+    scopes: ['TENANT'],
   },
   {
     label: '주문 조회',
@@ -127,6 +139,24 @@ export const navigationItems: NavigationItem[] = [
     icon: 'storeRouteMaster',
     description: 'XLSX 업로드',
     roles: ['VIEWER', 'OPERATOR', 'ADMIN'],
+    scopes: ['TENANT'],
+  },
+  {
+    label: '고객사 공개 마스터',
+    path: '/client-masters',
+    group: 'master',
+    icon: 'productMaster',
+    description: '공개 범위 조회',
+    roles: ['VIEWER', 'OPERATOR', 'ADMIN'],
+    scopes: ['TENANT', 'CLIENT'],
+  },
+  {
+    label: '고객사별 마스터 공개 설정',
+    path: '/masters/client-visibility',
+    group: 'master',
+    icon: 'storeRouteMaster',
+    description: '고객사별 공개 범위',
+    roles: ['ADMIN'],
     scopes: ['TENANT'],
   },
   {

@@ -3,9 +3,16 @@ export type BatchStatus =
   | 'VALIDATING'
   | 'VALIDATION_FAILED'
   | 'READY_TO_CONFIRM'
+  | 'CONFIRMATION_REQUESTED'
+  | 'NEEDS_MORE_INFO'
+  | 'REJECTED'
   | 'CONFIRMED'
   | 'CANCELLED'
   | 'ROLLED_BACK';
+
+export type BatchConfirmationRequestStatus = 'REQUESTED' | 'NEEDS_MORE_INFO' | 'REJECTED' | 'APPROVED';
+
+export type BatchSupplementRequestType = 'FILE_REUPLOAD' | 'MASTER_DATA' | 'CLARIFICATION';
 
 export interface SheetResult {
   sheetName: string;
@@ -40,6 +47,8 @@ export interface BackendBatchSummary {
   id: number;
   tenantId: number;
   clientId: number;
+  parentBatchId?: number | null;
+  revisionNo: number;
   status: BatchStatus;
   batchNo: string;
   deliveryDate?: string | null;
@@ -52,6 +61,18 @@ export interface BackendBatchSummary {
 }
 
 export interface BackendBatchDetail extends BackendBatchSummary {
+  reuploadReason?: string | null;
+  latestConfirmationRequest?: {
+    id: number;
+    status: BatchConfirmationRequestStatus;
+    requestedBy?: number | null;
+    requestedAt: string;
+    requestMemo?: string | null;
+    reviewedBy?: number | null;
+    reviewedAt?: string | null;
+    reviewComment?: string | null;
+    supplementType?: BatchSupplementRequestType | null;
+  } | null;
   uploadedFiles: Array<{
     id: number;
     fileType: string;
@@ -85,6 +106,8 @@ export interface OisUploadResponse {
   batchId: number;
   tenantId: number;
   clientId: number;
+  parentBatchId?: number | null;
+  revisionNo: number;
   status: BatchStatus;
   batchNo: string;
   deliveryDate?: string | null;
@@ -94,4 +117,25 @@ export interface OisUploadResponse {
   plLineCount: number;
   labelLineCount: number;
   orderLineCount: number;
+}
+
+export interface BatchConfirmationRequest {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  batchId: number;
+  batchNo: string;
+  batchStatus: BatchStatus;
+  deliveryDate?: string | null;
+  errorCount: number;
+  warningCount: number;
+  infoCount: number;
+  status: BatchConfirmationRequestStatus;
+  requestedBy?: number | null;
+  requestedAt: string;
+  requestMemo?: string | null;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewComment?: string | null;
+  supplementType?: BatchSupplementRequestType | null;
 }

@@ -9,7 +9,7 @@ import { useClientScope } from '../app/clientContext';
 import { Badge, Button, Card, FullScreenLoadingOverlay } from '../components/common';
 import { DataTable, type DataTableColumn } from '../components/data';
 import { BatchStatusBadge, ConfirmActionModal, MetricCard } from '../components/domain';
-import type { SheetResult } from '../types/batch';
+import type { BatchSupplementRequestType, SheetResult } from '../types/batch';
 
 type ProgressStepKey = 'uploaded' | 'parsed' | 'validated' | 'confirmed' | 'available';
 type ActionState = 'validate' | 'confirm' | 'cancel' | 'rollback' | null;
@@ -108,7 +108,7 @@ export function BatchDetailPage() {
     setActionState('confirm');
     setErrorMessage(null);
     try {
-      await omsApi.batches.confirm(batch.id, { tenantId, clientId, actorId: fakeCurrentUser.id ?? undefined });
+      await omsApi.batches.requestConfirmation(batch.id, { tenantId, clientId }, { actorId: fakeCurrentUser.id ?? undefined });
       setConfirmModalOpen(false);
       await loadBatch();
       setConfirmSuccessAlertOpen(true);
@@ -178,9 +178,9 @@ export function BatchDetailPage() {
       ) : null}
       {actionState === 'confirm' ? (
         <FullScreenLoadingOverlay
-          description="확정 가능 여부를 확인하고 배치를 확정하는 중입니다. 잠시만 기다려 주세요."
+          description="검증이 끝난 배치를 물류사 담당자에게 전달하는 중입니다. 잠시만 기다려 주세요."
           detail={batch.batchNo}
-          title="배치를 확정하고 있습니다"
+          title="배치 확정을 요청하고 있습니다"
         />
       ) : null}
       {actionState === 'cancel' ? (
@@ -198,13 +198,13 @@ export function BatchDetailPage() {
         />
       ) : null}
       <ConfirmActionModal
-        confirmLabel="확정"
-        description="확정 후에는 이 배치가 외부 API 제공과 운영 다운로드 대상에 포함됩니다."
+        confirmLabel="확정 요청"
+        description="검증 결과를 물류사 담당자에게 전달합니다. 물류사가 최종 확정한 뒤 외부 API와 운영 다운로드 대상에 포함됩니다."
         loading={actionState === 'confirm'}
         onClose={() => setConfirmModalOpen(false)}
         onConfirm={handleConfirm}
         open={confirmModalOpen}
-        title="주문을 확정하시겠습니까?"
+        title="배치 확정을 요청하시겠습니까?"
       />
       <ConfirmActionModal
         confirmLabel="배치 취소"
@@ -226,8 +226,10 @@ export function BatchDetailPage() {
         open={pendingDangerAction === 'rollback'}
         title="확정 배치를 롤백할까요?"
       />
-      <ConfirmedOrderAlert open={confirmSuccessAlertOpen} onClose={() => setConfirmSuccessAlertOpen(false)} />
+      <ConfirmationRequestedAlert open={confirmSuccessAlertOpen} onClose={() => setConfirmSuccessAlertOpen(false)} />
       {errorMessage ? <ApiErrorCard message={errorMessage} onRetry={loadBatch} /> : null}
+      <SupplementRequestPanel batch={batch} canOperateBatch={canOperateBatch} />
+      <RejectionReasonPanel batch={batch} />
       <BatchHeader
         actionState={actionState}
         batch={batch}
@@ -273,22 +275,22 @@ export function BatchDetailPage() {
   );
 }
 
-function ConfirmedOrderAlert({ onClose, open }: { onClose: () => void; open: boolean }) {
+function ConfirmationRequestedAlert({ onClose, open }: { onClose: () => void; open: boolean }) {
   return (
     <AlertDialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="fixed inset-0 z-50 bg-slate-950/40" />
         <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-6 text-left shadow-lg duration-150 data-[state=closed]:scale-95 data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-700">
               <CheckCircle aria-hidden="true" size={22} strokeWidth={2.3} />
             </div>
             <div className="min-w-0">
               <AlertDialog.Title className="text-base font-semibold text-slate-950">
-                주문이 확정되었습니다.
+                배치 확정을 요청했습니다.
               </AlertDialog.Title>
               <AlertDialog.Description className="mt-2 text-sm leading-6 text-slate-500">
-                배치 상태가 확정 완료로 변경되었습니다.
+                물류사 담당자가 검토한 뒤 최종 확정합니다.
               </AlertDialog.Description>
             </div>
           </div>
@@ -343,6 +345,7 @@ function BatchHeader({
           <div className="flex flex-wrap items-center gap-3">
             <span className="font-mono text-lg font-bold text-slate-950">{batch.batchNo}</span>
             <BatchStatusBadge status={batch.status} />
+            {batch.parentBatchId ? <Badge tone="blue">보완본 R{batch.revisionNo}</Badge> : null}
             {batch.errorCount > 0 ? <Badge tone="red">확정 불가</Badge> : null}
             {confirmed ? <Badge tone="green">후속 처리 가능</Badge> : null}
           </div>
@@ -373,6 +376,8 @@ function BatchHeader({
           <Meta label="원본 파일명" value={uploadedFile?.originalFileName} />
           <Meta label="업로드시각" value={formatDateTime(batch.uploadedAt)} />
           <Meta label="파일 크기" value={uploadedFile ? formatFileSize(uploadedFile.fileSize) : undefined} />
+          {batch.parentBatchId ? <Meta label="원 배치" value={`#${batch.parentBatchId}`} /> : null}
+          {batch.reuploadReason ? <Meta label="보완 사유" value={batch.reuploadReason} /> : null}
           <Meta label="메모" value={batch.memo ?? undefined} />
         </dl>
       </div>
@@ -448,7 +453,7 @@ function BatchPrimaryActions({
       </Link>
       {canOperateBatch ? (
         <Button className="min-w-24" disabled={!canConfirm || actionState !== null} onClick={onConfirm} variant="primary">
-          {actionState === 'confirm' ? '확정 중' : '배치 확정'}
+          {actionState === 'confirm' ? '요청 중' : '배치 확정 요청'}
         </Button>
       ) : null}
       {canAdministerBatch ? (
@@ -461,26 +466,31 @@ function BatchPrimaryActions({
 }
 
 function BatchStatusSummary({ batch, canConfirm, confirmed }: { batch: BackendBatchDetail; canConfirm: boolean; confirmed: boolean }) {
-  const tone = confirmed ? 'green' : batch.errorCount > 0 ? 'red' : canConfirm ? 'blue' : 'slate';
+  const confirmationRequested = batch.status === 'CONFIRMATION_REQUESTED';
+  const tone = confirmed ? 'green' : confirmationRequested ? 'blue' : batch.errorCount > 0 ? 'red' : canConfirm ? 'blue' : 'slate';
   const toneClass = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
-    green: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    blue: 'border-slate-200 bg-slate-50 text-slate-700',
+    green: 'border-teal-200 bg-teal-50 text-teal-800',
     red: 'border-red-200 bg-red-50 text-red-800',
     slate: 'border-slate-200 bg-slate-50 text-slate-700',
   }[tone];
   const title = confirmed
     ? '확정된 배치입니다'
+    : confirmationRequested
+      ? '물류사에 배치 확정을 요청했습니다'
     : batch.errorCount > 0
       ? `Error ${batch.errorCount}건이 있어 확정할 수 없습니다`
       : canConfirm
-        ? 'Error가 없어 배치 확정이 가능합니다'
+        ? 'Error가 없어 배치 확정을 요청할 수 있습니다'
         : '검증 상태를 확인한 뒤 다음 작업을 진행하세요';
   const description = confirmed
     ? '라벨 다운로드와 외부 API 제공 상태를 확인할 수 있습니다.'
+    : confirmationRequested
+      ? '물류사 담당자가 요청 내용을 확인한 뒤 최종 확정합니다.'
     : batch.errorCount > 0
       ? '검증 결과에서 오류 항목을 먼저 확인하세요.'
       : canConfirm
-        ? 'Warning 항목을 확인한 뒤 확정을 진행하세요.'
+        ? 'Warning 항목을 확인한 뒤 물류사에 확정을 요청하세요.'
         : '검증 전 또는 검증 진행 중인 배치는 확정할 수 없습니다.';
 
   return (
@@ -515,7 +525,7 @@ function BatchProgress({ batch }: { batch: BackendBatchDetail }) {
                     : active
                       ? 'border-teal-300 bg-teal-50'
                       : complete
-                        ? 'border-emerald-200 bg-emerald-50'
+                        ? 'border-teal-200 bg-teal-50'
                         : 'border-slate-200 bg-slate-50'
                 }`}
                 key={step.key}
@@ -545,27 +555,32 @@ function BatchProgress({ batch }: { batch: BackendBatchDetail }) {
 }
 
 function ValidationPolicyPanel({ batch, canConfirm }: { batch: BackendBatchDetail; canConfirm: boolean }) {
+  const confirmationRequested = batch.status === 'CONFIRMATION_REQUESTED';
   const tone = batch.errorCount > 0 ? 'red' : batch.status === 'CONFIRMED' ? 'green' : 'blue';
   const title =
     batch.errorCount > 0
       ? '오류가 있어 배치를 확정할 수 없습니다'
       : batch.status === 'CONFIRMED'
         ? '확정된 배치입니다'
+        : confirmationRequested
+          ? '물류사 최종 확정을 기다리고 있습니다'
         : canConfirm
-          ? '배치 확정이 가능합니다'
+          ? '배치 확정을 요청할 수 있습니다'
           : '검증 결과 확인이 필요합니다';
   const message =
     batch.errorCount > 0
       ? '검증 결과에서 Error 항목을 먼저 확인하세요. Error가 남아 있으면 외부 제공과 라벨 다운로드를 진행할 수 없습니다.'
       : batch.status === 'CONFIRMED'
         ? '외부 API 제공과 라벨 다운로드 대상입니다. 필요한 후속 작업을 진행하세요.'
+        : confirmationRequested
+          ? '물류사 담당자가 요청 내용을 검토한 뒤 최종 확정합니다.'
         : canConfirm
-          ? 'Error가 없습니다. Warning 항목을 확인한 뒤 배치를 확정할 수 있습니다.'
+          ? 'Error가 없습니다. Warning 항목을 확인한 뒤 배치 확정을 요청할 수 있습니다.'
           : '검증이 끝나지 않았거나 확정할 수 없는 상태입니다.';
 
   const toneClass = {
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
-    green: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+    blue: 'border-slate-200 bg-slate-50 text-slate-700',
+    green: 'border-teal-200 bg-teal-50 text-teal-800',
     red: 'border-red-200 bg-red-50 text-red-800',
   }[tone];
 
@@ -587,12 +602,90 @@ function ValidationPolicyPanel({ batch, canConfirm }: { batch: BackendBatchDetai
   );
 }
 
+function SupplementRequestPanel({ batch, canOperateBatch }: { batch: BackendBatchDetail; canOperateBatch: boolean }) {
+  const request = batch.latestConfirmationRequest;
+  if (batch.status !== 'NEEDS_MORE_INFO' && request?.status !== 'NEEDS_MORE_INFO') {
+    return null;
+  }
+
+  const reviewComment = request?.reviewComment?.trim();
+  const requestMemo = request?.requestMemo?.trim();
+
+  return (
+    <Card className="border-amber-200 bg-amber-50 p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-base font-bold text-slate-950">물류사 보완 요청</p>
+            {request?.supplementType ? <Badge tone="amber">{supplementTypeLabel(request.supplementType)}</Badge> : null}
+          </div>
+          <p className="mt-2 whitespace-pre-wrap rounded-md border border-amber-200 bg-white px-4 py-3 text-sm leading-6 text-slate-800">
+            {reviewComment || '보완 요청 사유가 등록되지 않았습니다.'}
+          </p>
+          <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+            <Meta label="검토 시각" value={request?.reviewedAt ? formatDateTime(request.reviewedAt) : undefined} />
+            <Meta label="요청 시각" value={request?.requestedAt ? formatDateTime(request.requestedAt) : undefined} />
+            <Meta label="확정 요청 메모" value={requestMemo || undefined} />
+          </dl>
+        </div>
+        {canOperateBatch ? (
+          <Link
+            className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-4 text-sm font-semibold text-white hover:bg-teal-800"
+            to={`/uploads?supplementOf=${batch.id}`}
+          >
+            보완본 업로드
+          </Link>
+        ) : null}
+      </div>
+    </Card>
+  );
+}
+
+function RejectionReasonPanel({ batch }: { batch: BackendBatchDetail }) {
+  const request = batch.latestConfirmationRequest;
+  if (batch.status !== 'REJECTED' && request?.status !== 'REJECTED') {
+    return null;
+  }
+
+  const reviewComment = request?.reviewComment?.trim();
+  const requestMemo = request?.requestMemo?.trim();
+
+  return (
+    <Card className="border-red-200 bg-red-50 p-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-base font-bold text-slate-950">물류사 반려 사유</p>
+            <Badge tone="red">반려</Badge>
+          </div>
+          <p className="mt-2 whitespace-pre-wrap rounded-md border border-red-200 bg-white px-4 py-3 text-sm leading-6 text-slate-800">
+            {reviewComment || '반려 사유가 등록되지 않았습니다.'}
+          </p>
+          <dl className="mt-4 grid gap-3 text-sm md:grid-cols-3">
+            <Meta label="검토 시각" value={request?.reviewedAt ? formatDateTime(request.reviewedAt) : undefined} />
+            <Meta label="요청 시각" value={request?.requestedAt ? formatDateTime(request.requestedAt) : undefined} />
+            <Meta label="확정 요청 메모" value={requestMemo || undefined} />
+          </dl>
+        </div>
+        <Link
+          className="inline-flex h-10 shrink-0 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+          to={`/batches/${batch.id}/validation`}
+        >
+          검증결과 보기
+        </Link>
+      </div>
+    </Card>
+  );
+}
+
 function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDetail; canOperateBatch: boolean }) {
-  if (!canOperateBatch || batch.status === 'CONFIRMED' || batch.status === 'CANCELLED' || batch.status === 'ROLLED_BACK') {
+  if (!canOperateBatch || batch.status === 'CONFIRMED' || batch.status === 'CONFIRMATION_REQUESTED' || batch.status === 'CANCELLED' || batch.status === 'ROLLED_BACK') {
     return null;
   }
 
   const hasErrors = batch.errorCount > 0 || batch.status === 'VALIDATION_FAILED';
+  const needsSupplement = batch.status === 'NEEDS_MORE_INFO';
+  const uploadPath = needsSupplement ? `/uploads?supplementOf=${batch.id}` : '/uploads';
 
   return (
     <Card className={`p-5 ${hasErrors ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
@@ -600,33 +693,46 @@ function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDet
         <div className="min-w-0">
           <p className="text-base font-bold text-slate-950">{hasErrors ? '검증 실패 후 처리' : '검증 후 처리 기준'}</p>
           <p className="mt-2 text-sm leading-6 text-slate-700">
-            실패한 배치는 그대로 보존하고 확정, 외부 API 제공, 라벨 다운로드만 차단합니다. 마스터 보완으로 해결되는 오류는 같은 배치를 재검증하고,
-            엑셀 원본값 자체가 틀린 경우에는 수정한 새 엑셀을 업로드하세요.
+            실패하거나 보완 요청된 배치는 그대로 보존합니다. 마스터 보완으로 해결되는 오류는 같은 배치를 재검증하고,
+            엑셀 원본값 자체가 틀린 경우에는 수정한 엑셀을 원 배치에 연결된 보완본으로 업로드하세요.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Link
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            to="/masters/products"
-          >
-            상품 마스터
-          </Link>
-          <Link
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            to="/masters/store-routes"
-          >
-            배송지/차량 마스터
-          </Link>
-          <Link
-            className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
-            to="/uploads"
-          >
-            새 엑셀 업로드
-          </Link>
+          {fakeCurrentUser.userScopeType === 'CLIENT' ? (
+            <Link
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              to="/client-masters"
+            >
+              공개 마스터 조회
+            </Link>
+          ) : (
+            <>
+              <Link
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                to="/masters/products"
+              >
+                상품 마스터
+              </Link>
+              <Link
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                to="/masters/store-routes"
+              >
+                배송지/차량 마스터
+              </Link>
+            </>
+          )}
+          {!needsSupplement ? (
+            <Link
+              className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
+              to={uploadPath}
+            >
+              새 엑셀 업로드
+            </Link>
+          ) : null}
         </div>
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <div className="border-l-4 border-blue-400 bg-white/70 px-4 py-3">
+        <div className="border-l-4 border-slate-400 bg-white/70 px-4 py-3">
           <p className="text-sm font-bold text-slate-900">마스터 누락</p>
           <p className="mt-1 text-sm leading-5 text-slate-600">상품코드나 거래처코드를 마스터에 추가한 뒤 이 배치를 다시 검증합니다.</p>
         </div>
@@ -690,6 +796,7 @@ function Meta({ label, value }: { label: string; value?: string }) {
 
 function getProgressIndex(batch: BackendBatchDetail) {
   if (batch.status === 'CONFIRMED') return 4;
+  if (batch.status === 'CONFIRMATION_REQUESTED') return 3;
   if (batch.status === 'READY_TO_CONFIRM' || batch.status === 'VALIDATION_FAILED' || batch.status === 'VALIDATING') return 2;
   return 1;
 }
@@ -702,6 +809,12 @@ function sheetTypeLabel(item: SheetResult) {
   return 'Label Box';
 }
 
+function supplementTypeLabel(value: BatchSupplementRequestType) {
+  if (value === 'FILE_REUPLOAD') return '수정 파일 필요';
+  if (value === 'MASTER_DATA') return '마스터 보완';
+  return '내용 확인 필요';
+}
+
 function sheetMessage(item: SheetResult) {
   if (item.message) return item.message;
   if (item.rowCount === 0 && item.sheetName.startsWith('Scan_upload_')) return '0건 Scan 시트로 정상 인식되었습니다.';
@@ -712,8 +825,9 @@ function sheetMessage(item: SheetResult) {
 
 function actionHint(batch: BackendBatchDetail, canConfirm: boolean, confirmed: boolean) {
   if (confirmed) return '확정 완료 상태이므로 라벨 다운로드와 외부 API 제공 상태를 확인할 수 있습니다.';
+  if (batch.status === 'CONFIRMATION_REQUESTED') return '물류사 담당자가 요청 내용을 검토하고 있습니다.';
   if (batch.errorCount > 0) return 'Error를 먼저 확인하세요. 마스터 누락은 보완 후 재검증하고, 엑셀 원본 오류는 수정 파일을 새로 업로드합니다.';
-  if (canConfirm) return 'Error가 없어 확정할 수 있습니다. Warning은 운영 확인 후 진행하세요.';
+  if (canConfirm) return 'Error가 없어 배치 확정을 요청할 수 있습니다. Warning은 운영 확인 후 진행하세요.';
   return '검증 상태를 확인한 뒤 후속 작업을 진행하세요.';
 }
 

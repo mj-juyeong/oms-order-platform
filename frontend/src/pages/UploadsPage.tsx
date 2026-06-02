@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import * as AlertDialog from '@radix-ui/react-alert-dialog';
 import { CheckCircle, FileSpreadsheet, X } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import {
   omsApi,
@@ -55,7 +55,12 @@ const statusLabel: Record<SheetResult['status'], string> = {
 
 export function UploadsPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
+  const [searchParams] = useSearchParams();
+  const supplementOfParam = searchParams.get('supplementOf');
+  const supplementBatchId = supplementOfParam ? Number(supplementOfParam) : NaN;
+  const activeSupplementBatchId = Number.isInteger(supplementBatchId) && supplementBatchId > 0 ? supplementBatchId : null;
   const userFixedClientId = fakeCurrentUser.clientId ?? null;
+  const isClientUser = fakeCurrentUser.userScopeType === 'CLIENT';
   const [clientContextSelection, setClientContextSelection] = useState(readClientContextSelection);
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [phase, setPhase] = useState<UploadPhase>('idle');
@@ -65,6 +70,8 @@ export function UploadsPage() {
   const [productMasterCriteria, setProductMasterCriteria] = useState<MasterCriteria | null>(null);
   const [storeRouteMasterCriteria, setStoreRouteMasterCriteria] = useState<MasterCriteria | null>(null);
   const [recentBatches, setRecentBatches] = useState<BackendBatchSummary[]>([]);
+  const [supplementBatch, setSupplementBatch] = useState<BackendBatchSummary | null>(null);
+  const [supplementLoading, setSupplementLoading] = useState(false);
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [clientInputMode, setClientInputMode] = useState<ClientInputMode>('select');
   const [clientSearchText, setClientSearchText] = useState('');
@@ -90,15 +97,50 @@ export function UploadsPage() {
   const contextClientName = fakeCurrentUser.clientName ?? (clientContextSelection.mode === 'client' ? clientContextSelection.clientName ?? null : null);
   const selectedClient = clients.find((client) => client.id === selectedClientId) ?? clientCandidates.find((candidate) => candidate.client.id === selectedClientId)?.client;
   const selectedClientName = contextClientName ?? selectedClient?.name ?? null;
+  const contextClientDisplayName = contextClientId ? selectedClientName ?? `고객사 #${contextClientId}` : null;
   const activeClientId = contextClientId ?? selectedClientId;
+  const supplementMode = Boolean(activeSupplementBatchId);
   const canConfirm = Boolean(validationResult && validationResult.status === 'READY_TO_CONFIRM' && validationResult.errorCount === 0);
+  const confirmationRequested = validationResult?.status === 'CONFIRMATION_REQUESTED' || uploadResult?.status === 'CONFIRMATION_REQUESTED';
   const confirmed = validationResult?.status === 'CONFIRMED' || uploadResult?.status === 'CONFIRMED';
   const validationOverlayCopy = getValidationOverlayCopy(validationOverlayStage);
 
   useEffect(() => subscribeClientContextSelection(setClientContextSelection), []);
 
   useEffect(() => {
-    if (!tenantId) {
+    let ignore = false;
+
+    async function loadSupplementBatch() {
+      if (!tenantId || !activeSupplementBatchId) {
+        setSupplementBatch(null);
+        return;
+      }
+
+      setSupplementLoading(true);
+      try {
+        const result = await omsApi.batches.detail(activeSupplementBatchId, { tenantId, clientId: contextClientId ?? undefined });
+        if (ignore) return;
+        setSupplementBatch(result);
+        setSelectedClientId(result.clientId);
+        setClientResolveMessage(`${result.batchNo} 배치의 보완본으로 업로드합니다.`);
+      } catch (error) {
+        if (!ignore) {
+          setSupplementBatch(null);
+          setErrorMessage(formatUploadError(error));
+        }
+      } finally {
+        if (!ignore) setSupplementLoading(false);
+      }
+    }
+
+    loadSupplementBatch();
+    return () => {
+      ignore = true;
+    };
+  }, [activeSupplementBatchId, contextClientId, tenantId]);
+
+  useEffect(() => {
+    if (!tenantId || userFixedClientId) {
       setClients([]);
       return;
     }
@@ -114,18 +156,24 @@ export function UploadsPage() {
     return () => {
       ignore = true;
     };
-  }, [tenantId]);
+  }, [tenantId, userFixedClientId]);
 
   useEffect(() => {
+    if (supplementBatch) {
+      setSelectedClientId(supplementBatch.clientId);
+      setClientResolveMessage(`${supplementBatch.batchNo} 배치의 보완본으로 업로드합니다.`);
+      return;
+    }
+
     if (contextClientId) {
       setSelectedClientId(contextClientId);
-      setClientResolveMessage(`${contextClientName ?? `client-${contextClientId}`} 고객사로 업로드합니다.`);
+      setClientResolveMessage(`${contextClientDisplayName ?? `고객사 #${contextClientId}`} 고객사로 업로드합니다.`);
       return;
     }
 
     setSelectedClientId(null);
     setClientInputMode('select');
-  }, [contextClientId, contextClientName, selectedFile]);
+  }, [contextClientDisplayName, contextClientId, selectedFile, supplementBatch]);
 
   useEffect(() => {
     let ignore = false;
@@ -138,6 +186,22 @@ export function UploadsPage() {
           setProductMasterCriteria(null);
           setStoreRouteMasterCriteria(null);
           setRecentBatches([]);
+          return;
+        }
+        if (isClientUser) {
+          const [productPage, storeRoutePage, batchPage] = await Promise.all([
+            omsApi.masters.clientMasters.products.list({ page: 0, size: 1 }),
+            omsApi.masters.clientMasters.storeRoutes.list({ page: 0, size: 1 }),
+            activeClientId
+              ? omsApi.batches.list({ tenantId, clientId: activeClientId, page: 0, size: 3 })
+              : Promise.resolve({ items: [] as BackendBatchSummary[] }),
+          ]);
+
+          if (ignore) return;
+
+          setProductMasterCriteria({ rowCount: productPage.totalElements });
+          setStoreRouteMasterCriteria({ rowCount: storeRoutePage.totalElements });
+          setRecentBatches(batchPage.items);
           return;
         }
         const [productPage, productUploads, storeRoutePage, storeRouteUploads, batchPage] = await Promise.all([
@@ -173,17 +237,24 @@ export function UploadsPage() {
     return () => {
       ignore = true;
     };
-  }, [activeClientId, sidebarReloadSeq, tenantId]);
+  }, [activeClientId, isClientUser, sidebarReloadSeq, tenantId]);
 
   useEffect(() => {
     let ignore = false;
 
     async function loadClientCandidates() {
+      if (supplementBatch) {
+        setClientCandidates([]);
+        setSelectedClientId(supplementBatch.clientId);
+        setClientResolveMessage(`${supplementBatch.batchNo} 배치의 보완본으로 업로드합니다.`);
+        return;
+      }
+
       if (contextClientId || clientInputMode !== 'direct') {
         setClientCandidates([]);
         if (contextClientId) {
           setSelectedClientId(contextClientId);
-          setClientResolveMessage(`${contextClientName ?? `client-${contextClientId}`} 고객사로 업로드합니다.`);
+          setClientResolveMessage(`${contextClientDisplayName ?? `고객사 #${contextClientId}`} 고객사로 업로드합니다.`);
         } else {
           setClientResolveMessage(null);
         }
@@ -243,7 +314,7 @@ export function UploadsPage() {
     return () => {
       ignore = true;
     };
-  }, [clientInputMode, clientSearchText, contextClientId, contextClientName, tenantId]);
+  }, [clientInputMode, clientSearchText, contextClientDisplayName, contextClientId, supplementBatch, tenantId]);
 
   const columns: DataTableColumn<SheetResult>[] = [
     {
@@ -289,7 +360,7 @@ export function UploadsPage() {
     setValidationOverlayStage(null);
     setClientInputMode('select');
     setClientSearchText(extractClientSearchText(file.name));
-    setSelectedClientId(contextClientId);
+    setSelectedClientId(supplementBatch?.clientId ?? contextClientId);
     setPhase('selected');
   }
 
@@ -303,7 +374,7 @@ export function UploadsPage() {
     setValidationOverlayStage(null);
     setClientSearchText('');
     setClientInputMode('select');
-    setSelectedClientId(contextClientId);
+    setSelectedClientId(supplementBatch?.clientId ?? contextClientId);
     setPhase('idle');
   }
 
@@ -316,7 +387,7 @@ export function UploadsPage() {
       setErrorMessage('현재 물류사 정보를 확인할 수 없습니다. 다시 로그인해 주세요.');
       return;
     }
-    const uploadClientId = selectedClientId ?? contextClientId;
+    const uploadClientId = supplementBatch?.clientId ?? selectedClientId ?? contextClientId;
     if (!uploadClientId) {
       setErrorMessage('고객사를 선택하세요. 목록에 없으면 고객사 관리에서 먼저 등록한 뒤 선택해 주세요.');
       return;
@@ -333,6 +404,8 @@ export function UploadsPage() {
         clientId: uploadClientId,
         file: selectedFile,
         uploadedBy: fakeCurrentUser.id ?? undefined,
+        parentBatchId: supplementBatch?.id,
+        reuploadReason: supplementBatch ? `보완 요청 배치 ${supplementBatch.batchNo}의 파일 보완본` : undefined,
       });
       setUploadResult(result);
       setPhase('parsed');
@@ -388,13 +461,14 @@ export function UploadsPage() {
     setConfirmSuccessAlertOpen(false);
 
     try {
-      await omsApi.batches.confirm(uploadResult.batchId, {
+      await omsApi.batches.requestConfirmation(uploadResult.batchId, {
         tenantId: uploadResult.tenantId,
         clientId: uploadResult.clientId,
+      }, {
         actorId: fakeCurrentUser.id ?? undefined,
       });
-      setUploadResult((current) => (current ? { ...current, status: 'CONFIRMED' } : current));
-      setValidationResult({ ...validationResult, status: 'CONFIRMED' });
+      setUploadResult((current) => (current ? { ...current, status: 'CONFIRMATION_REQUESTED' } : current));
+      setValidationResult({ ...validationResult, status: 'CONFIRMATION_REQUESTED' });
       setConfirmModalOpen(false);
       setConfirmSuccessAlertOpen(true);
       setSidebarReloadSeq((current) => current + 1);
@@ -423,13 +497,15 @@ export function UploadsPage() {
       ) : null}
       {confirming ? (
         <FullScreenLoadingOverlay
-          description="확정 가능한 배치를 외부 API와 다운로드 대상에 포함할 수 있도록 상태를 저장하고 있습니다."
+          description="검증이 끝난 배치를 물류사 담당자에게 전달하고 있습니다."
           detail={uploadResult?.batchNo ?? selectedFileName}
-          title="주문을 확정하고 있습니다"
+          title="배치 확정을 요청하고 있습니다"
         />
       ) : null}
 
       <UploadProgress phase={phase} />
+
+      {supplementMode ? <SupplementUploadBanner batch={supplementBatch} loading={supplementLoading} /> : null}
 
       <div className="grid gap-5 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.65fr)]">
         <div className="space-y-5">
@@ -447,7 +523,7 @@ export function UploadsPage() {
           {phase !== 'idle' ? (
           <Card className="upload-phase-panel overflow-hidden" key={phase}>
             {selectedFile ? <SelectedFileSummary file={selectedFile} onRemove={phase === 'selected' ? handleFileRemove : undefined} prominent /> : null}
-            <UploadStageHeader confirmed={confirmed} phase={phase} validationResult={validationResult} />
+            <UploadStageHeader confirmationRequested={confirmationRequested} confirmed={confirmed} phase={phase} validationResult={validationResult} />
             <div className="p-5">
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px]">
               <div className="rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
@@ -455,6 +531,7 @@ export function UploadsPage() {
                 <div className="mt-2 flex flex-wrap items-center gap-2">
                   <Badge tone="teal">{fakeCurrentUser.tenantName ?? '현재 물류사'}</Badge>
                   <Badge tone={selectedClientName ? 'blue' : 'amber'}>{selectedClientName ?? '고객사 선택 필요'}</Badge>
+                  {uploadResult?.parentBatchId ? <Badge tone="blue">보완본 R{uploadResult.revisionNo}</Badge> : null}
                 </div>
               </div>
               <Input label="대표 배송일" readOnly value={uploadResult?.deliveryDate ?? '엑셀 업로드 후 표시'} />
@@ -464,9 +541,9 @@ export function UploadsPage() {
               <ClientResolvePanel
                 candidates={clientCandidates}
                 clients={clients}
-                disabled={uploading || validating || confirming || Boolean(contextClientId)}
+                disabled={uploading || validating || confirming || Boolean(contextClientId) || supplementMode}
                 inputMode={clientInputMode}
-                lockedClientName={contextClientName}
+                lockedClientName={supplementBatch ? selectedClientName ?? `고객사 #${supplementBatch.clientId}` : contextClientId ? contextClientDisplayName : null}
                 loading={clientResolving}
                 message={clientResolveMessage}
                 onInputModeChange={setClientInputMode}
@@ -478,13 +555,13 @@ export function UploadsPage() {
             ) : null}
             {errorMessage ? <UploadErrorMessage message={errorMessage} /> : null}
             {uploadResult ? <UploadResultSummary result={uploadResult} validationResult={validationResult} /> : null}
-            {phase === 'validated' && validationResult ? <ValidationOutcomeNotice canConfirm={canConfirm} confirmed={confirmed} result={validationResult} /> : null}
+            {phase === 'validated' && validationResult ? <ValidationOutcomeNotice canConfirm={canConfirm} confirmationRequested={confirmationRequested} confirmed={confirmed} result={validationResult} /> : null}
 
             <div className="mt-5 flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-sm font-semibold text-slate-900">{actionTitle(phase, loadingAction, canConfirm, confirmed)}</p>
-                {actionDescription(phase, loadingAction, canConfirm, confirmed) ? (
-                  <p className="mt-1 text-sm text-slate-500">{actionDescription(phase, loadingAction, canConfirm, confirmed)}</p>
+                <p className="text-sm font-semibold text-slate-900">{actionTitle(phase, loadingAction, canConfirm, confirmationRequested, confirmed)}</p>
+                {actionDescription(phase, loadingAction, canConfirm, confirmationRequested, confirmed) ? (
+                  <p className="mt-1 text-sm text-slate-500">{actionDescription(phase, loadingAction, canConfirm, confirmationRequested, confirmed)}</p>
                 ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
@@ -509,7 +586,7 @@ export function UploadsPage() {
                     </Link>
                     {canConfirm && !confirmed ? (
                       <Button disabled={confirming} onClick={() => setConfirmModalOpen(true)} variant="primary">
-                        확정
+                        배치 확정 요청
                       </Button>
                     ) : null}
                   </>
@@ -539,6 +616,7 @@ export function UploadsPage() {
             errorMessage={sidebarErrorMessage}
             loading={sidebarLoading}
             productMaster={productMasterCriteria}
+            publicView={isClientUser}
             storeRouteMaster={storeRouteMasterCriteria}
           />
           <UploadHelpPanel />
@@ -547,35 +625,35 @@ export function UploadsPage() {
       </div>
 
       <ConfirmActionModal
-        confirmLabel="확정"
-        description="확정 후에는 이 배치가 외부 API 제공과 운영 다운로드 대상에 포함됩니다."
+        confirmLabel="확정 요청"
+        description="검증 결과를 물류사 담당자에게 전달합니다. 물류사가 최종 확정한 뒤 외부 API와 운영 다운로드 대상에 포함됩니다."
         loading={confirming}
         onClose={() => setConfirmModalOpen(false)}
         onConfirm={handleConfirmOrder}
         open={confirmModalOpen}
-        title="주문을 확정하시겠습니까?"
+        title="배치 확정을 요청하시겠습니까?"
       />
-      <ConfirmedOrderAlert open={confirmSuccessAlertOpen} onClose={() => setConfirmSuccessAlertOpen(false)} />
+      <ConfirmationRequestedAlert open={confirmSuccessAlertOpen} onClose={() => setConfirmSuccessAlertOpen(false)} />
     </div>
   );
 }
 
-function ConfirmedOrderAlert({ onClose, open }: { onClose: () => void; open: boolean }) {
+function ConfirmationRequestedAlert({ onClose, open }: { onClose: () => void; open: boolean }) {
   return (
     <AlertDialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)}>
       <AlertDialog.Portal>
         <AlertDialog.Overlay className="fixed inset-0 z-50 bg-slate-950/40 data-[state=closed]:animate-none data-[state=open]:animate-in" />
         <AlertDialog.Content className="fixed left-1/2 top-1/2 z-50 w-[calc(100%-2rem)] max-w-md -translate-x-1/2 -translate-y-1/2 rounded-lg border border-slate-200 bg-white p-6 text-left shadow-lg duration-150 data-[state=closed]:scale-95 data-[state=closed]:opacity-0 data-[state=open]:scale-100 data-[state=open]:opacity-100">
           <div className="flex items-start gap-3">
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-50 text-emerald-700">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-teal-50 text-teal-700">
               <CheckCircle aria-hidden="true" size={22} strokeWidth={2.3} />
             </div>
             <div className="min-w-0">
               <AlertDialog.Title className="text-base font-semibold text-slate-950">
-                주문이 확정되었습니다.
+                배치 확정을 요청했습니다.
               </AlertDialog.Title>
               <AlertDialog.Description className="mt-2 text-sm leading-6 text-slate-500">
-                배치 상태가 확정 완료로 변경되었습니다.
+                물류사 담당자가 검토한 뒤 최종 확정합니다.
               </AlertDialog.Description>
             </div>
           </div>
@@ -589,6 +667,32 @@ function ConfirmedOrderAlert({ onClose, open }: { onClose: () => void; open: boo
         </AlertDialog.Content>
       </AlertDialog.Portal>
     </AlertDialog.Root>
+  );
+}
+
+function SupplementUploadBanner({ batch, loading }: { batch: BackendBatchSummary | null; loading: boolean }) {
+  return (
+    <Card className="border-amber-200 bg-amber-50 p-5">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-base font-bold text-slate-950">보완본 업로드</p>
+            <Badge tone="amber">{loading ? '원 배치 확인 중' : '원 배치 연결'}</Badge>
+          </div>
+          {!batch ? (
+            <p className="mt-2 text-sm leading-6 text-slate-700">보완 요청된 원 배치를 확인한 뒤 수정한 OIS 엑셀을 업로드합니다.</p>
+          ) : null}
+        </div>
+        {batch ? (
+          <Link
+            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+            to={`/batches/${batch.id}`}
+          >
+            원 배치 보기
+          </Link>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 
@@ -609,7 +713,7 @@ function UploadProgress({ phase }: { phase: UploadPhase }) {
                 active
                   ? 'upload-step-active border-teal-300 bg-teal-50 shadow-sm'
                   : done
-                    ? 'upload-step-done border-emerald-200 bg-emerald-50'
+                    ? 'upload-step-done border-teal-200 bg-teal-50'
                     : 'border-slate-200 bg-slate-50 opacity-85'
               }`}
               key={step.key}
@@ -638,17 +742,19 @@ function UploadProgress({ phase }: { phase: UploadPhase }) {
 }
 
 function UploadStageHeader({
+  confirmationRequested,
   confirmed,
   phase,
   validationResult,
 }: {
+  confirmationRequested: boolean;
   confirmed: boolean;
   phase: UploadPhase;
   validationResult: BatchValidationResult | null;
 }) {
   const canConfirm = Boolean(validationResult && validationResult.status === 'READY_TO_CONFIRM' && validationResult.errorCount === 0);
-  const tone = confirmed ? 'green' : phase === 'validated' && !canConfirm ? 'red' : phase === 'parsed' ? 'blue' : 'teal';
-  const label = confirmed ? '확정 완료' : phase === 'validated' ? (canConfirm ? '확정 가능' : '확정 불가') : phase === 'parsed' ? '검증 대기' : '파일 정보';
+  const tone = confirmed ? 'green' : confirmationRequested ? 'teal' : phase === 'validated' && !canConfirm ? 'red' : phase === 'parsed' ? 'blue' : 'teal';
+  const label = confirmed ? '확정 완료' : confirmationRequested ? '확정 요청 완료' : phase === 'validated' ? (canConfirm ? '확정 요청 가능' : '확정 불가') : phase === 'parsed' ? '검증 대기' : '파일 정보';
   const title =
     phase === 'selected'
       ? '선택한 파일을 확인해 주세요'
@@ -656,8 +762,10 @@ function UploadStageHeader({
         ? '파일 확인이 끝났습니다'
         : confirmed
           ? '처리 완료'
+          : confirmationRequested
+            ? '물류사 검토를 기다리고 있습니다'
           : canConfirm
-            ? '검증 결과 확정할 수 있습니다'
+            ? '검증 결과를 물류사에 전달할 수 있습니다'
             : '검증 결과 확인이 필요합니다';
   const description =
     phase === 'selected'
@@ -666,8 +774,10 @@ function UploadStageHeader({
         ? '시트 인식 결과를 확인한 뒤 검증 실행만 진행하면 됩니다.'
         : confirmed
           ? '이 배치는 후속 업무에서 사용할 수 있는 상태입니다.'
+          : confirmationRequested
+            ? '물류사 담당자가 요청 내용을 확인한 뒤 최종 확정합니다.'
           : canConfirm
-            ? 'Error가 없어 바로 확정할 수 있습니다. Warning은 필요 시 검증 결과에서 확인하세요.'
+            ? 'Error가 없어 배치 확정을 요청할 수 있습니다. Warning은 필요 시 검증 결과에서 확인하세요.'
             : 'Error가 남아 있어 확정할 수 없습니다. 검증 결과에서 원인을 먼저 확인하세요.';
 
   return (
@@ -696,7 +806,7 @@ function SelectedFileSummary({
     <div className={`${prominent ? 'upload-file-highlight border-b border-teal-100 bg-teal-50/70 px-5 py-4' : 'mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-4'}`}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-emerald-200 bg-white text-emerald-700 shadow-sm">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-md border border-teal-200 bg-white text-teal-700 shadow-sm">
             <FileSpreadsheet aria-hidden="true" size={24} strokeWidth={2.2} />
           </div>
           <div className="min-w-0">
@@ -752,8 +862,16 @@ function UploadResultSummary({
             {result.batchNo} · {result.fileName}
           </p>
         </div>
-        <BatchStatusBadge status={validationResult?.status ?? result.status} />
+        <div className="flex flex-wrap gap-2">
+          {result.parentBatchId ? <Badge tone="blue">보완본 R{result.revisionNo}</Badge> : null}
+          <BatchStatusBadge status={validationResult?.status ?? result.status} />
+        </div>
       </div>
+      {result.parentBatchId ? (
+        <p className="mt-2 text-xs leading-5 text-slate-500">
+          원 배치 #{result.parentBatchId}에 연결된 보완본입니다. 이 배치를 검증한 뒤 새 확정 요청을 보내세요.
+        </p>
+      ) : null}
       <div className="mt-3 grid gap-2 sm:grid-cols-4">
         {countItems.map((item) => (
           <div className="rounded-md border border-white bg-white px-3 py-2" key={item.label}>
@@ -775,25 +893,34 @@ function UploadResultSummary({
 
 function ValidationOutcomeNotice({
   canConfirm,
+  confirmationRequested,
   confirmed,
   result,
 }: {
   canConfirm: boolean;
+  confirmationRequested: boolean;
   confirmed: boolean;
   result: BatchValidationResult;
 }) {
   if (confirmed) {
     return null;
   }
+  if (confirmationRequested) {
+    return (
+      <div className="mt-4 rounded-md border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-medium text-teal-800">
+        물류사 담당자에게 배치 확정을 요청했습니다.
+      </div>
+    );
+  }
 
   return (
     <div
       className={`mt-4 rounded-md border px-4 py-3 text-sm font-medium ${
-        canConfirm ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700'
+        canConfirm ? 'border-teal-200 bg-teal-50 text-teal-800' : 'border-red-200 bg-red-50 text-red-700'
       }`}
     >
       {canConfirm
-        ? `Error ${result.errorCount}건입니다. 현재 상태에서 주문 확정이 가능합니다.`
+        ? `Error ${result.errorCount}건입니다. 현재 상태에서 배치 확정을 요청할 수 있습니다.`
         : `Error ${result.errorCount}건이 확인되어 확정할 수 없습니다. 검증 결과에서 조치가 필요합니다.`}
     </div>
   );
@@ -846,9 +973,9 @@ function ClientResolvePanel({
 
   if (lockedClientName) {
     return (
-      <div className="mt-4 rounded-md border border-blue-100 bg-blue-50 px-4 py-3">
-        <p className="text-sm font-semibold text-blue-950">상단에서 선택한 고객사로 업로드합니다</p>
-        <p className="mt-1 text-sm text-blue-700">{lockedClientName}</p>
+      <div className="mt-4 rounded-md border border-slate-200 bg-slate-50 px-4 py-3">
+        <p className="text-sm font-semibold text-slate-900">상단에서 선택한 고객사로 업로드합니다</p>
+        <p className="mt-1 text-sm text-slate-600">{lockedClientName}</p>
       </div>
     );
   }
@@ -875,7 +1002,7 @@ function ClientResolvePanel({
       </div>
 
       {inputMode === 'direct' ? (
-        <div className="mt-3 rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-xs font-semibold leading-5 text-blue-800">
+        <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-semibold leading-5 text-slate-700">
           직접 입력은 기존 고객사를 찾기 위한 검색입니다. OIS 업로드 과정에서 신규 고객사는 생성되지 않습니다.
         </div>
       ) : null}
@@ -931,11 +1058,13 @@ function CurrentMasterCriteriaPanel({
   errorMessage,
   loading,
   productMaster,
+  publicView,
   storeRouteMaster,
 }: {
   errorMessage: string | null;
   loading: boolean;
   productMaster: MasterCriteria | null;
+  publicView: boolean;
   storeRouteMaster: MasterCriteria | null;
 }) {
   const ready = Boolean(productMaster?.rowCount && storeRouteMaster?.rowCount);
@@ -961,8 +1090,8 @@ function CurrentMasterCriteriaPanel({
         </div>
       ) : null}
       <div className="mt-5 space-y-3">
-        <MasterCriteriaRow label="상품 마스터" loading={loading} master={productMaster} to="/masters/products" />
-        <MasterCriteriaRow label="배송지/차량 마스터" loading={loading} master={storeRouteMaster} to="/masters/store-routes" />
+        <MasterCriteriaRow label="상품 마스터" loading={loading} master={productMaster} to={publicView ? '/client-masters' : '/masters/products'} />
+        <MasterCriteriaRow label="배송지/차량 마스터" loading={loading} master={storeRouteMaster} to={publicView ? '/client-masters' : '/masters/store-routes'} />
       </div>
     </Card>
   );
@@ -1208,7 +1337,7 @@ function sheetTypeLabel(item: SheetResult) {
   return 'Label Box';
 }
 
-function actionTitle(phase: UploadPhase, loadingAction: LoadingAction, canConfirm: boolean, confirmed: boolean) {
+function actionTitle(phase: UploadPhase, loadingAction: LoadingAction, canConfirm: boolean, confirmationRequested: boolean, confirmed: boolean) {
   if (loadingAction === 'upload') {
     return '엑셀 파일을 확인하고 있습니다';
   }
@@ -1218,7 +1347,7 @@ function actionTitle(phase: UploadPhase, loadingAction: LoadingAction, canConfir
   }
 
   if (loadingAction === 'confirm') {
-    return '주문 확정 처리 중입니다';
+    return '배치 확정 요청 처리 중입니다';
   }
 
   if (phase === 'idle') {
@@ -1236,11 +1365,14 @@ function actionTitle(phase: UploadPhase, loadingAction: LoadingAction, canConfir
   if (confirmed) {
     return '주문이 확정되었습니다';
   }
+  if (confirmationRequested) {
+    return '배치 확정을 요청했습니다';
+  }
 
-  return canConfirm ? '검증 완료, 확정 가능' : '검증 완료, 조치 필요';
+  return canConfirm ? '검증 완료, 확정 요청 가능' : '검증 완료, 조치 필요';
 }
 
-function actionDescription(phase: UploadPhase, loadingAction: LoadingAction, canConfirm: boolean, confirmed: boolean) {
+function actionDescription(phase: UploadPhase, loadingAction: LoadingAction, canConfirm: boolean, confirmationRequested: boolean, confirmed: boolean) {
   if (loadingAction === 'upload') {
     return '시트 구성과 데이터 건수를 확인하는 중입니다.';
   }
@@ -1250,7 +1382,7 @@ function actionDescription(phase: UploadPhase, loadingAction: LoadingAction, can
   }
 
   if (loadingAction === 'confirm') {
-    return '확정 상태를 저장하고 감사 로그를 남기는 중입니다.';
+    return '물류사 담당자에게 전달할 요청을 저장하고 있습니다.';
   }
 
   if (phase === 'idle') {
@@ -1268,8 +1400,11 @@ function actionDescription(phase: UploadPhase, loadingAction: LoadingAction, can
   if (confirmed) {
     return '';
   }
+  if (confirmationRequested) {
+    return '물류사 담당자가 검토한 뒤 최종 확정합니다.';
+  }
 
-  return canConfirm ? '검증 결과를 확인하거나 바로 확정할 수 있습니다.' : '오류가 있으면 검증 결과를 먼저 확인하세요.';
+  return canConfirm ? '검증 결과를 확인한 뒤 물류사에 배치 확정을 요청할 수 있습니다.' : '오류가 있으면 검증 결과를 먼저 확인하세요.';
 }
 
 function getValidationOverlayCopy(stage: ValidationOverlayStage) {
@@ -1279,8 +1414,8 @@ function getValidationOverlayCopy(stage: ValidationOverlayStage) {
 
   if (stage === 'ready') {
     return {
-      title: '검증 완료, 확정할 수 있습니다',
-      description: 'Error가 없어 주문 확정 단계로 이동할 수 있습니다.',
+      title: '검증 완료, 확정을 요청할 수 있습니다',
+      description: 'Error가 없어 배치 확정 요청 단계로 이동할 수 있습니다.',
     };
   }
 

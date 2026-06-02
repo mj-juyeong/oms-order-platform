@@ -30,6 +30,7 @@ data class BatchActionRequest(
 
 data class ValidationErrorResponse(
 	val id: Long,
+	val batchId: Long,
 	val severity: ValidationSeverity,
 	val errorCode: String,
 	val userTitle: String,
