@@ -4,6 +4,7 @@ export interface BackendOrderLine {
   id: number;
   tenantId: number;
   clientId: number;
+  clientName?: string | null;
   batchId: number;
   sourcePlLineId: number;
   orderNo?: string | null;

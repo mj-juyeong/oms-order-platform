@@ -8,6 +8,7 @@ import { DataTable, Pagination, type DataTableColumn } from '../components/data'
 import { BatchStatusBadge, CodeCell } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { LabelLine } from '../types/label';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 interface LabelFilters {
   batchId: string;
@@ -41,8 +42,10 @@ export function LabelLinesPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
   const { clientId } = useClientScope();
   const [filters, setFilters] = useState<LabelFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<LabelFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [labelType, setLabelType] = useState<LabelTypeFilter>('ALL');
+  const [appliedLabelType, setAppliedLabelType] = useState<LabelTypeFilter>('ALL');
   const [selectedLine, setSelectedLine] = useState<LabelLine | null>(null);
   const [page, setPage] = useState(1);
   const [pageData, setPageData] = useState<PageResponse<BackendLabelLine> | null>(null);
@@ -53,11 +56,15 @@ export function LabelLinesPage() {
 
   useEffect(() => {
     void loadLines();
-  }, [clientId, filters, labelType, page, tenantId]);
+  }, [appliedFilters, appliedLabelType, clientId, page, tenantId]);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toLabelLine), [pageData]);
   const summary = useMemo(() => createLabelSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
-  const activeFilterCount = useMemo(() => countActiveFilters(filters) + (labelType === 'ALL' ? 0 : 1), [filters, labelType]);
+  const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters) + (appliedLabelType === 'ALL' ? 0 : 1), [appliedFilters, appliedLabelType]);
+  const hasPendingFilters = useMemo(
+    () => !areFilterStatesEqual(filters, appliedFilters) || labelType !== appliedLabelType,
+    [appliedFilters, appliedLabelType, filters, labelType],
+  );
   const uniqueBatchIds = useMemo(() => uniqueVisibleBatchIds(lines), [lines]);
   const canDownloadCurrent = uniqueBatchIds.length === 1 && lines.length > 0 && lines.every((line) => line.batchStatus === 'CONFIRMED');
 
@@ -74,16 +81,16 @@ export function LabelLinesPage() {
         clientId,
         page: page - 1,
         size: pageSize,
-        batchId: parseNumericFilter(filters.batchId),
-        labelType: labelType === 'ALL' ? undefined : labelType,
-        orderNo: textFilter(filters.orderNo),
-        storeCode: textFilter(filters.storeCode),
-        storeName: textFilter(filters.storeName),
-        brandName: textFilter(filters.brandName),
-        productCode: textFilter(filters.productCode),
-        productName: textFilter(filters.productName),
-        matchingCode: textFilter(filters.matchingCode),
-        qrCode: textFilter(filters.qrCode),
+        batchId: parseNumericFilter(appliedFilters.batchId),
+        labelType: appliedLabelType === 'ALL' ? undefined : appliedLabelType,
+        orderNo: textFilter(appliedFilters.orderNo),
+        storeCode: textFilter(appliedFilters.storeCode),
+        storeName: textFilter(appliedFilters.storeName),
+        brandName: textFilter(appliedFilters.brandName),
+        productCode: textFilter(appliedFilters.productCode),
+        productName: textFilter(appliedFilters.productName),
+        matchingCode: textFilter(appliedFilters.matchingCode),
+        qrCode: textFilter(appliedFilters.qrCode),
       });
       setPageData(data);
     } catch (loadError) {
@@ -94,19 +101,26 @@ export function LabelLinesPage() {
   }
 
   function updateFilter<TKey extends keyof LabelFilters>(key: TKey, value: LabelFilters[TKey]) {
-    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
   function updateLabelType(value: LabelTypeFilter) {
-    setPage(1);
     setLabelType(value);
+  }
+
+  function applyFilters() {
+    setPage(1);
+    setAppliedFilters(filters);
+    setAppliedLabelType(labelType);
+    setFiltersOpen(false);
   }
 
   function resetFilters() {
     setPage(1);
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
     setLabelType('ALL');
+    setAppliedLabelType('ALL');
   }
 
   async function handleDownloadCurrent() {
@@ -117,7 +131,7 @@ export function LabelLinesPage() {
     await downloadLabels({
       batchId: uniqueBatchIds[0],
       key: 'current',
-      labelType,
+        labelType: appliedLabelType,
     });
   }
 
@@ -133,7 +147,7 @@ export function LabelLinesPage() {
     await downloadLabels({
       batchId: line.batchNumericId,
       key: `line-${line.id}`,
-      labelType: labelType === 'ALL' ? line.labelType : labelType,
+      labelType: appliedLabelType === 'ALL' ? line.labelType : appliedLabelType,
     });
   }
 
@@ -159,12 +173,12 @@ export function LabelLinesPage() {
         clientId,
         batchId,
         labelType: requestedLabelType === 'ALL' ? undefined : requestedLabelType,
-        orderNo: textFilter(filters.orderNo),
-        storeCode: textFilter(filters.storeCode),
-        brandName: textFilter(filters.brandName),
-        productCode: textFilter(filters.productCode),
-        matchingCode: textFilter(filters.matchingCode),
-        qrCode: textFilter(filters.qrCode),
+        orderNo: textFilter(appliedFilters.orderNo),
+        storeCode: textFilter(appliedFilters.storeCode),
+        brandName: textFilter(appliedFilters.brandName),
+        productCode: textFilter(appliedFilters.productCode),
+        matchingCode: textFilter(appliedFilters.matchingCode),
+        qrCode: textFilter(appliedFilters.qrCode),
         downloadedBy: fakeCurrentUser.id ?? undefined,
       });
       const fileName = downloaded.fileName ?? defaultFileName(batchId, requestedLabelType);
@@ -185,7 +199,7 @@ export function LabelLinesPage() {
     <div className="space-y-5">
       {error ? <ErrorState description={error} onRetry={loadLines} title="Label 조회를 처리할 수 없습니다." /> : null}
       {downloadMessage ? (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-800">
+        <div className="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-800">
           {downloadMessage}
         </div>
       ) : null}
@@ -195,7 +209,9 @@ export function LabelLinesPage() {
       <LabelFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
         labelType={labelType}
+        onApply={applyFilters}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
@@ -211,7 +227,7 @@ export function LabelLinesPage() {
               <Badge tone="blue">EA</Badge>
               <Badge tone="teal">BOX</Badge>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">
               총 <span className="font-semibold text-teal-700">{(pageData?.totalElements ?? 0).toLocaleString()}</span>건이 검색되었습니다.
               행을 선택하면 라벨 출력에 필요한 코드와 상품 정보를 확인합니다.
             </p>
@@ -230,6 +246,7 @@ export function LabelLinesPage() {
           getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
           getRowKey={(item) => item.id}
           onRowClick={setSelectedLine}
+          renderMobileCard={renderLabelMobileCard}
         />
         <div className="px-5 py-4">
           <Pagination
@@ -255,9 +272,9 @@ function LabelSummaryCards({ summary }: { summary: ReturnType<typeof createLabel
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
       {cards.map((card) => (
-        <Card className="p-4" key={card.label}>
+        <Card className="p-3 sm:p-4" key={card.label}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-slate-600">{card.label}</p>
@@ -265,9 +282,46 @@ function LabelSummaryCards({ summary }: { summary: ReturnType<typeof createLabel
             </div>
             <Badge tone={card.tone}>{card.label}</Badge>
           </div>
-          <p className="mt-3 text-xs leading-5 text-slate-500">{card.description}</p>
+          <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{card.description}</p>
         </Card>
       ))}
+    </div>
+  );
+}
+
+function renderLabelMobileCard(line: LabelLine) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <CodeCell value={line.orderNo} />
+            <Badge tone={line.labelType === 'EA' ? 'blue' : 'teal'}>{line.labelType}</Badge>
+            {line.batchStatus ? <BatchStatusBadge status={line.batchStatus} /> : <Badge>미확정</Badge>}
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={line.productName}>{line.productName}</p>
+          <p className="mt-1 truncate text-xs text-slate-500" title={line.storeName}>{line.storeName}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-bold text-slate-950">{line.orderQty.toLocaleString()}</p>
+          <p className="text-xs font-semibold text-slate-500">{line.labelType}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <MobileFact label="상품" value={<CodeCell value={line.productCode} />} />
+        <MobileFact label="거래처" value={<CodeCell value={line.storeCode} />} />
+        <MobileFact label="매칭" value={<CodeCell value={line.matchingCode} />} />
+        <MobileFact label="원본" value={`${line.sheetName} / ${line.rowNo}행`} />
+      </div>
+    </div>
+  );
+}
+
+function MobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
     </div>
   );
 }
@@ -275,7 +329,9 @@ function LabelSummaryCards({ summary }: { summary: ReturnType<typeof createLabel
 function LabelFilterPanel({
   activeFilterCount,
   filters,
+  hasPendingFilters,
   labelType,
+  onApply,
   onReset,
   onToggleOpen,
   open,
@@ -284,7 +340,9 @@ function LabelFilterPanel({
 }: {
   activeFilterCount: number;
   filters: LabelFilters;
+  hasPendingFilters: boolean;
   labelType: LabelTypeFilter;
+  onApply: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
   open: boolean;
@@ -298,14 +356,16 @@ function LabelFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
-          <p className="mt-1 text-xs text-slate-500">Label 유형, 배치 ID, 주문번호, 매칭코드, QR코드와 상품 정보를 조합해 데이터를 찾습니다.</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">Label 유형, 배치 ID, 주문번호, 매칭코드, QR코드와 상품 정보를 조합해 데이터를 찾습니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
           <SegmentButton active={labelType === 'ALL'} onClick={() => setLabelType('ALL')}>전체</SegmentButton>
           <SegmentButton active={labelType === 'EA'} onClick={() => setLabelType('EA')}>EA</SegmentButton>
           <SegmentButton active={labelType === 'BOX'} onClick={() => setLabelType('BOX')}>BOX</SegmentButton>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">초기화</Button>
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">검색</Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">초기화</Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">{open ? '필터 접기' : '상세 필터'}</Button>
         </div>
       </div>
@@ -322,6 +382,11 @@ function LabelFilterPanel({
             <Input label="브랜드" onChange={(event) => updateFilter('brandName', event.target.value)} placeholder="백소정" value={filters.brandName} />
             <Input label="품목코드" onChange={(event) => updateFilter('productCode', event.target.value)} placeholder="P000001" value={filters.productCode} />
             <Input label="상품명" onChange={(event) => updateFilter('productName', event.target.value)} placeholder="상품명" value={filters.productName} />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
+            </Button>
           </div>
         </div>
       ) : null}
@@ -378,8 +443,8 @@ function LabelDetailModal({
   }
 
   return (
-    <ModalFrame onClose={onClose} panelClassName="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+    <ModalFrame onClose={onClose} panelClassName="flex max-h-[92dvh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-lg font-bold text-slate-950">Label 상세</p>
@@ -387,20 +452,20 @@ function LabelDetailModal({
               {line.batchStatus ? <BatchStatusBadge status={line.batchStatus} /> : null}
               {line.qrCode ? <Badge tone="green">QR 있음</Badge> : <Badge tone="amber">QR 없음</Badge>}
             </div>
-            <p className="mt-1 text-sm text-slate-500">라벨 출력에 필요한 주문, 거래처, 품목, 매칭 정보를 확인합니다.</p>
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">라벨 출력에 필요한 주문, 거래처, 품목, 매칭 정보를 확인합니다.</p>
           </div>
           <Button aria-label="Label 상세 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
         </div>
 
-        <div className="overflow-y-auto bg-slate-50 px-6 py-5">
+        <div className="overflow-y-auto bg-slate-50 px-4 py-4 sm:px-6 sm:py-5">
           <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
             <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
               <div className="min-w-0">
-                <p className="text-base font-bold text-slate-950">{line.productName || '-'}</p>
+                <p className="break-words text-base font-bold text-slate-950">{line.productName || '-'}</p>
                 <p className="mt-1 text-sm text-slate-600">{line.storeName || '-'} · {line.orderQty.toLocaleString()}개</p>
-                <p className="mt-3 text-sm leading-6 text-teal-800">Label_EA / Label_Box 데이터는 라벨 다운로드의 기준 데이터입니다.</p>
+                <p className="mt-3 hidden text-sm leading-6 text-teal-800 sm:block">Label_EA / Label_Box 데이터는 라벨 다운로드의 기준 데이터입니다.</p>
               </div>
-              <div className="grid min-w-[280px] gap-2 sm:grid-cols-3">
+              <div className="grid w-full min-w-0 grid-cols-2 gap-2 sm:grid-cols-3 xl:w-auto xl:min-w-[280px]">
                 <LabelSummaryPill label="브랜드" value={line.brandName || '-'} />
                 <LabelSummaryPill label="거래처" value={line.storeName || '-'} />
                 <LabelSummaryPill label="주문량" value={line.orderQty.toLocaleString()} />
@@ -408,7 +473,7 @@ function LabelDetailModal({
             </div>
           </div>
 
-          <div className="mt-5 grid gap-4 xl:grid-cols-3">
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             <DetailSection description="라벨과 연결된 주문 정보입니다." title="주문 정보">
               <DetailItem label="주문번호" value={<CodeCell value={line.orderNo} />} />
               <DetailItem label="배치 ID" value={<CodeCell value={line.batchId} />} />
@@ -433,7 +498,7 @@ function LabelDetailModal({
 
           <details className="mt-5 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm">
             <summary className="cursor-pointer font-semibold text-slate-700">원천 Label 정보</summary>
-            <dl className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <dl className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <DetailItem label="Label 유형" value={<Badge tone={line.labelType === 'EA' ? 'blue' : 'teal'}>{line.labelType}</Badge>} />
               <DetailItem label="엑셀 행" value={`${line.rowNo}행`} />
               <DetailItem label="QR코드" value={<CodeCell muted={!line.qrCode} value={line.qrCode || '-'} />} />
@@ -481,7 +546,7 @@ function toLabelLine(row: BackendLabelLine): LabelLine {
 
 function LabelSummaryPill({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-white/70 bg-white/70 px-3 py-2">
+    <div className="min-w-0 rounded-md border border-white/70 bg-white/70 px-3 py-2">
       <p className="text-xs font-semibold text-slate-500">{label}</p>
       <p className="mt-1 truncate text-sm font-bold text-slate-950" title={value}>{value}</p>
     </div>
@@ -540,18 +605,18 @@ function DetailSection({ children, className = '', description, title }: { child
     <section className={`rounded-lg border border-slate-200 bg-white ${className}`}>
       <div className="border-b border-slate-100 px-4 py-3">
         <p className="text-sm font-bold text-slate-950">{title}</p>
-        <p className="mt-1 text-xs text-slate-500">{description}</p>
+        <p className="mt-1 hidden text-xs text-slate-500 sm:block">{description}</p>
       </div>
-      <dl className="grid gap-3 p-4 text-sm">{children}</dl>
+      <dl className="grid gap-3 p-3 text-sm sm:p-4">{children}</dl>
     </section>
   );
 }
 
 function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 rounded-md border border-slate-200 bg-white p-4">
+    <div className="grid min-w-0 grid-cols-[76px_minmax(0,1fr)] items-center gap-3 rounded-md border border-slate-200 bg-white p-3 sm:grid-cols-[104px_minmax(0,1fr)] sm:p-4">
       <dt className="text-xs font-semibold text-slate-500">{label}</dt>
-      <dd className="min-w-0 text-slate-900">{value}</dd>
+      <dd className="min-w-0 overflow-hidden text-slate-900">{value}</dd>
     </div>
   );
 }

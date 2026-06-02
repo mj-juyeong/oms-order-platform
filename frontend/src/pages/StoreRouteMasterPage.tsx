@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi } from '../api/oms';
@@ -8,6 +8,7 @@ import { DataTable, Pagination, type DataTableColumn } from '../components/data'
 import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { MasterUploadPreviewResult, MasterUploadStatus, StoreRouteMasterItem, StoreRouteMasterUploadHistory, StoreRouteMasterUploadResult } from '../types/master';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 type StoreRouteOperationStatus = 'ALL' | 'ACTIVE' | 'INACTIVE';
 
@@ -74,6 +75,7 @@ export function StoreRouteMasterPage() {
   const [searchParams] = useSearchParams();
   const requestedBaljugoCode = searchParams.get('baljugoCode') ?? '';
   const [filters, setFilters] = useState<StoreRouteFilters>(() => ({ ...initialFilters, baljugoCode: requestedBaljugoCode }));
+  const [appliedFilters, setAppliedFilters] = useState<StoreRouteFilters>(() => ({ ...initialFilters, baljugoCode: requestedBaljugoCode }));
   const [filtersOpen, setFiltersOpen] = useState(Boolean(requestedBaljugoCode));
   const [page, setPage] = useState(0);
   const [storeRouteResponse, setStoreRouteResponse] = useState<PageResponse<StoreRouteMasterItem> | null>(null);
@@ -95,6 +97,7 @@ export function StoreRouteMasterPage() {
     if (!requestedBaljugoCode) return;
 
     setFilters((current) => (current.baljugoCode === requestedBaljugoCode ? current : { ...current, baljugoCode: requestedBaljugoCode }));
+    setAppliedFilters((current) => (current.baljugoCode === requestedBaljugoCode ? current : { ...current, baljugoCode: requestedBaljugoCode }));
     setFiltersOpen(true);
     setPage(0);
   }, [requestedBaljugoCode]);
@@ -112,14 +115,14 @@ export function StoreRouteMasterPage() {
         }
         const result = await omsApi.masters.storeRoutes.list({
           tenantId,
-          baljugoCode: filters.baljugoCode.trim() || undefined,
-          storeCode: filters.storeCode.trim() || undefined,
-          brandName: filters.brandName.trim() || undefined,
-          storeName: filters.storeName.trim() || undefined,
-          area: filters.area.trim() || undefined,
-          deliveryRound: filters.deliveryRound.trim() || undefined,
-          vehicleName: filters.vehicleName.trim() || undefined,
-          operationStatus: filters.operationStatus === 'ALL' ? undefined : filters.operationStatus,
+          baljugoCode: appliedFilters.baljugoCode.trim() || undefined,
+          storeCode: appliedFilters.storeCode.trim() || undefined,
+          brandName: appliedFilters.brandName.trim() || undefined,
+          storeName: appliedFilters.storeName.trim() || undefined,
+          area: appliedFilters.area.trim() || undefined,
+          deliveryRound: appliedFilters.deliveryRound.trim() || undefined,
+          vehicleName: appliedFilters.vehicleName.trim() || undefined,
+          operationStatus: appliedFilters.operationStatus === 'ALL' ? undefined : appliedFilters.operationStatus,
           page,
           size: pageSize,
         });
@@ -142,14 +145,14 @@ export function StoreRouteMasterPage() {
       ignore = true;
     };
   }, [
-    filters.area,
-    filters.baljugoCode,
-    filters.brandName,
-    filters.deliveryRound,
-    filters.operationStatus,
-    filters.storeCode,
-    filters.storeName,
-    filters.vehicleName,
+    appliedFilters.area,
+    appliedFilters.baljugoCode,
+    appliedFilters.brandName,
+    appliedFilters.deliveryRound,
+    appliedFilters.operationStatus,
+    appliedFilters.storeCode,
+    appliedFilters.storeName,
+    appliedFilters.vehicleName,
     page,
     reloadSeq,
     tenantId,
@@ -186,7 +189,8 @@ export function StoreRouteMasterPage() {
     };
   }, [reloadSeq, tenantId]);
 
-  const activeFilterCount = useMemo(() => countActiveStoreRouteFilters(filters), [filters]);
+  const activeFilterCount = useMemo(() => countActiveStoreRouteFilters(appliedFilters), [appliedFilters]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
   const storeRoutes = storeRouteResponse?.items ?? [];
   const latestUpload = uploadResult ?? uploadHistoryResponse?.items[0] ?? null;
 
@@ -330,17 +334,23 @@ export function StoreRouteMasterPage() {
 
   function updateFilter<TKey extends keyof StoreRouteFilters>(key: TKey, value: StoreRouteFilters[TKey]) {
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters() {
     setPage(0);
+    setAppliedFilters(filters);
+    setFiltersOpen(false);
   }
 
   function resetFilters() {
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
     setPage(0);
   }
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-4 lg:grid-cols-4">
+      <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <MasterMetric title="현재 배송지" value={`${(storeRouteResponse?.totalElements ?? 0).toLocaleString()}건`} description="조회 가능한 배송지/차량 기준정보" />
         <MasterMetric title="최근 업로드" value={latestUpload ? formatDateTime(latestUpload.uploadedAt) : '-'} description={latestUpload?.fileName ?? '업로드 이력 없음'} />
         <MasterMetric title="최근 반영 결과" value={latestUpload ? `${latestUpload.rowCount.toLocaleString()}건` : '-'} description={formatUploadCounts(latestUpload)} />
@@ -350,6 +360,8 @@ export function StoreRouteMasterPage() {
       <StoreRouteFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
+        onApply={applyFilters}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
@@ -390,6 +402,7 @@ export function StoreRouteMasterPage() {
               emptyDescription="발주고코드, 지점명, 차량명, 운영여부 필터를 다시 확인해 주세요."
               emptyTitle="조회 결과가 없습니다."
               getRowKey={(item) => String(item.id)}
+              renderMobileCard={renderStoreRouteMobileCard}
             />
             <Pagination
               page={page + 1}
@@ -473,6 +486,7 @@ export function StoreRouteMasterPage() {
             emptyDescription="아직 배송지/차량 마스터 업로드 이력이 없습니다."
             emptyTitle="업로드 이력이 없습니다."
             getRowKey={(item) => String(item.id ?? item.uploadId)}
+            renderMobileCard={renderStoreRouteUploadMobileCard}
           />
         )}
       </Modal>
@@ -480,12 +494,75 @@ export function StoreRouteMasterPage() {
   );
 }
 
+function renderStoreRouteMobileCard(item: StoreRouteMasterItem) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <CodeCell value={item.baljugoCode} />
+            <OperationStatusBadge item={item} />
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={item.storeName ?? '-'}>{item.storeName ?? '-'}</p>
+          <p className="mt-1 truncate text-xs text-slate-500" title={item.brandName ?? '-'}>{item.brandName ?? '-'}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-bold text-slate-950">{item.deliveryRound ?? '-'}</p>
+          <p className="text-xs font-semibold text-slate-500">차수</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <MobileFact label="거래처" value={<CodeCell value={item.customerCode ?? item.storeCode ?? ''} />} />
+        <MobileFact label="권역" value={item.area ?? '-'} />
+        <MobileFact label="차량" value={item.vehicleName ?? '-'} />
+        <MobileFact label="기사" value={item.driverName ?? '-'} />
+      </div>
+    </div>
+  );
+}
+
+function renderStoreRouteUploadMobileCard(item: StoreRouteMasterUploadHistory) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <UploadStatusBadge status={item.status} />
+            <CodeCell value={String(item.uploadId)} />
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={item.fileName ?? '-'}>{item.fileName ?? '-'}</p>
+          <p className="mt-1 text-xs text-slate-500">{formatDateTime(item.uploadedAt)}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-bold text-slate-950">{item.rowCount.toLocaleString()}</p>
+          <p className="text-xs font-semibold text-slate-500">rows</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <MobileFact label="신규" value={item.insertedCount.toLocaleString()} />
+        <MobileFact label="수정" value={item.updatedCount.toLocaleString()} />
+        <MobileFact label="유지" value={item.unchangedCount.toLocaleString()} />
+        <MobileFact label="실패" value={item.failedCount.toLocaleString()} />
+      </div>
+    </div>
+  );
+}
+
+function MobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
+    </div>
+  );
+}
+
 function MasterMetric({ description, title, value }: { description: string; title: string; value: string }) {
   return (
-    <Card className="p-4">
+    <Card className="p-3 sm:p-4">
       <p className="text-xs font-semibold text-slate-500">{title}</p>
       <p className="mt-2 truncate text-lg font-bold text-slate-950">{value}</p>
-      <p className="mt-1 truncate text-xs text-slate-500">{description}</p>
+      <p className="mt-1 hidden truncate text-xs text-slate-500 sm:block">{description}</p>
     </Card>
   );
 }
@@ -493,6 +570,8 @@ function MasterMetric({ description, title, value }: { description: string; titl
 function StoreRouteFilterPanel({
   activeFilterCount,
   filters,
+  hasPendingFilters,
+  onApply,
   onReset,
   onToggleOpen,
   open,
@@ -500,6 +579,8 @@ function StoreRouteFilterPanel({
 }: {
   activeFilterCount: number;
   filters: StoreRouteFilters;
+  hasPendingFilters: boolean;
+  onApply: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
   open: boolean;
@@ -515,11 +596,15 @@ function StoreRouteFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
-          <p className="mt-1 text-xs text-slate-500">발주고코드, 지점, 권역, 차수, 차량과 운영여부로 현재 배송지/차량 기준정보를 찾습니다.</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">발주고코드, 지점, 권역, 차수, 차량과 운영여부로 현재 배송지/차량 기준정보를 찾습니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+            검색
+          </Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">
             초기화
           </Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">
@@ -549,6 +634,11 @@ function StoreRouteFilterPanel({
               value={filters.operationStatus}
             />
           </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
+            </Button>
+          </div>
         </div>
       ) : null}
     </Card>
@@ -566,11 +656,11 @@ function MasterUploadCompleteView({
 }) {
   return (
     <div className="space-y-5">
-      <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-5 py-4">
+      <div className="rounded-lg border border-teal-200 bg-teal-50 px-5 py-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
-            <p className="text-base font-bold text-emerald-900">배송지/차량 마스터 업로드가 완료되었습니다</p>
-            <p className="mt-1 text-sm leading-6 text-emerald-800">처리 결과가 현재 배송지/차량 기준정보에 반영되었습니다.</p>
+            <p className="text-base font-bold text-teal-900">배송지/차량 마스터 업로드가 완료되었습니다</p>
+            <p className="mt-1 text-sm leading-6 text-teal-800">처리 결과가 현재 배송지/차량 기준정보에 반영되었습니다.</p>
           </div>
           <UploadStatusBadge status={result.status} />
         </div>
@@ -602,7 +692,7 @@ function MasterUploadResultSummary({ result }: { result: StoreRouteMasterUploadR
       <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         <SummaryCount label="전체" value={result.rowCount} />
         <SummaryCount label="신규" value={result.insertedCount} tone="text-teal-700" />
-        <SummaryCount label="수정" value={result.updatedCount} tone="text-blue-700" />
+        <SummaryCount label="수정" value={result.updatedCount} tone="text-slate-700" />
         <SummaryCount label="유지" value={result.unchangedCount} />
         <SummaryCount label="실패" value={result.failedCount} tone={result.failedCount > 0 ? 'text-red-700' : 'text-slate-950'} />
       </div>

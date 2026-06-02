@@ -17,6 +17,7 @@ import { BatchStatusBadge } from '../components/domain';
 import type { BatchStatus } from '../types/batch';
 import type { PageResponse } from '../types/api';
 import { formatDateRangeFilterLabel, type DateRangeValue } from '../utils/dateRange';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 interface BatchFilters {
   keyword: string;
@@ -47,6 +48,7 @@ export function BatchesPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
   const { clientId, scopeLabel } = useClientScope();
   const [filters, setFilters] = useState<BatchFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<BatchFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [page, setPage] = useState(0);
   const [response, setResponse] = useState<PageResponse<BackendBatchSummary> | null>(null);
@@ -70,11 +72,11 @@ export function BatchesPage() {
           clientId,
           page,
           size: 50,
-          status: filters.status === 'ALL' ? undefined : filters.status,
-          keyword: filters.keyword.trim() || undefined,
-          deliveryDateFrom: filters.dateRange.from || undefined,
-          deliveryDateTo: filters.dateRange.to || undefined,
-          errorOnly: filters.errorOnly || undefined,
+          status: appliedFilters.status === 'ALL' ? undefined : appliedFilters.status,
+          keyword: appliedFilters.keyword.trim() || undefined,
+          deliveryDateFrom: appliedFilters.dateRange.from || undefined,
+          deliveryDateTo: appliedFilters.dateRange.to || undefined,
+          errorOnly: appliedFilters.errorOnly || undefined,
         });
         if (!ignore) {
           setResponse(result);
@@ -94,19 +96,26 @@ export function BatchesPage() {
     return () => {
       ignore = true;
     };
-  }, [clientId, filters.dateRange, filters.errorOnly, filters.keyword, filters.status, page, reloadSeq, tenantId]);
+  }, [appliedFilters.dateRange, appliedFilters.errorOnly, appliedFilters.keyword, appliedFilters.status, clientId, page, reloadSeq, tenantId]);
 
   const batches = response?.items ?? [];
-  const summary = useMemo(() => createBatchSummary(response?.items ?? []), [response]);
-  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
+  const summary = useMemo(() => createBatchSummary(response?.items ?? [], response?.totalElements ?? 0), [response]);
+  const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
 
   function updateFilter<TKey extends keyof BatchFilters>(key: TKey, value: BatchFilters[TKey]) {
-    setPage(0);
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters() {
+    setPage(0);
+    setAppliedFilters(filters);
+    setFiltersOpen(false);
   }
 
   function resetFilters() {
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
     setPage(0);
   }
 
@@ -117,8 +126,9 @@ export function BatchesPage() {
       <BatchFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
+        onApply={applyFilters}
         open={filtersOpen}
-        onClose={() => setFiltersOpen(false)}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         updateFilter={updateFilter}
@@ -150,7 +160,8 @@ export function BatchesPage() {
 function BatchFilterPanel({
   activeFilterCount,
   filters,
-  onClose,
+  hasPendingFilters,
+  onApply,
   onReset,
   onToggleOpen,
   open,
@@ -158,7 +169,8 @@ function BatchFilterPanel({
 }: {
   activeFilterCount: number;
   filters: BatchFilters;
-  onClose: () => void;
+  hasPendingFilters: boolean;
+  onApply: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
   open: boolean;
@@ -171,11 +183,15 @@ function BatchFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">필터</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>기본 조건</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-slate-500">{createFilterSummary(filters)}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+            검색
+          </Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">
             초기화
           </Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">
@@ -222,8 +238,8 @@ function BatchFilterPanel({
             </div>
           </div>
           <div className="mt-4 flex justify-end">
-            <Button onClick={onClose} size="sm" variant="primary">
-              적용하고 접기
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
             </Button>
           </div>
         </div>
@@ -234,24 +250,24 @@ function BatchFilterPanel({
 
 function BatchSummaryCards({ summary }: { summary: ReturnType<typeof createBatchSummary> }) {
   const cards = [
-    { label: '현재 페이지', value: summary.total, tone: 'blue' as const, description: '조회된 페이지 내 배치' },
+    { label: '조회 결과', value: summary.total, tone: 'blue' as const, description: '적용된 조건의 전체 배치' },
     { label: '검증 실패', value: summary.errorBatches, tone: 'red' as const, description: 'Error가 남은 배치' },
     { label: '확정 대기', value: summary.readyToConfirm, tone: 'amber' as const, description: '확정 가능한 후보' },
     { label: '확정 완료', value: summary.confirmed, tone: 'green' as const, description: '외부 제공/다운로드 가능' },
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-2 gap-3 md:grid-cols-2 xl:grid-cols-4">
       {cards.map((card) => (
-        <Card className="p-4" key={card.label}>
+        <Card className="p-3 sm:p-4" key={card.label}>
           <div className="flex items-start justify-between gap-3">
             <div>
               <p className="text-sm font-semibold text-slate-600">{card.label}</p>
-              <p className="mt-2 text-2xl font-bold text-slate-950">{card.value.toLocaleString()}</p>
+              <p className="mt-1.5 text-xl font-bold text-slate-950 sm:mt-2 sm:text-2xl">{card.value.toLocaleString()}</p>
             </div>
             <Badge tone={card.tone}>{card.label}</Badge>
           </div>
-          <p className="mt-2 text-xs text-slate-500">{card.description}</p>
+          <p className="mt-2 hidden text-xs text-slate-500 sm:block">{card.description}</p>
         </Card>
       ))}
     </div>
@@ -363,7 +379,7 @@ function createFilterSummary(filters: BatchFilters) {
   return summary.length > 0 ? summary.join(' · ') : '기본 조건으로 배치를 표시합니다.';
 }
 
-function createBatchSummary(items: BackendBatchSummary[]) {
+function createBatchSummary(items: BackendBatchSummary[], totalElements: number) {
   const confirmed = items.filter((item) => item.status === 'CONFIRMED').length;
   const errorBatches = items.filter((item) => item.errorCount > 0 || item.status === 'VALIDATION_FAILED').length;
   const readyToConfirm = items.filter((item) => item.status === 'READY_TO_CONFIRM' && item.errorCount === 0).length;
@@ -372,7 +388,7 @@ function createBatchSummary(items: BackendBatchSummary[]) {
     confirmed,
     errorBatches,
     readyToConfirm,
-    total: items.length,
+    total: totalElements,
   };
 }
 

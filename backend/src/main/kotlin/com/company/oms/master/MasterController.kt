@@ -1,9 +1,15 @@
 package com.company.oms.master
 
+import com.company.oms.auth.AccessScopeService
+import com.company.oms.auth.UserRole
+import com.company.oms.common.error.ErrorCode
+import com.company.oms.common.error.OmsException
 import com.company.oms.common.persistence.MasterType
 import com.company.oms.common.persistence.MasterUploadStatus
+import com.company.oms.common.persistence.UserScopeType
 import com.company.oms.common.response.PageResponse
 import org.springframework.context.annotation.Profile
+import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
@@ -20,6 +26,7 @@ import org.springframework.web.multipart.MultipartFile
 class MasterController(
 	private val masterUpsertService: MasterUpsertService,
 	private val clientCodeMappingService: ClientCodeMappingService,
+	private val accessScopeService: AccessScopeService,
 ) {
 
 	@PostMapping("/products/uploads", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
@@ -27,56 +34,66 @@ class MasterController(
 		@RequestParam tenantId: Long,
 		@RequestParam(required = false) uploadedBy: Long?,
 		@RequestParam file: MultipartFile,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.uploadProductMaster(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.uploadProductMaster(
+			tenantId = resolvedTenantId,
 			file = file,
 			uploadedBy = uploadedBy,
 		)
+	}
 
 	@PostMapping("/products/uploads/preview", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
 	fun previewProductUpload(
 		@RequestParam tenantId: Long,
 		@RequestParam(required = false) uploadedBy: Long?,
 		@RequestParam file: MultipartFile,
-	): MasterUploadPreviewResponse =
-		masterUpsertService.previewProductMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadPreviewResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.previewProductMasterUpload(
+			tenantId = resolvedTenantId,
 			file = file,
 			uploadedBy = uploadedBy,
 		)
+	}
 
 	@PostMapping("/products/uploads/{uploadId}/apply")
 	fun applyProductUpload(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.applyProductMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.applyProductMasterUpload(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 		)
+	}
 
 	@PostMapping("/products/uploads/{uploadId}/cancel")
 	fun cancelProductUpload(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.cancelMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.cancelMasterUpload(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 			expectedType = MasterType.PRODUCT,
 		)
+	}
 
 	@GetMapping("/products/uploads/{uploadId}/row-errors")
 	fun listProductUploadRowErrors(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): List<MasterUploadRowFailureResponse> =
-		masterUpsertService.listMasterUploadRowFailures(
-			tenantId = tenantId,
+	): List<MasterUploadRowFailureResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listMasterUploadRowFailures(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 			expectedType = MasterType.PRODUCT,
 		)
+	}
 
 	@GetMapping("/products/uploads")
 	fun listProductUploads(
@@ -84,13 +101,15 @@ class MasterController(
 		@RequestParam(required = false) status: MasterUploadStatus?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<MasterUploadHistoryResponse> =
-		masterUpsertService.listProductUploads(
-			tenantId = tenantId,
+	): PageResponse<MasterUploadHistoryResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listProductUploads(
+			tenantId = resolvedTenantId,
 			status = status,
 			page = page,
 			size = size,
 		)
+	}
 
 	@GetMapping("/products")
 	fun listProducts(
@@ -101,71 +120,83 @@ class MasterController(
 		@RequestParam(required = false) activeYn: Boolean?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<ProductMasterItemResponse> =
-		masterUpsertService.listProducts(
-			tenantId = tenantId,
+	): PageResponse<ProductMasterItemResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listProducts(
+			tenantId = resolvedTenantId,
 			ezadminCode = ezadminCode,
 			productName = productName,
 			activeYn = activeYn ?: operationStatus.toActiveYn(),
 			page = page,
 			size = size,
 		)
+	}
 
 	@PostMapping("/store-routes/uploads", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
 	fun uploadStoreRoutes(
 		@RequestParam tenantId: Long,
 		@RequestParam(required = false) uploadedBy: Long?,
 		@RequestParam file: MultipartFile,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.uploadStoreRouteMaster(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.uploadStoreRouteMaster(
+			tenantId = resolvedTenantId,
 			file = file,
 			uploadedBy = uploadedBy,
 		)
+	}
 
 	@PostMapping("/store-routes/uploads/preview", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
 	fun previewStoreRouteUpload(
 		@RequestParam tenantId: Long,
 		@RequestParam(required = false) uploadedBy: Long?,
 		@RequestParam file: MultipartFile,
-	): MasterUploadPreviewResponse =
-		masterUpsertService.previewStoreRouteMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadPreviewResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.previewStoreRouteMasterUpload(
+			tenantId = resolvedTenantId,
 			file = file,
 			uploadedBy = uploadedBy,
 		)
+	}
 
 	@PostMapping("/store-routes/uploads/{uploadId}/apply")
 	fun applyStoreRouteUpload(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.applyStoreRouteMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.applyStoreRouteMasterUpload(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 		)
+	}
 
 	@PostMapping("/store-routes/uploads/{uploadId}/cancel")
 	fun cancelStoreRouteUpload(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): MasterUploadSummaryResponse =
-		masterUpsertService.cancelMasterUpload(
-			tenantId = tenantId,
+	): MasterUploadSummaryResponse {
+		val resolvedTenantId = requireWritableTenant(tenantId)
+		return masterUpsertService.cancelMasterUpload(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 			expectedType = MasterType.STORE_ROUTE,
 		)
+	}
 
 	@GetMapping("/store-routes/uploads/{uploadId}/row-errors")
 	fun listStoreRouteUploadRowErrors(
 		@PathVariable uploadId: Long,
 		@RequestParam tenantId: Long,
-	): List<MasterUploadRowFailureResponse> =
-		masterUpsertService.listMasterUploadRowFailures(
-			tenantId = tenantId,
+	): List<MasterUploadRowFailureResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listMasterUploadRowFailures(
+			tenantId = resolvedTenantId,
 			uploadId = uploadId,
 			expectedType = MasterType.STORE_ROUTE,
 		)
+	}
 
 	@GetMapping("/store-routes/uploads")
 	fun listStoreRouteUploads(
@@ -173,13 +204,15 @@ class MasterController(
 		@RequestParam(required = false) status: MasterUploadStatus?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<MasterUploadHistoryResponse> =
-		masterUpsertService.listStoreRouteUploads(
-			tenantId = tenantId,
+	): PageResponse<MasterUploadHistoryResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listStoreRouteUploads(
+			tenantId = resolvedTenantId,
 			status = status,
 			page = page,
 			size = size,
 		)
+	}
 
 	@GetMapping("/store-routes")
 	fun listStoreRoutes(
@@ -196,9 +229,10 @@ class MasterController(
 		@RequestParam(required = false) activeYn: Boolean?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<StoreRouteMasterItemResponse> =
-		masterUpsertService.listStoreRoutes(
-			tenantId = tenantId,
+	): PageResponse<StoreRouteMasterItemResponse> {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterUpsertService.listStoreRoutes(
+			tenantId = resolvedTenantId,
 			baljugoCode = baljugoCode,
 			customerCode = customerCode ?: storeCode,
 			brandName = brandName,
@@ -210,6 +244,7 @@ class MasterController(
 			page = page,
 			size = size,
 		)
+	}
 
 	@GetMapping("/client-product-code-mappings")
 	fun listClientProductCodeMappings(
@@ -220,22 +255,26 @@ class MasterController(
 		@RequestParam(required = false) activeYn: Boolean?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<ClientProductCodeMappingResponse> =
-		clientCodeMappingService.listProductMappings(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<ClientProductCodeMappingResponse> {
+		val scope = requireWritableClient(tenantId, clientId)
+		return clientCodeMappingService.listProductMappings(
+			tenantId = scope.tenantId,
+			clientId = requireNotNull(scope.clientId),
 			clientProductCode = clientProductCode,
 			ezadminCode = ezadminCode,
 			activeYn = activeYn,
 			page = page,
 			size = size,
 		)
+	}
 
 	@PostMapping("/client-product-code-mappings")
 	fun upsertClientProductCodeMapping(
 		@RequestBody request: ClientProductCodeMappingUpsertRequest,
-	): ClientProductCodeMappingResponse =
-		clientCodeMappingService.upsertProductMapping(request)
+	): ClientProductCodeMappingResponse {
+		requireWritableClient(request.tenantId, request.clientId)
+		return clientCodeMappingService.upsertProductMapping(request)
+	}
 
 	@GetMapping("/client-store-code-mappings")
 	fun listClientStoreCodeMappings(
@@ -246,22 +285,57 @@ class MasterController(
 		@RequestParam(required = false) activeYn: Boolean?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
-	): PageResponse<ClientStoreCodeMappingResponse> =
-		clientCodeMappingService.listStoreMappings(
-			tenantId = tenantId,
-			clientId = clientId,
+	): PageResponse<ClientStoreCodeMappingResponse> {
+		val scope = requireWritableClient(tenantId, clientId)
+		return clientCodeMappingService.listStoreMappings(
+			tenantId = scope.tenantId,
+			clientId = requireNotNull(scope.clientId),
 			clientStoreCode = clientStoreCode,
 			baljugoCode = baljugoCode,
 			activeYn = activeYn,
 			page = page,
 			size = size,
 		)
+	}
 
 	@PostMapping("/client-store-code-mappings")
 	fun upsertClientStoreCodeMapping(
 		@RequestBody request: ClientStoreCodeMappingUpsertRequest,
-	): ClientStoreCodeMappingResponse =
-		clientCodeMappingService.upsertStoreMapping(request)
+	): ClientStoreCodeMappingResponse {
+		requireWritableClient(request.tenantId, request.clientId)
+		return clientCodeMappingService.upsertStoreMapping(request)
+	}
+
+	private fun requireReadableTenant(tenantId: Long): Long {
+		val currentUser =
+			accessScopeService.requireAnyRole(
+				UserRole.VIEWER,
+				UserRole.OPERATOR,
+				UserRole.ADMIN,
+				UserRole.SYSTEM_ADMIN,
+			)
+		if (currentUser.userScopeType == UserScopeType.CLIENT) {
+			throw OmsException(
+				errorCode = ErrorCode.FORBIDDEN,
+				message = "CLIENT users must use the public master API.",
+				status = HttpStatus.FORBIDDEN,
+			)
+		}
+		return accessScopeService.requireTenantAccess(tenantId)
+	}
+
+	private fun requireWritableTenant(tenantId: Long): Long {
+		accessScopeService.requireTenantAdmin()
+		return accessScopeService.requireTenantAccess(tenantId)
+	}
+
+	private fun requireWritableClient(
+		tenantId: Long,
+		clientId: Long,
+	) = accessScopeService.requireClientAccess(
+		tenantId = requireWritableTenant(tenantId),
+		clientId = clientId,
+	)
 }
 
 private fun String?.toActiveYn(): Boolean? =

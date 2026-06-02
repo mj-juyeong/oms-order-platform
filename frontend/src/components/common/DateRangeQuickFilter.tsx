@@ -47,11 +47,13 @@ export function DateRangeQuickFilter({ includeTomorrow = false, label, onChange,
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
           <DateInput
             aria-label={`${label} 시작일`}
+            label="시작일"
             onChange={(event) => onChange({ ...value, from: event.target.value, preset: 'CUSTOM' })}
             value={value.from}
           />
           <DateInput
             aria-label={`${label} 종료일`}
+            label="종료일"
             onChange={(event) => onChange({ ...value, to: event.target.value, preset: 'CUSTOM' })}
             value={value.to}
           />

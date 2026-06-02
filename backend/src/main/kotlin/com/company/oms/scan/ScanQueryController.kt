@@ -27,11 +27,21 @@ class ScanQueryController(
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		deliveryDate: LocalDate?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		deliveryDateFrom: LocalDate?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		deliveryDateTo: LocalDate?,
 		@RequestParam(required = false) scanCenter: String?,
 		@RequestParam(required = false) storeCode: String?,
+		@RequestParam(required = false) storeName: String?,
 		@RequestParam(required = false) productCode: String?,
+		@RequestParam(required = false) productName: String?,
 		@RequestParam(required = false) barcode: String?,
 		@RequestParam(defaultValue = "true") confirmedOnly: Boolean,
+		@RequestParam(required = false) sortBy: String?,
+		@RequestParam(required = false) sortDirection: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
 	): PageResponse<ScanLineResponse> {
@@ -42,11 +52,17 @@ class ScanQueryController(
 			clientId = scope.clientId,
 			batchId = batchId,
 			deliveryDate = deliveryDate,
+			deliveryDateFrom = deliveryDateFrom,
+			deliveryDateTo = deliveryDateTo,
 			scanCenter = scanCenter,
 			storeCode = storeCode,
+			storeName = storeName,
 			productCode = productCode,
+			productName = productName,
 			barcode = barcode,
 			confirmedOnly = confirmedOnly,
+			sortBy = sortBy,
+			sortDirection = sortDirection,
 			page = page,
 			size = size,
 		)

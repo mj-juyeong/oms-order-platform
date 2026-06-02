@@ -7,7 +7,8 @@ import { DataTable, FilterBar, Pagination, type DataTableColumn } from '../compo
 import { CodeCell } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { AuditLog } from '../types/audit';
-import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
+import { type DateRangeValue } from '../utils/dateRange';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 type AuditLogType = AuditLog['logType'];
 
@@ -34,6 +35,7 @@ export function AuditPage() {
   const { clientId } = useClientScope();
   const [activeType, setActiveType] = useState<AuditLogType>('BATCH');
   const [filters, setFilters] = useState<AuditFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<AuditFilters>(initialFilters);
   const [page, setPage] = useState(1);
   const [batchPage, setBatchPage] = useState<PageResponse<BackendBatchAuditLog> | null>(null);
   const [downloadPage, setDownloadPage] = useState<PageResponse<BackendAuditDownloadLog> | null>(null);
@@ -45,22 +47,20 @@ export function AuditPage() {
   useEffect(() => {
     void loadAuditLogs();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeType, clientId, filters.action, filters.batchId, filters.dateRange, filters.responseStatus, page, reloadSeq, tenantId]);
+  }, [activeType, appliedFilters.action, appliedFilters.actor, appliedFilters.batchId, appliedFilters.dateRange, appliedFilters.responseStatus, page, reloadSeq, tenantId, clientId]);
 
   const rows = useMemo(() => {
-    const mappedRows =
-      activeType === 'BATCH'
-        ? (batchPage?.items ?? []).map(toBatchAuditLog)
-        : activeType === 'DOWNLOAD'
-          ? (downloadPage?.items ?? []).map(toDownloadAuditLog)
-          : (apiPage?.items ?? []).map(toApiAuditLog);
-
-    return filterAuditLogs(mappedRows, filters);
-  }, [activeType, apiPage, batchPage, downloadPage, filters]);
+    return activeType === 'BATCH'
+      ? (batchPage?.items ?? []).map(toBatchAuditLog)
+      : activeType === 'DOWNLOAD'
+        ? (downloadPage?.items ?? []).map(toDownloadAuditLog)
+        : (apiPage?.items ?? []).map(toApiAuditLog);
+  }, [activeType, apiPage, batchPage, downloadPage]);
 
   const total = currentPageData(activeType, batchPage, downloadPage, apiPage)?.totalElements ?? rows.length;
   const totalPages = currentPageData(activeType, batchPage, downloadPage, apiPage)?.totalPages ?? 1;
-  const activeFilterCount = countActiveFilters(filters);
+  const activeFilterCount = countActiveFilters(appliedFilters);
+  const hasPendingFilters = !areFilterStatesEqual(filters, appliedFilters);
 
   async function loadAuditLogs() {
     setLoading(true);
@@ -78,29 +78,29 @@ export function AuditPage() {
         clientId,
         page: page - 1,
         size: pageSize,
-        ...dateTimeQuery(filters.dateRange),
+        ...dateTimeQuery(appliedFilters.dateRange),
       };
 
       if (activeType === 'BATCH') {
         const data = await omsApi.audit.batches({
           ...commonParams,
-          batchId: parseNumericFilter(filters.batchId),
-          action: textFilter(filters.action),
+          batchId: parseNumericFilter(appliedFilters.batchId),
+          action: textFilter(appliedFilters.action),
         });
         setBatchPage(data);
       } else if (activeType === 'DOWNLOAD') {
         const data = await omsApi.audit.downloads({
           ...commonParams,
-          batchId: parseNumericFilter(filters.batchId),
-          downloadType: textFilter(filters.action),
-          downloadedBy: parseNumericFilter(filters.actor),
+          batchId: parseNumericFilter(appliedFilters.batchId),
+          downloadType: textFilter(appliedFilters.action),
+          downloadedBy: parseNumericFilter(appliedFilters.actor),
         });
         setDownloadPage(data);
       } else {
         const data = await omsApi.audit.apiCalls({
           ...commonParams,
-          path: textFilter(filters.action),
-          responseStatus: parseNumericFilter(filters.responseStatus),
+          path: textFilter(appliedFilters.action),
+          responseStatus: parseNumericFilter(appliedFilters.responseStatus),
         });
         setApiPage(data);
       }
@@ -112,13 +112,18 @@ export function AuditPage() {
   }
 
   function updateFilter<TKey extends keyof AuditFilters>(key: TKey, value: AuditFilters[TKey]) {
-    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters() {
+    setPage(1);
+    setAppliedFilters(filters);
   }
 
   function resetFilters() {
     setPage(1);
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
   }
 
   function updateActiveType(type: AuditLogType) {
@@ -130,7 +135,7 @@ export function AuditPage() {
     <div className="space-y-5">
       <AuditTabs activeType={activeType} onChange={updateActiveType} />
 
-      <FilterBar onReset={resetFilters}>
+      <FilterBar applyDisabled={!hasPendingFilters} applyLabel="검색" onReset={resetFilters} onSubmit={applyFilters}>
         <DateRangeQuickFilter label="발생시각" onChange={(value) => updateFilter('dateRange', value)} value={filters.dateRange} />
         <Input label={activeType === 'API' ? 'path' : activeType === 'DOWNLOAD' ? '다운로드 유형' : 'action'} onChange={(event) => updateFilter('action', event.target.value)} placeholder={activeType === 'API' ? '/external/v1' : activeType === 'DOWNLOAD' ? 'LABEL' : 'CONFIRMED'} value={filters.action} />
         {activeType !== 'API' ? (
@@ -163,6 +168,7 @@ export function AuditPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             {activeFilterCount > 0 ? <Badge tone="blue">필터 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
             <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
               새로고침
             </Button>
@@ -288,16 +294,6 @@ function toApiAuditLog(row: BackendApiCallLog): AuditLog {
   };
 }
 
-function filterAuditLogs(rows: AuditLog[], filters: AuditFilters) {
-  return rows.filter((row) => (
-    isDateInRange(row.occurredAt, filters.dateRange) &&
-    includesText(row.batchId ?? '', filters.batchId) &&
-    includesText(row.actionOrPath, filters.action) &&
-    includesText(row.actorName, filters.actor) &&
-    includesText(row.status, filters.responseStatus)
-  ));
-}
-
 function currentPageData(
   type: AuditLogType,
   batchPage: PageResponse<BackendBatchAuditLog> | null,
@@ -336,10 +332,6 @@ function parseNumericFilter(value: string) {
 
 function textFilter(value: string) {
   return value.trim() || undefined;
-}
-
-function includesText(value: string, query: string) {
-  return value.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase());
 }
 
 function auditTypeLabel(type: AuditLogType) {

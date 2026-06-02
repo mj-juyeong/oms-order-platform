@@ -29,11 +29,21 @@ class PlQueryController(
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		dueDate: LocalDate?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		dueDateFrom: LocalDate?,
+		@RequestParam(required = false)
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		dueDateTo: LocalDate?,
 		@RequestParam(required = false) vehicleName: String?,
 		@RequestParam(required = false) storeCode: String?,
+		@RequestParam(required = false) storeName: String?,
 		@RequestParam(required = false) productCode: String?,
+		@RequestParam(required = false) productName: String?,
 		@RequestParam(required = false) orderNo: String?,
 		@RequestParam(defaultValue = "true") confirmedOnly: Boolean,
+		@RequestParam(required = false) sortBy: String?,
+		@RequestParam(required = false) sortDirection: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
 	): PageResponse<PlLineResponse> {
@@ -45,11 +55,17 @@ class PlQueryController(
 			batchId = batchId,
 			plType = plType,
 			dueDate = dueDate,
+			dueDateFrom = dueDateFrom,
+			dueDateTo = dueDateTo,
 			vehicleName = vehicleName,
 			storeCode = storeCode,
+			storeName = storeName,
 			productCode = productCode,
+			productName = productName,
 			orderNo = orderNo,
 			confirmedOnly = confirmedOnly,
+			sortBy = sortBy,
+			sortDirection = sortDirection,
 			page = page,
 			size = size,
 		)

@@ -34,6 +34,8 @@ class LabelQueryController(
 		@RequestParam(required = false) matchingCode: String?,
 		@RequestParam(required = false) qrCode: String?,
 		@RequestParam(defaultValue = "true") confirmedOnly: Boolean,
+		@RequestParam(required = false) sortBy: String?,
+		@RequestParam(required = false) sortDirection: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
 	): PageResponse<LabelLineResponse> {
@@ -53,6 +55,8 @@ class LabelQueryController(
 			matchingCode = matchingCode,
 			qrCode = qrCode,
 			confirmedOnly = confirmedOnly,
+			sortBy = sortBy,
+			sortDirection = sortDirection,
 			page = page,
 			size = size,
 		)

@@ -19,6 +19,7 @@ import { BatchStatusBadge, CodeCell } from '../components/domain';
 import type { BatchStatus } from '../types/batch';
 import type { LabelDownloadRow } from '../types/label';
 import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 type LabelTypeFilter = 'ALL' | 'EA' | 'BOX';
 type DownloadableFilter = 'ALL' | 'YES' | 'NO';
@@ -69,6 +70,7 @@ export function LabelDownloadsPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
   const { clientId } = useClientScope();
   const [filters, setFilters] = useState<LabelDownloadFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<LabelDownloadFilters>(initialFilters);
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [rows, setRows] = useState<LabelDownloadRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,8 +82,9 @@ export function LabelDownloadsPage() {
     void loadRows();
   }, [clientId, tenantId]);
 
-  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
-  const filteredRows = useMemo(() => filterRows(rows, filters), [filters, rows]);
+  const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
+  const filteredRows = useMemo(() => filterRows(rows, appliedFilters), [appliedFilters, rows]);
   const summary = useMemo(() => createSummary(rows), [rows]);
   const recentDownloads = useMemo(() => rows.filter((item) => item.lastDownloadedAt).slice(0, 6), [rows]);
 
@@ -118,8 +121,14 @@ export function LabelDownloadsPage() {
     setFilters((current) => ({ ...current, [key]: value }));
   }
 
+  function applyFilters() {
+    setAppliedFilters(filters);
+    setFiltersOpen(false);
+  }
+
   function resetFilters() {
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
   }
 
   async function handleDownload(row: LabelDownloadRow) {
@@ -134,25 +143,25 @@ export function LabelDownloadsPage() {
         setError('물류사 계정 정보가 없습니다. 다시 로그인해 주세요.');
         return;
       }
-      const labelType = filters.labelType === 'ALL' ? undefined : filters.labelType;
+      const labelType = appliedFilters.labelType === 'ALL' ? undefined : appliedFilters.labelType;
       const downloaded = await omsApi.downloads.labels({
         tenantId,
         clientId,
         batchId: row.batchNumericId,
         labelType,
-        storeCode: filters.storeCode.trim() || undefined,
-        vehicleName: filters.vehicleName.trim() || undefined,
-        deliveryRound: filters.deliveryRound.trim() || undefined,
+        storeCode: appliedFilters.storeCode.trim() || undefined,
+        vehicleName: appliedFilters.vehicleName.trim() || undefined,
+        deliveryRound: appliedFilters.deliveryRound.trim() || undefined,
         downloadedBy: fakeCurrentUser.id ?? undefined,
       });
 
-      const fileName = downloaded.fileName ?? defaultFileName(row.batchNumericId, filters.labelType);
+      const fileName = downloaded.fileName ?? defaultFileName(row.batchNumericId, appliedFilters.labelType);
       saveBlob(downloaded.blob, fileName);
       setDownloadResult({
         batchId: row.batchId,
         fileName,
-        labelType: filters.labelType,
-        rowCount: filters.labelType === 'EA' ? row.labelEaCount : filters.labelType === 'BOX' ? row.labelBoxCount : row.labelEaCount + row.labelBoxCount,
+        labelType: appliedFilters.labelType,
+        rowCount: appliedFilters.labelType === 'EA' ? row.labelEaCount : appliedFilters.labelType === 'BOX' ? row.labelBoxCount : row.labelEaCount + row.labelBoxCount,
       });
       await loadRows();
     } catch (downloadError) {
@@ -180,6 +189,8 @@ export function LabelDownloadsPage() {
       <LabelDownloadFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
+        onApply={applyFilters}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
         open={filtersOpen}
@@ -296,6 +307,8 @@ async function fetchLabelStores(tenantId: number, batchId: number, clientId?: nu
 function LabelDownloadFilterPanel({
   activeFilterCount,
   filters,
+  hasPendingFilters,
+  onApply,
   onReset,
   onToggleOpen,
   open,
@@ -303,6 +316,8 @@ function LabelDownloadFilterPanel({
 }: {
   activeFilterCount: number;
   filters: LabelDownloadFilters;
+  hasPendingFilters: boolean;
+  onApply: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
   open: boolean;
@@ -315,11 +330,15 @@ function LabelDownloadFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
           <p className="mt-1 text-xs text-slate-500">배치, 배송일, Label 유형, 거래처코드, 차량명, 차수 조건으로 다운로드 대상을 찾습니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+            검색
+          </Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">
             초기화
           </Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">
@@ -361,6 +380,11 @@ function LabelDownloadFilterPanel({
             <Input label="거래처코드" onChange={(event) => updateFilter('storeCode', event.target.value)} placeholder="S001" value={filters.storeCode} />
             <Input label="차량명" onChange={(event) => updateFilter('vehicleName', event.target.value)} placeholder="차량1" value={filters.vehicleName} />
             <Input label="차수" onChange={(event) => updateFilter('deliveryRound', event.target.value)} placeholder="1" value={filters.deliveryRound} />
+          </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
+            </Button>
           </div>
         </div>
       ) : null}
@@ -414,9 +438,9 @@ function DownloadResultModal({ onClose, result }: { onClose: () => void; result:
   return (
     <Modal open title="라벨 다운로드 완료" onClose={onClose}>
       <div className="space-y-4">
-        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <p className="text-sm font-semibold text-emerald-800">라벨 파일 다운로드 요청이 처리되었습니다.</p>
-          <p className="mt-1 text-xs text-emerald-700">브라우저 다운로드 목록에서 생성된 XLSX 파일을 확인할 수 있습니다.</p>
+        <div className="rounded-md border border-teal-200 bg-teal-50 px-4 py-3">
+          <p className="text-sm font-semibold text-teal-800">라벨 파일 다운로드 요청이 처리되었습니다.</p>
+          <p className="mt-1 text-xs text-teal-700">브라우저 다운로드 목록에서 생성된 XLSX 파일을 확인할 수 있습니다.</p>
         </div>
         <dl className="grid gap-3 text-sm sm:grid-cols-2">
           <DetailItem label="배치번호" value={result.batchId} />

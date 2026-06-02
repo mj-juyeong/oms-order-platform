@@ -2,9 +2,10 @@ package com.company.oms.pl
 
 import com.company.oms.common.persistence.PlType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import java.time.LocalDate
 
-interface PlLineRepository : JpaRepository<PlLineEntity, Long> {
+interface PlLineRepository : JpaRepository<PlLineEntity, Long>, JpaSpecificationExecutor<PlLineEntity> {
 	fun findAllByTenantIdAndClientIdAndBatchId(
 		tenantId: Long,
 		clientId: Long,
@@ -24,4 +25,3 @@ interface PlLineRepository : JpaRepository<PlLineEntity, Long> {
 		orderNo: String,
 	): List<PlLineEntity>
 }
-

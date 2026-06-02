@@ -7,6 +7,7 @@ import { CodeCell } from '../components/domain';
 import type { ClientSummary } from '../types/client';
 import type { TenantSummary } from '../types/tenant';
 import type { UserRole, UserScopeType, UserSummary } from '../types/auth';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 type UserStatus = 'ACTIVE' | 'DISABLED';
 type UserFormMode = 'create' | 'edit';
@@ -64,6 +65,7 @@ const emptyForm: UserFormState = {
 export function UserManagementPage() {
   const [users, setUsers] = useState<UserSummary[]>([]);
   const [filters, setFilters] = useState<UserFilters>(initialFilters);
+  const [appliedFilters, setAppliedFilters] = useState<UserFilters>(initialFilters);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -77,11 +79,12 @@ export function UserManagementPage() {
   useEffect(() => {
     void loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filters.keyword, filters.status, filters.userScopeType, page, reloadSeq]);
+  }, [appliedFilters.keyword, appliedFilters.status, appliedFilters.userScopeType, page, reloadSeq]);
 
   const activeCount = useMemo(() => users.filter((user) => user.status === 'ACTIVE').length, [users]);
   const adminCount = useMemo(() => users.filter((user) => user.roles.includes('ADMIN') || user.roles.includes('SYSTEM_ADMIN')).length, [users]);
   const tenantUserCount = useMemo(() => users.filter((user) => user.userScopeType === 'TENANT').length, [users]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
   const canEditUsers = canManageUsers();
   const visibleScopeOptions = getAllowedScopeOptions();
 
@@ -91,9 +94,9 @@ export function UserManagementPage() {
 
     try {
       const response = await omsApi.users.list({
-        keyword: filters.keyword.trim() || undefined,
-        status: filters.status || undefined,
-        userScopeType: filters.userScopeType || undefined,
+        keyword: appliedFilters.keyword.trim() || undefined,
+        status: appliedFilters.status || undefined,
+        userScopeType: appliedFilters.userScopeType || undefined,
         page: page - 1,
         size: pageSize,
       });
@@ -108,8 +111,18 @@ export function UserManagementPage() {
   }
 
   function updateFilter<TKey extends keyof UserFilters>(key: TKey, value: UserFilters[TKey]) {
-    setPage(1);
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters() {
+    setPage(1);
+    setAppliedFilters(filters);
+  }
+
+  function resetFilters() {
+    setPage(1);
+    setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
   }
 
   function openCreateModal() {
@@ -167,7 +180,10 @@ export function UserManagementPage() {
             />
           </div>
           <div className="flex flex-wrap gap-2">
-            <Button onClick={() => setFilters(initialFilters)} variant="secondary">
+            <Button disabled={!hasPendingFilters} onClick={applyFilters} variant="primary">
+              검색
+            </Button>
+            <Button onClick={resetFilters} variant="secondary">
               초기화
             </Button>
             <Button onClick={() => setReloadSeq((current) => current + 1)} variant="secondary">
@@ -305,7 +321,7 @@ function UserFormModal({
     setForm((current) => ({
       ...current,
       roleCodes: normalizeRoleSelection(
-        form.userScopeType,
+        current.userScopeType,
         current.roleCodes.includes(role)
           ? current.roleCodes.filter((item) => item !== role)
           : [...current.roleCodes, role],
@@ -597,6 +613,7 @@ function validateForm(form: UserFormState, mode: UserFormMode) {
   if (!getAllowedScopeOptions().some((option) => option.value === form.userScopeType)) return '현재 계정으로 선택할 수 없는 스코프입니다.';
   if (form.roleCodes.length === 0) return '권한을 하나 이상 선택해 주세요.';
   if (form.roleCodes.some((role) => !isRoleAllowedForScope(form.userScopeType, role))) return '선택한 스코프에서 허용되지 않는 권한이 포함되어 있습니다.';
+  if (form.userScopeType === 'CLIENT' && form.roleCodes.length !== 1) return '고객사 사용자는 권한을 하나만 선택해 주세요.';
   if (form.userScopeType !== 'SYSTEM' && !toOptionalNumber(form.tenantId)) return '물류사를 선택해 주세요.';
   if (form.userScopeType === 'CLIENT' && !toOptionalNumber(form.clientId)) return '고객사를 선택해 주세요.';
   return null;
@@ -631,11 +648,14 @@ function getAllowedRoleOptions(scope: UserScopeType) {
 function isRoleAllowedForScope(scope: UserScopeType, role: UserRole) {
   if (scope === 'SYSTEM') return role === 'SYSTEM_ADMIN';
   if (scope === 'TENANT') return role === 'ADMIN' || role === 'OPERATOR' || role === 'VIEWER';
-  return role === 'VIEWER';
+  return role === 'OPERATOR' || role === 'VIEWER';
 }
 
 function normalizeRoleSelection(scope: UserScopeType, roles: UserRole[]): UserRole[] {
   const allowedRoles = roles.filter((role) => isRoleAllowedForScope(scope, role));
+  if (scope === 'CLIENT') {
+    return allowedRoles.length > 0 ? [allowedRoles[allowedRoles.length - 1]] : ['VIEWER'];
+  }
   if (allowedRoles.length > 0) {
     return allowedRoles;
   }

@@ -2,10 +2,11 @@ package com.company.oms.label
 
 import com.company.oms.common.persistence.LabelType
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import org.springframework.data.jpa.repository.Query
 import org.springframework.data.repository.query.Param
 
-interface LabelLineRepository : JpaRepository<LabelLineEntity, Long> {
+interface LabelLineRepository : JpaRepository<LabelLineEntity, Long>, JpaSpecificationExecutor<LabelLineEntity> {
 	fun findAllByTenantIdAndClientIdAndBatchId(
 		tenantId: Long,
 		clientId: Long,

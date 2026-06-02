@@ -8,6 +8,7 @@ data class OrderLineResponse(
 	val id: Long,
 	val tenantId: Long,
 	val clientId: Long,
+	val clientName: String?,
 	val batchId: Long,
 	val sourcePlLineId: Long,
 	val orderNo: String?,
@@ -28,12 +29,14 @@ data class OrderLineResponse(
 
 fun OrderLineEntity.toResponse(
 	batchStatus: BatchStatus?,
+	clientName: String? = null,
 	fallbackStoreName: String? = null,
 ): OrderLineResponse =
 	OrderLineResponse(
 		id = requireNotNull(id),
 		tenantId = tenantId,
 		clientId = clientId,
+		clientName = clientName,
 		batchId = batchId,
 		sourcePlLineId = sourcePlLineId,
 		orderNo = orderNo,

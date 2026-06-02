@@ -43,6 +43,8 @@ class OrderQueryController(
 		@RequestParam(required = false)
 		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
 		dueDateTo: LocalDate?,
+		@RequestParam(required = false) sortBy: String?,
+		@RequestParam(required = false) sortDirection: String?,
 		@RequestParam(defaultValue = "0") page: Int,
 		@RequestParam(defaultValue = "20") size: Int,
 	): PageResponse<OrderLineResponse> {
@@ -64,6 +66,8 @@ class OrderQueryController(
 			confirmedOnly = confirmedOnly,
 			dueDateFrom = dueDateFrom,
 			dueDateTo = dueDateTo,
+			sortBy = sortBy,
+			sortDirection = sortDirection,
 			page = page,
 			size = size,
 		)

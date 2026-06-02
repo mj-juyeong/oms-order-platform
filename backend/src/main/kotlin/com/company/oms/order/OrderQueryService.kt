@@ -4,8 +4,10 @@ import com.company.oms.batch.UploadBatchRepository
 import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
 import com.company.oms.common.persistence.BatchStatus
+import com.company.oms.common.query.sortedByQuery
 import com.company.oms.common.response.PageResponse
 import com.company.oms.common.response.toPageResponse
+import com.company.oms.common.scope.ClientRepository
 import com.company.oms.master.StoreRouteMasterItemRepository
 import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
@@ -18,6 +20,7 @@ import java.time.LocalDate
 class OrderQueryService(
 	private val orderLineRepository: OrderLineRepository,
 	private val uploadBatchRepository: UploadBatchRepository,
+	private val clientRepository: ClientRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
 ) {
 
@@ -38,6 +41,8 @@ class OrderQueryService(
 		confirmedOnly: Boolean,
 		dueDateFrom: LocalDate?,
 		dueDateTo: LocalDate?,
+		sortBy: String?,
+		sortDirection: String?,
 		page: Int,
 		size: Int,
 	): PageResponse<OrderLineResponse> {
@@ -60,13 +65,20 @@ class OrderQueryService(
 			.filter { vehicleName.isNullOrBlank() || it.vehicleName.containsIgnoringCase(vehicleName) }
 			.filter { dueDateFrom == null || (it.dueDate != null && !it.dueDate!!.isBefore(dueDateFrom)) }
 			.filter { dueDateTo == null || (it.dueDate != null && !it.dueDate!!.isAfter(dueDateTo)) }
-			.sortedBy { it.id ?: 0 }
 			.toList()
 
 		val fallbackStoreNames = fallbackStoreNames(tenantId, filteredRows.map { it.storeCode })
+		val clientNamesById = clientNamesById(filteredRows.map { it.clientId })
 
 		return filteredRows
-			.map { it.toResponse(statusByBatchId[it.batchId], fallbackStoreNames[it.storeCode]) }
+			.map { it.toResponse(statusByBatchId[it.batchId], clientNamesById[it.clientId], fallbackStoreNames[it.storeCode]) }
+			.sortedByQuery(
+				sortBy = sortBy,
+				sortDirection = sortDirection,
+				defaultSortBy = "id",
+				allowedSortFields = orderSortFields,
+				valueSelector = OrderLineResponse::sortValue,
+			)
 			.toPageResponse(page, size)
 	}
 
@@ -83,7 +95,11 @@ class OrderQueryService(
 		if (row.tenantId != tenantId || (clientId != null && row.clientId != clientId)) {
 			throw OmsException(ErrorCode.ORDER_LINE_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 		}
-		return row.toResponse(batchStatusById(tenantId, clientId)[row.batchId], fallbackStoreName(tenantId, row.storeCode))
+		return row.toResponse(
+			batchStatus = batchStatusById(tenantId, clientId)[row.batchId],
+			clientName = clientName(row.clientId),
+			fallbackStoreName = fallbackStoreName(tenantId, row.storeCode),
+		)
 	}
 
 	private fun batchStatusById(tenantId: Long, clientId: Long?): Map<Long, BatchStatus> =
@@ -91,6 +107,18 @@ class OrderQueryService(
 			.filter { it.tenantId == tenantId && (clientId == null || it.clientId == clientId) }
 			.mapNotNull { batch -> batch.id?.let { it to batch.status } }
 			.toMap()
+
+	private fun clientNamesById(clientIds: List<Long>): Map<Long, String> =
+		clientIds
+			.distinct()
+			.mapNotNull { clientId -> clientName(clientId)?.let { clientId to it } }
+			.toMap()
+
+	private fun clientName(clientId: Long): String? =
+		clientRepository.findById(clientId)
+			.orElse(null)
+			?.name
+			?.takeIf(String::isNotBlank)
 
 	private fun fallbackStoreNames(
 		tenantId: Long,
@@ -115,3 +143,42 @@ class OrderQueryService(
 
 private fun String?.containsIgnoringCase(query: String): Boolean =
 	this?.contains(query.trim(), ignoreCase = true) == true
+
+private val orderSortFields =
+	setOf(
+		"id",
+		"batchId",
+		"sourcePlLineId",
+		"orderNo",
+		"storeCode",
+		"storeName",
+		"brandName",
+		"productCode",
+		"productName",
+		"unit",
+		"orderQty",
+		"dueDate",
+		"vehicleName",
+		"deliveryRound",
+		"area",
+	)
+
+private fun OrderLineResponse.sortValue(field: String): Comparable<*>? =
+	when (field) {
+		"id" -> id
+		"batchId" -> batchId
+		"sourcePlLineId" -> sourcePlLineId
+		"orderNo" -> orderNo
+		"storeCode" -> storeCode
+		"storeName" -> storeName
+		"brandName" -> brandName
+		"productCode" -> productCode
+		"productName" -> productName
+		"unit" -> unit
+		"orderQty" -> orderQty
+		"dueDate" -> dueDate
+		"vehicleName" -> vehicleName
+		"deliveryRound" -> deliveryRound
+		"area" -> area
+		else -> id
+	}

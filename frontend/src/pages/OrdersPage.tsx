@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode, type UIEvent } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { omsApi } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
 import { useClientScope } from '../app/clientContext';
@@ -18,7 +18,8 @@ import { Pagination } from '../components/data/Pagination';
 import { BatchStatusBadge, CodeCell } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { BackendOrderLine, OrderLine } from '../types/order';
-import { isDateInRange, type DateRangeValue } from '../utils/dateRange';
+import { type DateRangeValue } from '../utils/dateRange';
+import { areFilterStatesEqual } from '../utils/filterState';
 
 type OrderViewMode = 'ALL' | 'BRANDS' | 'PRODUCTS' | 'STORES' | 'VEHICLES' | 'BATCHES';
 
@@ -83,7 +84,9 @@ const unitOptions = [
 export function OrdersPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
   const { clientId } = useClientScope();
-  const [filters, setFilters] = useState<OrderFilters>(initialFilters);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [filters, setFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams));
+  const [appliedFilters, setAppliedFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewMode, setViewMode] = useState<OrderViewMode>('ALL');
   const [selectedGroup, setSelectedGroup] = useState<OrderGroupRow | null>(null);
@@ -95,14 +98,19 @@ export function OrdersPage() {
   const [reloadSeq, setReloadSeq] = useState(0);
 
   const orders = useMemo(() => (response?.items ?? []).map(mapBackendOrderLine), [response]);
-  const visibleOrders = useMemo(
-    () => orders.filter((order) => isDateInRange(order.dueDate, filters.dueDateRange)),
-    [filters.dueDateRange, orders],
-  );
+  const visibleOrders = orders;
   const visibleGroups = useMemo(() => groupOrders(visibleOrders, viewMode), [viewMode, visibleOrders]);
   const summary = useMemo(() => createOrderSummary(visibleOrders, response?.totalElements ?? 0), [response, visibleOrders]);
-  const activeFilterCount = useMemo(() => countActiveFilters(filters), [filters]);
-  const batchIdError = filters.batchId.trim() && !toNumberOrUndefined(filters.batchId) ? '배치 ID는 숫자로 입력해주세요.' : null;
+  const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
+  const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
+  const batchIdError = appliedFilters.batchId.trim() && !toNumberOrUndefined(appliedFilters.batchId) ? '배치 ID는 숫자로 입력해주세요.' : null;
+
+  useEffect(() => {
+    const nextFilters = orderFiltersFromSearchParams(searchParams);
+    setPage(0);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+  }, [searchParams]);
 
   useEffect(() => {
     if (selectedGroup && !visibleGroups.some((item) => item.id === selectedGroup.id)) {
@@ -135,7 +143,7 @@ export function OrdersPage() {
     }
 
     omsApi.orders
-      .list(buildOrderQuery(filters, page, tenantId, clientId))
+      .list(buildOrderQuery(appliedFilters, page, tenantId, clientId))
       .then((data) => {
         if (!cancelled) {
           setResponse(data);
@@ -156,26 +164,35 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [batchIdError, clientId, filters, page, reloadSeq, tenantId]);
+  }, [appliedFilters, batchIdError, clientId, page, reloadSeq, tenantId]);
 
   function updateFilter<TKey extends keyof OrderFilters>(key: TKey, value: OrderFilters[TKey]) {
-    setPage(0);
     setFilters((current) => ({ ...current, [key]: value }));
+  }
+
+  function applyFilters() {
+    setPage(0);
+    setAppliedFilters(filters);
+    setFiltersOpen(false);
   }
 
   function resetFilters() {
     setPage(0);
     setFilters(initialFilters);
+    setAppliedFilters(initialFilters);
+    setSearchParams({}, { replace: true });
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-3 md:space-y-5">
       <SummaryCards loading={loading} summary={summary} />
 
       <OrderFilterPanel
         activeFilterCount={activeFilterCount}
         filters={filters}
+        hasPendingFilters={hasPendingFilters}
         open={filtersOpen}
+        onApply={applyFilters}
         onReload={() => setReloadSeq((value) => value + 1)}
         onReset={resetFilters}
         onToggleOpen={() => setFiltersOpen((current) => !current)}
@@ -183,17 +200,17 @@ export function OrdersPage() {
       />
 
       <Card className="overflow-hidden">
-        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex flex-col gap-2 border-b border-slate-100 px-4 py-3 lg:flex-row lg:items-center lg:justify-between lg:px-5 lg:py-4">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
               <p className="text-base font-bold text-slate-950">주문 요약</p>
             </div>
-            <p className="mt-1 text-sm text-slate-500">
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">
               서버에서 조회한 주문 <strong className="text-teal-700">{(response?.totalElements ?? 0).toLocaleString()}</strong>건 중
               현재 페이지의 <strong className="text-teal-700">{visibleOrders.length.toLocaleString()}</strong>건을 묶어서 보여줍니다.
             </p>
           </div>
-          <div className="flex shrink-0 flex-wrap gap-2">
+          <div className="oms-table-scroll flex shrink-0 gap-2 overflow-x-auto pb-1">
             {viewModeOptions.map((option) => (
               <ViewModeButton
                 active={viewMode === option.value}
@@ -217,6 +234,7 @@ export function OrdersPage() {
             <GroupedOrderList
               mode={viewMode}
               onOpenGroup={setSelectedGroup}
+              onOpenOrder={setSelectedOrder}
               rows={visibleGroups}
             />
             <div className="border-t border-slate-100 px-5 py-4">
@@ -247,24 +265,29 @@ export function OrdersPage() {
 
 function SummaryCards({ loading, summary }: { loading: boolean; summary: ReturnType<typeof createOrderSummary> }) {
   const cards = [
-    { label: '조회 주문', value: summary.total, tone: 'green' as const, description: '현재 조건의 총 조회 건수' },
-    { label: '현재 페이지', value: summary.loaded, tone: 'teal' as const, description: '현재 페이지에 표시 중인 주문 건수' },
-    { label: '주문 수량', value: summary.totalQty, tone: 'blue' as const, description: '현재 페이지 주문 수량 합계' },
-    { label: '코드 보존', value: summary.codeSensitive, tone: 'amber' as const, description: '0으로 시작하는 코드성 값' },
+    { label: '조회 주문', shortLabel: '조회', value: summary.total, tone: 'green' as const, description: '총 조회 건수' },
+    { label: '현재 페이지', shortLabel: '페이지', value: summary.loaded, tone: 'teal' as const, description: '표시 중인 건수' },
+    { label: '주문 수량', shortLabel: '수량', value: summary.totalQty, tone: 'blue' as const, description: '현재 페이지 합계' },
+    { label: '코드 보존', shortLabel: '코드', value: summary.codeSensitive, tone: 'amber' as const, description: '0 시작 코드' },
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid grid-cols-4 gap-2 md:gap-3">
       {cards.map((card) => (
-        <Card className="p-4" key={card.label}>
-          <div className="flex items-start justify-between gap-3">
-            <div>
-              <p className="text-sm font-semibold text-slate-600">{card.label}</p>
-              <p className="mt-2 text-2xl font-bold text-slate-950">{loading ? '-' : card.value.toLocaleString()}</p>
+        <Card className="min-w-0 px-2 py-3 md:p-4" key={card.label}>
+          <div className="flex min-w-0 items-start justify-between gap-2">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-semibold text-slate-600 md:text-sm">
+                <span className="md:hidden">{card.shortLabel}</span>
+                <span className="hidden md:inline">{card.label}</span>
+              </p>
+              <p className="mt-1 truncate text-xl font-bold text-slate-950 md:mt-2 md:text-2xl">{loading ? '-' : card.value.toLocaleString()}</p>
             </div>
-            <Badge tone={card.tone}>{card.label}</Badge>
+            <span className="hidden md:inline-flex">
+              <Badge tone={card.tone}>{card.label}</Badge>
+            </span>
           </div>
-          <p className="mt-3 text-xs leading-5 text-slate-500">{card.description}</p>
+          <p className="mt-1 hidden text-xs leading-5 text-slate-500 md:block">{card.description}</p>
         </Card>
       ))}
     </div>
@@ -274,6 +297,8 @@ function SummaryCards({ loading, summary }: { loading: boolean; summary: ReturnT
 function OrderFilterPanel({
   activeFilterCount,
   filters,
+  hasPendingFilters,
+  onApply,
   onReload,
   onReset,
   onToggleOpen,
@@ -282,6 +307,8 @@ function OrderFilterPanel({
 }: {
   activeFilterCount: number;
   filters: OrderFilters;
+  hasPendingFilters: boolean;
+  onApply: () => void;
   onReload: () => void;
   onReset: () => void;
   onToggleOpen: () => void;
@@ -289,7 +316,7 @@ function OrderFilterPanel({
   updateFilter: <TKey extends keyof OrderFilters>(key: TKey, value: OrderFilters[TKey]) => void;
 }) {
   return (
-    <Card className="px-4 py-4">
+    <Card className="px-4 py-3 md:py-4">
       <div
         className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between"
         onClick={onToggleOpen}
@@ -298,12 +325,14 @@ function OrderFilterPanel({
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
             {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {hasPendingFilters ? <Badge tone="amber">검색 필요</Badge> : null}
           </div>
-          <p className="mt-1 text-xs text-slate-500">PL 기반 주문 요약 데이터를 조건별로 조회합니다.</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">PL 기반 주문 요약 데이터를 조건별로 조회합니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
+          <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">검색</Button>
           <Button onClick={onReload} size="sm" variant="secondary">새로고침</Button>
-          <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">초기화</Button>
+          <Button disabled={activeFilterCount === 0 && !hasPendingFilters} onClick={onReset} size="sm" variant="ghost">초기화</Button>
           <Button aria-expanded={open} onClick={onToggleOpen} size="sm" variant="secondary">
             {open ? '필터 닫기' : '상세 필터'}
           </Button>
@@ -324,6 +353,11 @@ function OrderFilterPanel({
             <Select label="단위" onChange={(event) => updateFilter('unit', event.target.value as OrderFilters['unit'])} options={unitOptions} value={filters.unit} />
             <Input label="차량명" onChange={(event) => updateFilter('vehicleName', event.target.value)} placeholder="장지N-14" value={filters.vehicleName} />
           </div>
+          <div className="mt-4 flex justify-end">
+            <Button disabled={!hasPendingFilters} onClick={onApply} size="sm" variant="primary">
+              검색
+            </Button>
+          </div>
         </div>
       ) : null}
     </Card>
@@ -336,7 +370,7 @@ function ViewModeButton({ active, children, onClick }: { active: boolean; childr
       aria-pressed={active}
       className={`inline-flex h-8 items-center justify-center rounded-md border px-3 text-xs font-semibold transition ${
         active ? 'border-teal-700 bg-teal-700 text-white' : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-      }`}
+      } shrink-0`}
       onClick={onClick}
       type="button"
     >
@@ -348,10 +382,12 @@ function ViewModeButton({ active, children, onClick }: { active: boolean; childr
 function GroupedOrderList({
   mode,
   onOpenGroup,
+  onOpenOrder,
   rows,
 }: {
   mode: OrderViewMode;
   onOpenGroup: (group: OrderGroupRow) => void;
+  onOpenOrder: (order: OrderLine) => void;
   rows: OrderGroupRow[];
 }) {
   if (rows.length === 0) {
@@ -380,7 +416,7 @@ function GroupedOrderList({
           <section className="bg-white" key={row.id}>
             <button
               className="grid w-full grid-cols-1 gap-3 px-5 py-4 text-left transition hover:bg-slate-50 xl:grid-cols-[minmax(0,1.5fr)_88px_104px_104px_104px_104px_156px] xl:items-center"
-              onClick={() => onOpenGroup(row)}
+              onClick={() => (mode === 'ALL' ? onOpenOrder(row.items[0]) : onOpenGroup(row))}
               type="button"
             >
               <span className="min-w-0">
@@ -437,6 +473,7 @@ function OrderGroupModal({
   const title = mode === 'ALL' ? '전체 주문' : `${viewModeLabel(mode)} 주문`;
   const visibleOrders = currentGroup.items.slice(0, visibleCount);
   const hasMore = visibleOrders.length < currentGroup.items.length;
+  const caption = orderGroupCaption(currentGroup, mode);
 
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const target = event.currentTarget;
@@ -448,28 +485,26 @@ function OrderGroupModal({
 
   return (
     <ModalFrame onClose={onClose} panelClassName="flex max-h-[86vh] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-lg font-bold text-slate-950">{title}</p>
             <Badge tone="teal">{currentGroup.orderCount.toLocaleString()}건</Badge>
           </div>
-          <p className="mt-1 truncate text-sm text-slate-500">
-            {currentGroup.label}{currentGroup.subLabel ? ` · ${currentGroup.subLabel}` : ''}
-          </p>
+          {caption ? <p className="mt-1 truncate text-sm text-slate-500">{caption}</p> : null}
         </div>
         <Button aria-label="주문 목록 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
       </div>
 
-      <div className="flex min-h-0 flex-1 flex-col bg-slate-50 px-6 py-5">
-        <div className="grid gap-3 md:grid-cols-4">
+      <div className="flex min-h-0 flex-1 flex-col bg-slate-50 px-4 py-4 sm:px-6 sm:py-5">
+        <div className="flex gap-2 sm:gap-3">
           <GroupSummaryTile label="주문 건" value={`${currentGroup.orderCount.toLocaleString()}건`} />
           <GroupSummaryTile label="총 수량" value={currentGroup.totalQty.toLocaleString()} />
           <GroupSummaryTile label="상품" value={`${currentGroup.productCount.toLocaleString()}개`} />
           <GroupSummaryTile label="거래처" value={`${currentGroup.storeCount.toLocaleString()}개`} />
         </div>
 
-        <div className="mt-4 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white" onScroll={handleScroll}>
+        <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white sm:mt-4" onScroll={handleScroll}>
           <ExpandedOrders mode={mode} orders={visibleOrders} onSelectOrder={onSelectOrder} />
         </div>
 
@@ -483,11 +518,20 @@ function OrderGroupModal({
   );
 }
 
+function orderGroupCaption(group: OrderGroupRow, mode: OrderViewMode) {
+  if (mode === 'ALL') {
+    const order = group.items[0];
+    return [order?.clientName, group.subLabel].filter(Boolean).join(' · ');
+  }
+
+  return [group.label, group.subLabel].filter(Boolean).join(' · ');
+}
+
 function GroupSummaryTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-md border border-slate-200 bg-white px-4 py-3">
-      <p className="text-xs font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 font-mono text-base font-bold text-slate-950">{value}</p>
+    <div className="min-w-0 flex-1 rounded-md border border-slate-200 bg-white px-2.5 py-2.5 sm:px-4 sm:py-3">
+      <p className="truncate text-[11px] font-semibold text-slate-500 sm:text-xs">{label}</p>
+      <p className="mt-1 truncate font-mono text-sm font-bold text-slate-950 sm:text-base">{value}</p>
     </div>
   );
 }
@@ -521,8 +565,20 @@ function ExpandedOrders({
 
   return (
     <div className="bg-white">
-      <div className="overflow-x-auto">
-        <table className="min-w-full border-separate border-spacing-0 text-sm">
+      <div className="divide-y divide-slate-100 md:hidden">
+        {orders.map((order) => (
+          <button
+            className="w-full px-4 py-3 text-left transition active:bg-teal-50"
+            key={order.id}
+            onClick={() => onSelectOrder(order)}
+            type="button"
+          >
+            <OrderMobileCard order={order} />
+          </button>
+        ))}
+      </div>
+      <div className="oms-table-scroll hidden overflow-x-auto md:block">
+        <table className="oms-responsive-table min-w-full border-separate border-spacing-0 text-sm">
           <thead className="bg-slate-50">
             <tr>
               {headers.map((header) => (
@@ -569,6 +625,43 @@ function StoreCell({ order }: { order: OrderLine }) {
       <span className="truncate font-semibold text-slate-800">{order.storeName}</span>
       <InlineCode value={order.storeCode} />
     </span>
+  );
+}
+
+function OrderMobileCard({ order }: { order: OrderLine }) {
+  return (
+    <div className="space-y-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <CodeCell value={order.orderNo} />
+            <Badge tone={order.unit === 'BOX' ? 'teal' : 'blue'}>{order.unit}</Badge>
+            <OrderBatchStatus order={order} />
+          </div>
+          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={order.productName || '-'}>{order.productName || '-'}</p>
+          <p className="mt-1 truncate text-xs text-slate-500" title={order.storeName || order.storeCode}>{order.storeName || order.storeCode || '-'}</p>
+        </div>
+        <div className="shrink-0 text-right">
+          <p className="text-base font-bold text-slate-950">{order.orderQty.toLocaleString()}</p>
+          <p className="text-xs font-semibold text-slate-500">{order.dueDate || '-'}</p>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
+        <OrderMobileFact label="상품" value={<InlineCode value={order.productCode} />} />
+        <OrderMobileFact label="거래처" value={<InlineCode value={order.storeCode} />} />
+        <OrderMobileFact label="브랜드" value={order.brandName || '-'} />
+        <OrderMobileFact label="차량" value={formatVehicleRound(order)} />
+      </div>
+    </div>
+  );
+}
+
+function OrderMobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
+    </div>
   );
 }
 
@@ -633,14 +726,13 @@ function OrderDetailModal({
 
   return (
     <ModalFrame onClose={onClose} panelClassName="flex max-h-[84vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-6 py-5">
+      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-lg font-bold text-slate-950">주문 상세</p>
             <OrderBatchStatus order={order} />
             <Badge tone={order.unit === 'EA' ? 'blue' : 'teal'}>{order.unit}</Badge>
           </div>
-          <p className="mt-1 text-sm text-slate-500">PL 데이터를 기준으로 재구성한 OMS 주문 조회용 요약입니다.</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
           {onBackToList ? <Button onClick={onBackToList} size="sm" variant="secondary">주문 목록으로</Button> : null}
@@ -648,14 +740,13 @@ function OrderDetailModal({
         </div>
       </div>
 
-      <div className="overflow-y-auto bg-slate-50 px-6 py-5">
+      <div className="overflow-y-auto bg-slate-50 px-4 py-4 sm:px-6 sm:py-5">
         <div className="rounded-lg border border-slate-200 bg-white p-4">
           <p className="text-base font-bold text-slate-950">{order.productName || '-'}</p>
           <p className="mt-1 text-sm text-slate-600">{order.storeName || order.storeCode || '-'} · {order.orderQty.toLocaleString()} {order.unit}</p>
-          <p className="mt-3 text-sm leading-6 text-slate-600">PL 데이터를 기준으로 재구성한 OMS 주문 조회용 요약입니다.</p>
         </div>
 
-        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+        <div className="mt-4 grid gap-4 lg:grid-cols-2">
           <DetailSection title="주문 정보" description="주문과 배치 기준 정보">
             <DetailItem label="주문번호" value={<CodeCell value={order.orderNo} />} />
             <DetailItem label="고객사" value={order.clientName} />
@@ -717,6 +808,18 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
   );
 }
 
+function orderFiltersFromSearchParams(searchParams: URLSearchParams): OrderFilters {
+  const dueDateFrom = searchParams.get('dueDateFrom') ?? '';
+  const dueDateTo = searchParams.get('dueDateTo') ?? '';
+
+  return {
+    ...initialFilters,
+    dueDateRange: dueDateFrom || dueDateTo
+      ? { preset: 'CUSTOM', from: dueDateFrom || dueDateTo, to: dueDateTo || dueDateFrom }
+      : initialFilters.dueDateRange,
+  };
+}
+
 function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number, clientId?: number) {
   return {
     tenantId,
@@ -743,7 +846,7 @@ function mapBackendOrderLine(row: BackendOrderLine): OrderLine {
   return {
     id: String(row.id),
     batchId: String(row.batchId),
-    clientName: fakeCurrentUser.clientName ?? `client-${row.clientId}`,
+    clientName: row.clientName?.trim() || fakeCurrentUser.clientName || `고객사 #${row.clientId}`,
     orderNo: row.orderNo ?? '',
     dueDate: row.dueDate ?? '',
     storeCode: row.storeCode ?? '',

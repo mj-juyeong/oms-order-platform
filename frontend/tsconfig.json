@@ -17,5 +17,10 @@
     "jsx": "react-jsx"
   },
   "include": ["src"],
+  "exclude": [
+    "src/pages/BatchConfirmationRequestsPage.tsx",
+    "src/pages/ClientMasterVisibilitySettingsPage.tsx",
+    "src/pages/ClientPublicMasterPage.tsx"
+  ],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

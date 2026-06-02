@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchDetail, type ValidationErrorItem } from '../api/oms';
 import { canOperateBatches, fakeCurrentUser } from '../app/auth';
 import { useClientScope } from '../app/clientContext';
 import { Badge, Button, Card, FullScreenLoadingOverlay, Input, ModalFrame, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell, MetricCard, SeverityBadge } from '../components/domain';
+import { BatchStatusBadge, CodeCell, MetricCard, SeverityBadge } from '../components/domain';
 import type { PageResponse } from '../types/api';
 import type { ValidationSeverity } from '../types/validation';
 
@@ -20,16 +20,32 @@ const severityFilterOptions = [
   { label: 'Info', value: 'INFO' },
 ];
 
+function severityFilterFromSearchParams(searchParams: URLSearchParams): SeverityFilter {
+  const severity = searchParams.get('severity')?.toUpperCase();
+  if (severity === 'ERROR' || severity === 'WARNING' || severity === 'INFO') {
+    return severity;
+  }
+
+  return 'ALL';
+}
+
+function errorCodeFilterFromSearchParams(searchParams: URLSearchParams) {
+  return searchParams.get('errorCode') ?? '';
+}
+
 export function ValidationResultsPage() {
   const tenantId = fakeCurrentUser.tenantId ?? null;
   const { clientId } = useClientScope();
   const { batchId } = useParams();
+  const [searchParams] = useSearchParams();
   const numericBatchId = Number(batchId);
+  const urlSeverityFilter = severityFilterFromSearchParams(searchParams);
+  const urlErrorCodeFilter = errorCodeFilterFromSearchParams(searchParams);
   const [batch, setBatch] = useState<BackendBatchDetail | null>(null);
   const [response, setResponse] = useState<PageResponse<ValidationErrorItem> | null>(null);
-  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>('ALL');
+  const [severityFilter, setSeverityFilter] = useState<SeverityFilter>(urlSeverityFilter);
   const [sheetName, setSheetName] = useState('');
-  const [errorCode, setErrorCode] = useState('');
+  const [errorCode, setErrorCode] = useState(urlErrorCodeFilter);
   const [keyword, setKeyword] = useState('');
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [selectedRow, setSelectedRow] = useState<ValidationErrorItem | null>(null);
@@ -37,6 +53,11 @@ export function ValidationResultsPage() {
   const [actionState, setActionState] = useState<ValidationActionState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    setSeverityFilter(urlSeverityFilter);
+    setErrorCode(urlErrorCodeFilter);
+  }, [urlErrorCodeFilter, urlSeverityFilter]);
 
   useEffect(() => {
     loadValidationResults();
@@ -171,11 +192,11 @@ export function ValidationResultsPage() {
       />
       <ValidationRecoveryGuide batch={batch} summary={summary} />
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4">
         <MetricCard description="현재 조회 조건의 검증 항목" label="조회 항목" value={rows.length.toLocaleString()} />
         <MetricCard description="수정 후 재검증 필요" label="Error" tone="red" value={summary.error} />
         <MetricCard description="운영 확인 권장" label="Warning" tone="amber" value={summary.warning} />
-        <MetricCard description="참고 안내" label="Info" tone="blue" value={summary.info} />
+        <MetricCard description="참고 안내" label="Info" tone="neutral" value={summary.info} />
       </div>
 
       <ValidationFilterPanel
@@ -198,7 +219,7 @@ export function ValidationResultsPage() {
         <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-4 md:flex-row md:items-center md:justify-between">
           <div>
             <p className="text-base font-bold text-slate-950">검증 항목</p>
-            <p className="mt-1 text-sm text-slate-500">행을 선택하면 원본값, 정규화값, 발생 위치를 확인합니다.</p>
+            <p className="mt-1 hidden text-sm text-slate-500 sm:block">행을 선택하면 원본값, 정규화값, 발생 위치를 확인합니다.</p>
           </div>
             <div className="flex flex-wrap gap-2">
             <Button disabled={rows.length === 0 || actionState !== null} onClick={handleDownloadCsv} size="sm" variant="secondary">
@@ -220,6 +241,7 @@ export function ValidationResultsPage() {
             getRowClassName={(item) => (item.id === selectedRow?.id ? 'bg-teal-50/80' : severityRowClassName(item.severity))}
             getRowKey={(item) => String(item.id)}
             onRowClick={setSelectedRow}
+            renderMobileCard={(item) => <ValidationIssueMobileCard row={item} />}
           />
           <div className="px-5 py-4">
             <Pagination page={(response?.page ?? 0) + 1} total={response?.totalElements ?? rows.length} totalPages={Math.max(1, response?.totalPages ?? 1)} />
@@ -272,9 +294,9 @@ function ValidationFilterPanel({
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
-            {activeFilterCount > 0 ? <Badge tone="blue">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
+            {activeFilterCount > 0 ? <Badge tone="neutral">적용 {activeFilterCount}</Badge> : <Badge>전체 조회</Badge>}
           </div>
-          <p className="mt-1 text-xs text-slate-500">{createValidationFilterSummary({ errorCode, keyword, severityFilter, sheetName })}</p>
+          <p className="mt-1 hidden text-xs text-slate-500 sm:block">{createValidationFilterSummary({ errorCode, keyword, severityFilter, sheetName })}</p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2" onClick={(event) => event.stopPropagation()}>
           <Button disabled={activeFilterCount === 0} onClick={onReset} size="sm" variant="ghost">
@@ -328,33 +350,36 @@ function ValidationHeader({
   summary: ReturnType<typeof getValidationSummary>;
 }) {
   const blocked = summary.error > 0;
+  const confirmed = batch.status === 'CONFIRMED';
+  const terminal = batch.status === 'CANCELLED' || batch.status === 'ROLLED_BACK';
+  const headerTone = blocked && !confirmed ? 'red' : 'teal';
+  const headerCopy = validationHeaderCopy({ blocked, canConfirm, confirmed, terminal });
   const fileName = batch.uploadedFiles[0]?.originalFileName ?? '파일명 없음';
 
   return (
-    <Card className={`p-5 ${blocked ? 'border-red-200 bg-red-50' : 'border-emerald-200 bg-emerald-50'}`}>
+    <Card className={`p-4 sm:p-5 ${headerTone === 'red' ? 'border-red-200 bg-red-50' : 'border-teal-200 bg-teal-50'}`}>
       <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             <CodeCell value={batch.batchNo} />
-            <span className="text-sm text-slate-500">{fileName}</span>
+            <BatchStatusBadge status={batch.status} />
+            <span className="min-w-0 max-w-full truncate text-sm text-slate-500 sm:max-w-[260px]">{fileName}</span>
             <Badge tone="neutral">Batch ID {batch.id}</Badge>
           </div>
-          <p className={`mt-3 text-base font-bold ${blocked ? 'text-red-900' : 'text-emerald-900'}`}>
-            {blocked ? '확정 가능 여부: 불가' : canConfirm ? '확정 가능 여부: 가능' : '검증 결과 확인이 필요합니다'}
+          <p className={`mt-3 text-base font-bold ${headerTone === 'red' ? 'text-red-900' : 'text-teal-900'}`}>
+            {headerCopy.title}
           </p>
-          <p className={`mt-1 text-sm leading-6 ${blocked ? 'text-red-800' : 'text-emerald-800'}`}>
-            {blocked
-              ? 'Error 항목을 수정한 뒤 재검증해야 배치 확정, 외부 API 제공, 라벨 다운로드를 진행할 수 있습니다.'
-              : 'Error가 없습니다. Warning 항목을 확인한 뒤 배치를 확정할 수 있습니다.'}
+          <p className={`mt-1 hidden text-sm leading-6 sm:block ${headerTone === 'red' ? 'text-red-800' : 'text-teal-800'}`}>
+            {headerCopy.description}
           </p>
         </div>
-        <div className="min-w-[260px]">
-          <div className="grid gap-2 sm:grid-cols-3">
+        <div className="w-full min-w-0 xl:w-auto xl:min-w-[260px]">
+          <div className="grid grid-cols-3 gap-2">
             <SeveritySummaryPill label="Error" tone="red" value={summary.error} />
             <SeveritySummaryPill label="Warning" tone="amber" value={summary.warning} />
-            <SeveritySummaryPill label="Info" tone="blue" value={summary.info} />
+            <SeveritySummaryPill label="Info" tone="neutral" value={summary.info} />
           </div>
-          <div className="mt-3 flex flex-wrap justify-end gap-2">
+          <div className="mt-3 flex flex-wrap justify-start gap-2 sm:justify-end">
             {canOperateBatch ? (
               <Button disabled={!canRevalidate || actionState !== null} onClick={onRevalidate} size="sm" variant="primary">
                 {actionState === 'revalidate' ? '재검증 중' : '재검증'}
@@ -368,12 +393,59 @@ function ValidationHeader({
             </Link>
           </div>
           {canOperateBatch && !canRevalidate ? (
-            <p className="mt-2 text-right text-xs text-slate-500">확정/취소/롤백 상태에서는 재검증을 실행할 수 없습니다.</p>
+            <p className="mt-2 hidden text-right text-xs text-slate-500 sm:block">확정/취소/롤백 상태에서는 재검증을 실행할 수 없습니다.</p>
           ) : null}
         </div>
       </div>
     </Card>
   );
+}
+
+function validationHeaderCopy({
+  blocked,
+  canConfirm,
+  confirmed,
+  terminal,
+}: {
+  blocked: boolean;
+  canConfirm: boolean;
+  confirmed: boolean;
+  terminal: boolean;
+}) {
+  if (confirmed) {
+    return {
+      description: blocked
+        ? '확정 이후 남아 있는 검증 이력을 확인합니다. 후속 조치가 필요한지는 운영 정책에 따라 별도로 판단합니다.'
+        : '확정 당시의 검증 결과와 Warning/Info 이력을 확인합니다. 이 배치는 이미 확정 처리되었습니다.',
+      title: '확정 완료 배치의 검증 이력입니다',
+    };
+  }
+
+  if (terminal) {
+    return {
+      description: '현재 배치 상태에서는 확정이나 재검증을 진행하지 않습니다. 검증 항목은 이력 확인용으로 조회합니다.',
+      title: '종료된 배치의 검증 이력입니다',
+    };
+  }
+
+  if (blocked) {
+    return {
+      description: 'Error 항목을 수정한 뒤 재검증해야 배치 확정, 외부 API 제공, 라벨 다운로드를 진행할 수 있습니다.',
+      title: '확정 가능 여부: 불가',
+    };
+  }
+
+  if (canConfirm) {
+    return {
+      description: 'Error가 없습니다. Warning 항목을 확인한 뒤 물류사에 배치 확정을 요청할 수 있습니다.',
+      title: '확정 요청 가능 여부: 가능',
+    };
+  }
+
+  return {
+    description: '현재 검증 결과를 확인하고, 필요한 후속 작업이 있는지 판단합니다.',
+    title: '검증 결과 확인이 필요합니다',
+  };
 }
 
 function ValidationRecoveryGuide({
@@ -383,7 +455,7 @@ function ValidationRecoveryGuide({
   batch: BackendBatchDetail;
   summary: ReturnType<typeof getValidationSummary>;
 }) {
-  if (summary.error === 0) {
+  if (summary.error === 0 || batch.status === 'CONFIRMED' || batch.status === 'CANCELLED' || batch.status === 'ROLLED_BACK') {
     return null;
   }
 
@@ -398,18 +470,29 @@ function ValidationRecoveryGuide({
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
-          <Link
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            to="/masters/products"
-          >
-            상품 마스터 보완
-          </Link>
-          <Link
-            className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
-            to="/masters/store-routes"
-          >
-            배송지/차량 보완
-          </Link>
+          {fakeCurrentUser.userScopeType === 'CLIENT' ? (
+            <Link
+              className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+              to="/client-masters"
+            >
+              공개 마스터 조회
+            </Link>
+          ) : (
+            <>
+              <Link
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                to="/masters/products"
+              >
+                상품 마스터 보완
+              </Link>
+              <Link
+                className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50"
+                to="/masters/store-routes"
+              >
+                배송지/차량 보완
+              </Link>
+            </>
+          )}
           <Link
             className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
             to="/uploads"
@@ -419,7 +502,7 @@ function ValidationRecoveryGuide({
         </div>
       </div>
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        <div className="border-l-4 border-blue-400 bg-white/70 px-4 py-3">
+        <div className="border-l-4 border-slate-300 bg-white/70 px-4 py-3">
           <p className="text-sm font-bold text-slate-900">마스터 보완</p>
           <p className="mt-1 text-sm leading-5 text-slate-600">코드가 마스터에 없으면 기준 데이터를 먼저 upsert한 뒤 재검증합니다.</p>
         </div>
@@ -436,10 +519,10 @@ function ValidationRecoveryGuide({
   );
 }
 
-function SeveritySummaryPill({ label, tone, value }: { label: string; tone: 'red' | 'amber' | 'blue'; value: number }) {
+function SeveritySummaryPill({ label, tone, value }: { label: string; tone: 'red' | 'amber' | 'neutral'; value: number }) {
   const toneClass = {
     amber: 'border-amber-200 bg-amber-50 text-amber-800',
-    blue: 'border-blue-200 bg-blue-50 text-blue-800',
+    neutral: 'border-slate-200 bg-slate-50 text-slate-700',
     red: 'border-red-200 bg-red-50 text-red-800',
   }[tone];
 
@@ -484,6 +567,44 @@ function ValidationLocation({ row }: { row: ValidationErrorItem }) {
     <div className="flex flex-col gap-1">
       <CodeCell muted={!row.sheetName} value={row.sheetName ?? '-'} />
       <span className="text-xs text-slate-500">행 {row.rowNo ?? '-'}</span>
+    </div>
+  );
+}
+
+function ValidationIssueMobileCard({ row }: { row: ValidationErrorItem }) {
+  return (
+    <div className="min-w-0 space-y-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <SeverityBadge severity={row.severity} />
+          <p className="mt-2 break-words text-sm font-bold leading-5 text-slate-950">{row.userTitle || row.message}</p>
+        </div>
+        <div className="shrink-0 text-right text-xs text-slate-500">
+          <CodeCell maxWidthClass="max-w-[96px]" muted={!row.sheetName} value={row.sheetName ?? '-'} />
+          <p className="mt-1">행 {row.rowNo ?? '-'}</p>
+        </div>
+      </div>
+
+      <p className="break-words text-xs leading-5 text-slate-600">{row.userMessage || row.message}</p>
+
+      <div className="grid grid-cols-2 gap-1.5">
+        <ValidationMobileFact label="대상" value={targetPrimaryLabel(row)} />
+        <ValidationMobileFact label="컬럼" value={row.columnName ?? '-'} />
+      </div>
+
+      {row.sourceSummary ? <p className="break-words text-xs leading-5 text-slate-500">{row.sourceSummary}</p> : null}
+      <p className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-700">
+        {row.actionGuide || severityGuide(row.severity)}
+      </p>
+    </div>
+  );
+}
+
+function ValidationMobileFact({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
+      <div className="mt-1 min-w-0 break-words text-xs font-semibold text-slate-800">{value}</div>
     </div>
   );
 }
@@ -621,10 +742,10 @@ function DetailItem({ label, value }: { label: string; value: ReactNode }) {
 function severitySummaryClassName(severity: ValidationSeverity) {
   if (severity === 'ERROR') return 'border-red-200 bg-red-50';
   if (severity === 'WARNING') return 'border-amber-200 bg-amber-50';
-  return 'border-blue-200 bg-blue-50';
+  return 'border-slate-200 bg-slate-50';
 }
 
-function validationImpact(severity: ValidationSeverity): { description: string; label: string; tone: 'amber' | 'blue' | 'red' } {
+function validationImpact(severity: ValidationSeverity): { description: string; label: string; tone: 'amber' | 'neutral' | 'red' } {
   if (severity === 'ERROR') {
     return {
       description: '배치 확정, 외부 API 제공, 라벨 다운로드가 막힙니다.',
@@ -644,7 +765,7 @@ function validationImpact(severity: ValidationSeverity): { description: string; 
   return {
     description: '참고 안내이며 배치 확정을 차단하지 않습니다.',
     label: '참고',
-    tone: 'blue',
+    tone: 'neutral',
   };
 }
 
@@ -677,13 +798,17 @@ function nextActions(row: ValidationErrorItem) {
   if (row.severity === 'ERROR') {
     actions.push('수정한 파일을 다시 업로드하거나 기준 마스터를 보정한 뒤 재검증하세요.');
   } else {
-    actions.push('내용을 확인한 뒤 문제가 없으면 배치 확정을 진행할 수 있습니다.');
+    actions.push('내용을 확인한 뒤 문제가 없으면 물류사에 배치 확정을 요청할 수 있습니다.');
   }
 
   return Array.from(new Set(actions));
 }
 
 function relatedMasterLink(row: ValidationErrorItem): { label: string; to: string } | null {
+  if (fakeCurrentUser.userScopeType === 'CLIENT' && (row.errorCode.includes('PRODUCT') || row.errorCode.includes('STORE') || row.errorCode.includes('VEHICLE'))) {
+    return { label: '공개 마스터 조회', to: '/client-masters' };
+  }
+
   if (row.errorCode.includes('PRODUCT')) {
     const ezadminCode = row.productCode ?? row.targetCode ?? row.originalValue ?? '';
     const query = ezadminCode ? `?ezadminCode=${encodeURIComponent(ezadminCode)}` : '';
@@ -843,8 +968,8 @@ function ApiErrorCard({ message, onRetry }: { message: string; onRetry: () => vo
 
 function SuccessCard({ message }: { message: string }) {
   return (
-    <Card className="border-emerald-200 bg-emerald-50 px-5 py-4">
-      <p className="text-sm font-semibold text-emerald-800">{message}</p>
+    <Card className="border-teal-200 bg-teal-50 px-5 py-4">
+      <p className="text-sm font-semibold text-teal-800">{message}</p>
     </Card>
   );
 }

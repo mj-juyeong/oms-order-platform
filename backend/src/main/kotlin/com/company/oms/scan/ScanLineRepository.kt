@@ -1,9 +1,10 @@
 package com.company.oms.scan
 
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import java.time.LocalDate
 
-interface ScanLineRepository : JpaRepository<ScanLineEntity, Long> {
+interface ScanLineRepository : JpaRepository<ScanLineEntity, Long>, JpaSpecificationExecutor<ScanLineEntity> {
 	fun findAllByTenantIdAndClientIdAndBatchId(
 		tenantId: Long,
 		clientId: Long,
@@ -23,4 +24,3 @@ interface ScanLineRepository : JpaRepository<ScanLineEntity, Long> {
 		barcode: String,
 	): List<ScanLineEntity>
 }
-
