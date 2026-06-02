@@ -1,5 +1,13 @@
 package com.company.oms
 
+import com.company.oms.auth.RoleEntity
+import com.company.oms.auth.RoleRepository
+import com.company.oms.auth.UserEntity
+import com.company.oms.auth.UserRepository
+import com.company.oms.auth.UserRoleEntity
+import com.company.oms.auth.UserRoleId
+import com.company.oms.auth.UserRoleRepository
+import com.company.oms.common.persistence.UserScopeType
 import com.company.oms.common.scope.ClientEntity
 import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
@@ -48,10 +56,14 @@ class MasterUpsertApiTest @Autowired constructor(
 	private val mockMvc: MockMvc,
 	private val tenantRepository: TenantRepository,
 	private val clientRepository: ClientRepository,
+	private val userRepository: UserRepository,
+	private val roleRepository: RoleRepository,
+	private val userRoleRepository: UserRoleRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
 	private val masterUploadRowErrorRepository: MasterUploadRowErrorRepository,
 ) {
+	private var currentAdminUserId: Long? = null
 
 	@BeforeEach
 	fun migrate() {
@@ -67,6 +79,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		mockMvc.multipart("/api/v1/masters/products/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -94,6 +107,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.multipart("/api/v1/masters/products/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -117,6 +131,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.get("/api/v1/masters/products") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 			param("ezadminCode", "00123")
 		}.andExpect {
@@ -132,6 +147,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		mockMvc.multipart("/api/v1/masters/store-routes/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -149,6 +165,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.multipart("/api/v1/masters/store-routes/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -166,6 +183,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.get("/api/v1/masters/store-routes") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 			param("baljugoCode", "000777")
 		}.andExpect {
@@ -182,6 +200,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		mockMvc.multipart("/api/v1/masters/products/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -204,6 +223,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		val previewResult = mockMvc.multipart("/api/v1/masters/products/uploads/preview") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -239,6 +259,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val uploadId = extractUploadId(previewResult.response.contentAsString)
 		assertEquals(2, masterUploadRowErrorRepository.findAllByMasterUploadBatchIdOrderByRowNoAscIdAsc(uploadId).size)
 		mockMvc.get("/api/v1/masters/products/uploads/$uploadId/row-errors") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 		}.andExpect {
 			status { isOk() }
@@ -251,6 +272,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.post("/api/v1/masters/products/uploads/$uploadId/apply") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 		}.andExpect {
 			status { isOk() }
@@ -269,6 +291,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		val previewResult = mockMvc.multipart("/api/v1/masters/products/uploads/preview") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -289,6 +312,7 @@ class MasterUpsertApiTest @Autowired constructor(
 
 		val uploadId = extractUploadId(previewResult.response.contentAsString)
 		mockMvc.post("/api/v1/masters/products/uploads/$uploadId/cancel") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 		}.andExpect {
 			status { isOk() }
@@ -303,6 +327,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		val tenantId = createTenant()
 
 		mockMvc.multipart("/api/v1/masters/store-routes/uploads") {
+			header("X-User-Id", adminUserId())
 			file(
 				MockMultipartFile(
 					"file",
@@ -328,6 +353,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.get("/api/v1/masters/store-routes") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 			param("storeCode", "seouldkb_017")
 			param("activeYn", "false")
@@ -370,6 +396,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		)
 
 		mockMvc.post("/api/v1/masters/client-product-code-mappings") {
+			header("X-User-Id", adminUserId())
 			contentType = MediaType.APPLICATION_JSON
 			content = """
 				{
@@ -388,6 +415,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.get("/api/v1/masters/client-product-code-mappings") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 			param("clientId", clientId.toString())
 			param("clientProductCode", "WS")
@@ -398,6 +426,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.post("/api/v1/masters/client-store-code-mappings") {
+			header("X-User-Id", adminUserId())
 			contentType = MediaType.APPLICATION_JSON
 			content = """
 				{
@@ -416,6 +445,7 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 
 		mockMvc.get("/api/v1/masters/client-store-code-mappings") {
+			header("X-User-Id", adminUserId())
 			param("tenantId", tenantId.toString())
 			param("clientId", clientId.toString())
 			param("clientStoreCode", "WS")
@@ -426,13 +456,32 @@ class MasterUpsertApiTest @Autowired constructor(
 		}
 	}
 
-	private fun createTenant(): Long =
-		tenantRepository.saveAndFlush(
+	private fun createTenant(): Long {
+		val tenantId =
+			tenantRepository.saveAndFlush(
 			TenantEntity(
 				code = "tenant-${UUID.randomUUID()}",
 				name = "Tenant",
 			),
 		).id!!
+		val role = roleRepository.findByCode("ADMIN") ?: roleRepository.saveAndFlush(RoleEntity(code = "ADMIN", name = "ADMIN"))
+		val user =
+			userRepository.saveAndFlush(
+				UserEntity(
+					userScopeType = UserScopeType.TENANT,
+					tenantId = tenantId,
+					loginId = "admin-${UUID.randomUUID()}",
+					name = "Admin",
+					passwordHash = "test",
+				),
+			)
+		userRoleRepository.saveAndFlush(UserRoleEntity(UserRoleId(user.id!!, role.id!!)))
+		currentAdminUserId = user.id
+		return tenantId
+	}
+
+	private fun adminUserId(): String =
+		requireNotNull(currentAdminUserId) { "createTenant() must run before calling master APIs." }.toString()
 
 	private fun storeRouteWorkbookBytes(
 		storeName: String,

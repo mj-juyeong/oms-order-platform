@@ -115,7 +115,7 @@ export function useClientScope() {
       clientId: selection.mode === 'client' ? selection.clientId : undefined,
       clientName: selection.mode === 'client' ? selection.clientName : undefined,
       isAllClients: selection.mode === 'all',
-      scopeLabel: selection.mode === 'all' ? '전체 고객사' : selection.clientName ?? `client-${selection.clientId}`,
+      scopeLabel: selection.mode === 'all' ? '전체 고객사' : selection.clientName ?? `고객사 #${selection.clientId}`,
     }),
     [selection],
   );

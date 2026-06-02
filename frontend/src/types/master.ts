@@ -116,6 +116,92 @@ export interface StoreRouteMasterItem {
   rowNo?: number | null;
 }
 
+export type ClientProductMasterVisibilityMode = 'SCOPED_ONLY' | 'ALL_PRODUCTS';
+
+export type ClientStoreRouteMasterVisibilityMode = 'SCOPED_ONLY' | 'ALL_STORE_ROUTES';
+
+export type ClientMasterScopeSource = 'MANUAL' | 'USED_IN_BATCH' | 'UPLOADED_BATCH' | 'REQUEST_APPROVED';
+export type ClientMasterScopeStatus = 'ACTIVE' | 'INACTIVE';
+
+export interface ClientMasterVisibilitySetting {
+  tenantId: number;
+  clientId: number;
+  productVisibilityMode: ClientProductMasterVisibilityMode;
+  storeRouteVisibilityMode: ClientStoreRouteMasterVisibilityMode;
+  showPriceFieldsYn: boolean;
+  showSupplierFieldsYn: boolean;
+  showStoreRouteInternalFieldsYn: boolean;
+  updatedBy?: number | null;
+  updatedAt?: string | null;
+}
+
+export interface ClientMasterVisibilitySettingRequest {
+  tenantId: number;
+  clientId: number;
+  productVisibilityMode: ClientProductMasterVisibilityMode;
+  storeRouteVisibilityMode: ClientStoreRouteMasterVisibilityMode;
+  showPriceFieldsYn?: boolean;
+  showSupplierFieldsYn?: boolean;
+  showStoreRouteInternalFieldsYn?: boolean;
+}
+
+export interface ClientPublicProductMasterItem {
+  id: number;
+  ezadminCode: string;
+  productName?: string | null;
+  customerProductCode?: string | null;
+  boxQty?: number | null;
+  outboundUnit?: string | null;
+  temperatureType?: string | null;
+  cbm?: number | null;
+  activeYn: boolean;
+}
+
+export interface ClientPublicStoreRouteMasterItem {
+  id: number;
+  baljugoCode: string;
+  customerCode?: string | null;
+  brandName?: string | null;
+  storeName?: string | null;
+  area?: string | null;
+  deliveryDay?: string | null;
+  deliveryRound?: string | null;
+  vehicleName?: string | null;
+  driverName?: string | null;
+  address?: string | null;
+  activeYn: boolean;
+  internalFieldsVisible: boolean;
+}
+
+export interface ClientMasterScope {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  masterItemId: number;
+  status: ClientMasterScopeStatus;
+  source: ClientMasterScopeSource;
+}
+
+export interface ClientProductMasterScopeItem {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  productMasterItemId: number;
+  status: ClientMasterScopeStatus;
+  source: ClientMasterScopeSource;
+  product?: ClientPublicProductMasterItem | null;
+}
+
+export interface ClientStoreRouteMasterScopeItem {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  storeRouteMasterItemId: number;
+  status: ClientMasterScopeStatus;
+  source: ClientMasterScopeSource;
+  storeRoute?: ClientPublicStoreRouteMasterItem | null;
+}
+
 export interface ClientProductCodeMapping {
   id: number;
   tenantId: number;

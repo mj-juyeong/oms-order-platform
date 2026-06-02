@@ -56,9 +56,9 @@ export function MasterUploadReviewPanel({
         </div>
         <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
           <ReviewCount label="전체" value={preview.rowCount} />
-          <ReviewCount label="정상" value={preview.validCount} tone="text-emerald-700" />
+          <ReviewCount label="정상" value={preview.validCount} tone="text-teal-700" />
           <ReviewCount label="신규 예상" value={preview.candidateInsertedCount} tone="text-teal-700" />
-          <ReviewCount label="수정 예상" value={preview.candidateUpdatedCount} tone="text-blue-700" />
+          <ReviewCount label="수정 예상" value={preview.candidateUpdatedCount} tone="text-slate-700" />
           <ReviewCount label="실패" value={preview.failedCount} tone="text-red-700" />
         </div>
       </Card>
@@ -68,8 +68,8 @@ export function MasterUploadReviewPanel({
           <p className="text-sm font-bold text-slate-900">실패 행</p>
           <Badge tone="red">{preview.failures.length.toLocaleString()}건</Badge>
         </div>
-        <div className="max-h-72 overflow-auto">
-          <table className="min-w-full divide-y divide-slate-200 text-sm">
+        <div className="oms-table-scroll max-h-72 overflow-auto">
+          <table className="oms-responsive-table min-w-full divide-y divide-slate-200 text-sm">
             <thead className="sticky top-0 bg-white">
               <tr className="text-left text-xs font-semibold text-slate-500">
                 <th className="w-20 px-4 py-3">rowNo</th>

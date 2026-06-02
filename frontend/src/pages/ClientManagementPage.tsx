@@ -109,7 +109,7 @@ export function ClientManagementPage() {
   }
 
   return (
-    <div className="space-y-5">
+    <div className="min-w-0 space-y-5">
       <section className="grid gap-3 md:grid-cols-3">
         <Metric label="전체 고객사" value={clients.length} />
         <Metric label="활성 고객사" value={activeCount} />
@@ -122,7 +122,7 @@ export function ClientManagementPage() {
             <p className="text-base font-bold text-slate-950">고객사 관리</p>
             <p className="mt-1 text-sm text-slate-500">고객사명만 입력하면 내부 코드는 자동 생성되고, OIS 코드가 있으면 별도로 보관합니다.</p>
           </div>
-          <div className="flex flex-wrap items-end gap-2">
+          <div className="flex max-w-full shrink-0 flex-nowrap items-end gap-2 overflow-x-auto pb-1">
             {isSystemAdmin ? (
               <Select
                 label="물류사"
@@ -131,14 +131,14 @@ export function ClientManagementPage() {
                 value={selectedTenantId}
               />
             ) : (
-              <div className="min-w-48 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+              <div className="min-w-48 shrink-0 whitespace-nowrap rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                 현재 물류사: {fakeCurrentUser.tenantName ?? fixedTenantId ?? '-'}
               </div>
             )}
-            <Button onClick={() => setReloadSeq((current) => current + 1)} variant="secondary">
+            <Button className="shrink-0 whitespace-nowrap" onClick={() => setReloadSeq((current) => current + 1)} variant="secondary">
               새로고침
             </Button>
-            <Button disabled={!toOptionalNumber(selectedTenantId)} onClick={openCreateModal} variant="primary">
+            <Button className="shrink-0 whitespace-nowrap" disabled={!toOptionalNumber(selectedTenantId)} onClick={openCreateModal} variant="primary">
               고객사 생성
             </Button>
           </div>
@@ -151,7 +151,7 @@ export function ClientManagementPage() {
         </Card>
       ) : null}
 
-      <Card className="overflow-hidden">
+      <Card className="min-w-0 overflow-hidden">
         {loading && clients.length === 0 ? (
           <div className="p-5">
             <LoadingState label="고객사 목록을 불러오는 중입니다." />
@@ -166,7 +166,7 @@ export function ClientManagementPage() {
           <DataTable
             columns={createColumns(openEditModal)}
             data={clients}
-            emptyDescription="고객사를 먼저 생성한 뒤 CLIENT_VIEWER 사용자를 생성하세요."
+            emptyDescription="고객사를 먼저 생성한 뒤 CLIENT 조회자 또는 운영자 사용자를 생성하세요."
             emptyTitle="등록된 고객사가 없습니다."
             getRowKey={(client) => String(client.id)}
             onRowClick={openEditModal}

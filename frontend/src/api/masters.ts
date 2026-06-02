@@ -2,10 +2,17 @@ import { apiData, buildQuery, uploadMultipart } from './client';
 import { endpoints } from './endpoints';
 import type { PageResponse } from '../types/api';
 import type {
+  ClientMasterScope,
+  ClientMasterVisibilitySetting,
+  ClientMasterVisibilitySettingRequest,
   ClientProductCodeMapping,
   ClientProductCodeMappingUpsertRequest,
+  ClientProductMasterScopeItem,
+  ClientPublicProductMasterItem,
+  ClientPublicStoreRouteMasterItem,
   ClientStoreCodeMapping,
   ClientStoreCodeMappingUpsertRequest,
+  ClientStoreRouteMasterScopeItem,
   MasterUploadPreviewResult,
   MasterUploadRowFailure,
   ProductMasterItem,
@@ -18,7 +25,7 @@ import type {
 
 export const mastersApi = {
   products: {
-    list: (params: { tenantId: number; ezadminCode?: string; productName?: string; operationStatus?: string; activeYn?: boolean; page?: number; size?: number }) => {
+    list: (params: { tenantId: number; ezadminCode?: string; productName?: string; operationStatus?: string; activeYn?: boolean; storageTemperature?: string; page?: number; size?: number }) => {
       const { operationStatus, ...rest } = params;
       const activeYn =
         params.activeYn ??
@@ -112,5 +119,38 @@ export const mastersApi = {
         method: 'POST',
         body,
       }),
+  },
+  clientVisibility: {
+    getSetting: (params: { tenantId?: number; clientId?: number }) =>
+      apiData<ClientMasterVisibilitySetting>(`${endpoints.clientMasterVisibility.settings}${buildQuery(params)}`),
+    updateSetting: (body: ClientMasterVisibilitySettingRequest) =>
+      apiData<ClientMasterVisibilitySetting>(endpoints.clientMasterVisibility.settings, {
+        method: 'PUT',
+        body,
+      }),
+    productScopes: (params: { tenantId: number; clientId: number; status?: string; ezadminCode?: string; productName?: string; page?: number; size?: number }) =>
+      apiData<PageResponse<ClientProductMasterScopeItem>>(`${endpoints.clientMasterVisibility.productScopes}${buildQuery(params)}`),
+    upsertProductScope: (body: { tenantId: number; clientId: number; productMasterItemId: number; activeYn?: boolean; source?: string }) =>
+      apiData<ClientMasterScope>(endpoints.clientMasterVisibility.productScopes, {
+        method: 'POST',
+        body,
+      }),
+    storeRouteScopes: (params: { tenantId: number; clientId: number; status?: string; baljugoCode?: string; storeName?: string; page?: number; size?: number }) =>
+      apiData<PageResponse<ClientStoreRouteMasterScopeItem>>(`${endpoints.clientMasterVisibility.storeRouteScopes}${buildQuery(params)}`),
+    upsertStoreRouteScope: (body: { tenantId: number; clientId: number; storeRouteMasterItemId: number; activeYn?: boolean; source?: string }) =>
+      apiData<ClientMasterScope>(endpoints.clientMasterVisibility.storeRouteScopes, {
+        method: 'POST',
+        body,
+      }),
+  },
+  clientMasters: {
+    products: {
+      list: (params: { tenantId?: number; clientId?: number; ezadminCode?: string; productName?: string; activeYn?: boolean; page?: number; size?: number }) =>
+        apiData<PageResponse<ClientPublicProductMasterItem>>(`${endpoints.clientMasters.products}${buildQuery(params)}`),
+    },
+    storeRoutes: {
+      list: (params: { tenantId?: number; clientId?: number; baljugoCode?: string; customerCode?: string; brandName?: string; storeName?: string; area?: string; deliveryRound?: string; activeYn?: boolean; page?: number; size?: number }) =>
+        apiData<PageResponse<ClientPublicStoreRouteMasterItem>>(`${endpoints.clientMasters.storeRoutes}${buildQuery(params)}`),
+    },
   },
 };
