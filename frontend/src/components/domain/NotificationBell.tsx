@@ -1,5 +1,6 @@
 import { Bell, Check, ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { OmsApiError } from '../../api/client';
 import { omsApi } from '../../api/oms';
@@ -301,10 +302,18 @@ function NotificationToastViewport({
     return null;
   }
 
-  return (
-    <div aria-live="polite" className="fixed bottom-4 right-4 z-[60] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2 sm:bottom-5 sm:right-5">
+  return createPortal(
+    <div
+      aria-live="polite"
+      className="pointer-events-none fixed z-[100] flex w-[calc(100vw-2rem)] max-w-sm flex-col-reverse items-end gap-2"
+      style={{ bottom: 24, left: 'auto', right: 24, top: 'auto' }}
+    >
       {items.map((item) => (
-        <div className={`rounded-md border border-l-4 bg-white shadow-lg ${toastToneClass(item.severity)}`} key={item.id} role="status">
+        <div
+          className={`pointer-events-auto w-full rounded-md border border-l-4 bg-white shadow-xl ring-1 ring-slate-900/5 ${toastToneClass(item.severity)}`}
+          key={item.id}
+          role="status"
+        >
           <div className="flex items-start gap-3 p-3">
             <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(item)} type="button">
               <div className="flex flex-wrap items-center gap-2">
@@ -325,7 +334,8 @@ function NotificationToastViewport({
           </div>
         </div>
       ))}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
