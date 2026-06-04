@@ -14,7 +14,7 @@ class ExternalApiLogService(
 	fun record(
 		request: HttpServletRequest,
 		tenantId: Long,
-		clientId: Long,
+		clientId: Long?,
 		apiKeyId: Long?,
 		responseStatus: Int,
 		startedNanos: Long,

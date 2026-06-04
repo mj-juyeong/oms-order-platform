@@ -1,437 +1,966 @@
-import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
-import { omsApi, type ApiKeyItem, type ClientSummary, type CreatedApiKey } from '../api/oms';
-import { canManageApiKeys, fakeCurrentUser } from '../app/auth';
-import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelection, useClientScope } from '../app/clientContext';
+import { useEffect, useMemo, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
+import { OmsApiError } from '../api/client';
+import { omsApi } from '../api/oms';
+import { canManageApiKeys, canRequestApiKeys, fakeCurrentUser } from '../app/auth';
 import { Badge, Button, Card, Input, Modal, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell } from '../components/domain';
+import type { PageResponse } from '../types/api';
+import type { ApiKeyItem, ApiKeyRequestItem, ApiKeyRequestStatus } from '../types/apiKey';
+import type { ClientSummary } from '../types/client';
 
-const DEFAULT_API_KEY_VALID_DAYS = 90;
+type ApiKeyTab = 'requests' | 'keys';
+type RequestStatusFilter = 'ALL' | ApiKeyRequestStatus;
+type KeyStatusFilter = 'ALL' | 'ACTIVE' | 'REVOKED' | 'EXPIRED';
 
-type ApiKeyScope = 'WOS_SCAN_READ' | 'PL_READ';
+type RequestFormState = {
+  name: string;
+  purpose: string;
+  systemName: string;
+  contactName: string;
+  contactEmail: string;
+  contactPhone: string;
+  requestedExpiresAt: string;
+  allowedScope: string[];
+};
 
-const scopeOptions: Array<{ label: string; scope: ApiKeyScope; description: string }> = [
-  { label: 'WOS Scan 조회', scope: 'WOS_SCAN_READ', description: '스캔 데이터를 외부 API로 조회합니다.' },
-  { label: 'PL Picking List 조회', scope: 'PL_READ', description: '피킹 리스트 데이터를 외부 API로 조회합니다.' },
+type DirectIssueFormState = {
+  name: string;
+  expiresAt: string;
+  allowedScope: string[];
+};
+
+type RevealedKeyState = {
+  apiKey: string;
+  description: string;
+  title: string;
+};
+
+const pageSize = 20;
+const requestStatusOptions: Array<{ label: string; value: RequestStatusFilter }> = [
+  { label: '전체', value: 'ALL' },
+  { label: '요청 대기', value: 'REQUESTED' },
+  { label: '발급 완료', value: 'ISSUED' },
+  { label: '반려', value: 'REJECTED' },
+  { label: '취소', value: 'CANCELED' },
+];
+const keyStatusOptions: Array<{ label: string; value: KeyStatusFilter }> = [
+  { label: '전체', value: 'ALL' },
+  { label: '활성', value: 'ACTIVE' },
+  { label: '폐기', value: 'REVOKED' },
+  { label: '만료', value: 'EXPIRED' },
+];
+const clientFilterBase = [{ label: '전체', value: 'ALL' }];
+const scopeOptions = [
+  { label: 'WOS Scan 조회', value: 'WOS_SCAN_READ' },
+  { label: 'PL Picking List 조회', value: 'PL_READ' },
 ];
 
 export function ApiKeysPage() {
-  const { clientId, selection } = useClientScope();
-  const [clients, setClients] = useState<ClientSummary[]>([]);
-  const [activeOnly, setActiveOnly] = useState(true);
-  const [apiKeys, setApiKeys] = useState<ApiKeyItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [createModalOpen, setCreateModalOpen] = useState(false);
-  const [refreshToken, setRefreshToken] = useState(0);
   const tenantId = fakeCurrentUser.tenantId ?? null;
-  const selectedClientId = clientId ?? fakeCurrentUser.clientId ?? null;
-  const selectedClient = clients.find((client) => client.id === selectedClientId);
-  const canCreateApiKey = canManageApiKeys() && fakeCurrentUser.userScopeType === 'TENANT' && tenantId !== null && selectedClientId !== null;
+  const userId = fakeCurrentUser.id ?? null;
+  const canManage = canManageApiKeys(fakeCurrentUser);
+  const canRequest = canRequestApiKeys(fakeCurrentUser);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const initialTab = searchParams.get('tab') === 'keys' && canManage ? 'keys' : 'requests';
+
+  const [tab, setTab] = useState<ApiKeyTab>(initialTab);
+  const [clients, setClients] = useState<ClientSummary[]>([]);
+  const [clientFilter, setClientFilter] = useState('ALL');
+  const [requestStatus, setRequestStatus] = useState<RequestStatusFilter>('REQUESTED');
+  const [keyStatus, setKeyStatus] = useState<KeyStatusFilter>('ACTIVE');
+  const [requestPage, setRequestPage] = useState(1);
+  const [keyPage, setKeyPage] = useState(1);
+  const [requestResponse, setRequestResponse] = useState<PageResponse<ApiKeyRequestItem> | null>(null);
+  const [keyResponse, setKeyResponse] = useState<PageResponse<ApiKeyItem> | null>(null);
+  const [loadingRequests, setLoadingRequests] = useState(false);
+  const [loadingKeys, setLoadingKeys] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [reloadSeq, setReloadSeq] = useState(0);
+  const [requestModalOpen, setRequestModalOpen] = useState(false);
+  const [issueModalOpen, setIssueModalOpen] = useState(false);
+  const [rejectTarget, setRejectTarget] = useState<ApiKeyRequestItem | null>(null);
+  const [revealTarget, setRevealTarget] = useState<ApiKeyRequestItem | null>(null);
+  const [rejectComment, setRejectComment] = useState('');
+  const [revokeTarget, setRevokeTarget] = useState<ApiKeyItem | null>(null);
+  const [revokeReason, setRevokeReason] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [requestForm, setRequestForm] = useState<RequestFormState>(defaultRequestForm());
+  const [issueForm, setIssueForm] = useState<DirectIssueFormState>(defaultIssueForm());
+  const [revealedKey, setRevealedKey] = useState<RevealedKeyState | null>(null);
+  const [copiedKey, setCopiedKey] = useState(false);
 
   useEffect(() => {
-    let ignore = false;
-
-    if (!tenantId) {
-      setClients([]);
+    if (tab === 'keys' && !canManage) {
+      setTab('requests');
+      setSearchParams({ tab: 'requests' }, { replace: true });
       return;
     }
+    setSearchParams({ tab }, { replace: true });
+  }, [canManage, setSearchParams, tab]);
 
-    omsApi.clients.list({ tenantId })
+  useEffect(() => {
+    if (!tenantId) {
+      return;
+    }
+    let ignore = false;
+
+    omsApi.clients
+      .list({ tenantId })
       .then((items) => {
-        if (ignore) return;
-        setClients(items);
-        if (selection.mode === 'client' && !items.some((client) => client.id === selection.clientId)) {
-          saveClientContextSelection({ mode: 'all' });
+        if (!ignore) {
+          setClients(items);
         }
       })
-      .catch(() => {
-        if (!ignore) setClients([]);
+      .catch((error) => {
+        if (!ignore) {
+          setErrorMessage(formatApiError(error));
+        }
       });
 
     return () => {
       ignore = true;
     };
-  }, [selection, tenantId]);
+  }, [tenantId]);
 
+  useEffect(() => {
+    if (!tenantId || !canRequest) {
+      setRequestResponse(null);
+      return;
+    }
+    let ignore = false;
+
+    async function loadRequests() {
+      setLoadingRequests(true);
+      try {
+        const result = await omsApi.apiKeys.requests.list({
+          tenantId: tenantId ?? undefined,
+          clientId: clientFilter === 'ALL' ? undefined : Number(clientFilter),
+          status: requestStatus === 'ALL' ? undefined : requestStatus,
+          page: requestPage - 1,
+          size: pageSize,
+        });
+        if (!ignore) {
+          setRequestResponse(result);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setErrorMessage(formatApiError(error));
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingRequests(false);
+        }
+      }
+    }
+
+    loadRequests();
+    return () => {
+      ignore = true;
+    };
+  }, [canRequest, clientFilter, reloadSeq, requestPage, requestStatus, tenantId]);
+
+  useEffect(() => {
+    if (!tenantId || !canManage) {
+      setKeyResponse(null);
+      return;
+    }
+    let ignore = false;
+
+    async function loadKeys() {
+      setLoadingKeys(true);
+      try {
+        const result = await omsApi.apiKeys.list({
+          tenantId: tenantId as number,
+          clientId: clientFilter === 'ALL' ? undefined : Number(clientFilter),
+          status: keyStatus === 'ALL' ? undefined : keyStatus,
+          page: keyPage - 1,
+          size: pageSize,
+        });
+        if (!ignore) {
+          setKeyResponse(result);
+        }
+      } catch (error) {
+        if (!ignore) {
+          setErrorMessage(formatApiError(error));
+        }
+      } finally {
+        if (!ignore) {
+          setLoadingKeys(false);
+        }
+      }
+    }
+
+    loadKeys();
+    return () => {
+      ignore = true;
+    };
+  }, [canManage, clientFilter, keyPage, keyStatus, reloadSeq, tenantId]);
+
+  const requests = requestResponse?.items ?? [];
+  const keys = keyResponse?.items ?? [];
   const clientOptions = useMemo(
-    () => [
-      { label: '전체 고객사 Key', value: 'all' },
-      ...clients.map((client) => ({ label: client.name, value: String(client.id) })),
-    ],
+    () => clientFilterBase.concat(clients.map((client) => ({ label: `${client.name} (${client.code})`, value: String(client.id) }))),
     [clients],
   );
 
-  useEffect(() => {
-    let ignore = false;
-    setLoading(true);
-
-    if (!tenantId) {
-      setApiKeys([]);
-      setLoading(false);
-      return;
-    }
-
-    omsApi.apiKeys.list({
-      tenantId,
-      clientId: selectedClientId ?? undefined,
-      status: activeOnly ? 'ACTIVE' : undefined,
-      page: 0,
-      size: 50,
-    })
-      .then((response) => {
-        if (ignore) {
-          return;
-        }
-        setApiKeys(response.items);
-        setLoadError(null);
-      })
-      .catch((error: unknown) => {
-        if (ignore) {
-          return;
-        }
-        setApiKeys([]);
-        setLoadError(error instanceof Error ? error.message : 'API Key 목록을 불러오지 못했습니다.');
-      })
-      .finally(() => {
-        if (!ignore) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      ignore = true;
-    };
-  }, [activeOnly, refreshToken, selectedClientId, tenantId]);
-
-  const filteredKeys = useMemo(() => {
-    if (!activeOnly) {
-      return apiKeys;
-    }
-
-    return apiKeys.filter((apiKey) => apiKey.status === 'ACTIVE');
-  }, [activeOnly, apiKeys]);
-
-  const activeCount = filteredKeys.filter((apiKey) => apiKey.status === 'ACTIVE').length;
-  const wosScopeCount = filteredKeys.filter((apiKey) => apiKey.allowedScope.includes('WOS_SCAN_READ')).length;
-  const plScopeCount = filteredKeys.filter((apiKey) => apiKey.allowedScope.includes('PL_READ')).length;
-
-  return (
-    <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-        <Metric label="활성 Key" value={activeCount} description="외부 API 호출 가능 상태" tone="green" />
-        <Metric label="WOS 권한" value={wosScopeCount} description="WOS_SCAN_READ scope 보유" tone="teal" />
-        <Metric label="PL 권한" value={plScopeCount} description="PL_READ scope 보유" tone="blue" />
-      </div>
-
-      <Card className="px-4 py-4">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="text-sm font-semibold text-slate-900">API Key 조회</p>
-              {loadError ? <Badge tone="red">조회 실패</Badge> : <Badge tone="green">API 연결</Badge>}
-            </div>
-            <p className="mt-1 hidden text-xs text-slate-500 sm:block">외부 시스템이 X-Api-Key 헤더로 사용하는 Key의 상태와 권한을 관리합니다.</p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="shrink-0 text-xs font-semibold text-slate-600">고객사</span>
-              <Select
-                aria-label="api-key-client"
-                className="w-48 sm:w-56"
-                onChange={(event) => saveClientContextSelection(clientSelectionFromValue(event.target.value, clients))}
-                options={clientOptions}
-                value={clientSelectionValue(selection)}
-              />
-            </div>
-            <button
-              aria-pressed={activeOnly}
-              className={`inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-semibold transition ${
-                activeOnly
-                  ? 'border-teal-700 bg-teal-700 text-white hover:bg-teal-800'
-                  : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50'
-              }`}
-              onClick={() => setActiveOnly((current) => !current)}
-              type="button"
-            >
-              활성 Key만 보기
-            </button>
-            {canCreateApiKey ? (
-              <Button onClick={() => setCreateModalOpen(true)} size="md" variant="primary">신규 발급</Button>
-            ) : null}
-          </div>
-        </div>
-        {canManageApiKeys() && !canCreateApiKey ? (
-          <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-800">
-            API Key는 고객사 단위로 발급합니다. 위 고객사 선택에서 특정 고객사를 선택한 뒤 발급할 수 있습니다.
-          </p>
-        ) : null}
-        {selectedClient ? (
-          <p className="mt-3 rounded-md border border-teal-200 bg-teal-50 px-3 py-2 text-xs leading-5 text-teal-800">
-            현재 선택한 고객사 <strong>{selectedClient.name}</strong> 기준으로 Key를 조회하고 신규 Key를 발급합니다.
-          </p>
-        ) : null}
-        {loadError ? (
-          <p className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs leading-5 text-red-700">
-            API Key 목록을 불러오지 못했습니다. {loadError}
-          </p>
-        ) : null}
-      </Card>
-
-      <Card className="overflow-hidden">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-base font-bold text-slate-950">API Key 목록</p>
-            <Badge tone="blue">원문 Key 재조회 불가</Badge>
-          </div>
-          <p className="mt-1 hidden text-sm text-slate-500 sm:block">
-            발급된 Key 값은 생성 직후 1회만 전달하고, 이후 화면에서는 이름, 상태, 권한, 만료와 사용 이력만 확인합니다.
-          </p>
-        </div>
-        <DataTable
-          columns={createColumns()}
-          data={filteredKeys}
-          emptyDescription={loadError ? '백엔드 API 응답을 확인한 뒤 다시 조회해 주세요.' : '상태 조건을 변경하거나 API Key 발급 여부를 확인해 주세요.'}
-          emptyTitle={loadError ? 'API Key 목록을 불러오지 못했습니다.' : '표시할 API Key가 없습니다.'}
-          getRowKey={(item) => String(item.id)}
-          renderMobileCard={renderApiKeyMobileCard}
-        />
-        <div className="px-5 py-4">
-          <p className="mb-3 hidden text-xs text-slate-500 sm:block">{loading ? 'API Key 목록을 갱신하는 중입니다.' : '외부 API 호출자는 발급받은 Key를 X-Api-Key 헤더에 넣어 호출합니다.'}</p>
-          <Pagination page={1} total={filteredKeys.length} totalPages={Math.max(1, Math.ceil(filteredKeys.length / 20))} />
-        </div>
-      </Card>
-
-      {canCreateApiKey && tenantId !== null && selectedClientId !== null ? (
-        <CreateApiKeyModal
-          clientId={selectedClientId}
-          onClose={() => setCreateModalOpen(false)}
-          onCreated={() => setRefreshToken((current) => current + 1)}
-          open={createModalOpen}
-          tenantId={tenantId}
-        />
-      ) : null}
-    </div>
+  const requestSummary = useMemo(
+    () => ({
+      requested: requests.filter((item) => item.status === 'REQUESTED').length,
+      issued: requests.filter((item) => item.status === 'ISSUED').length,
+      rejected: requests.filter((item) => item.status === 'REJECTED').length,
+      canceled: requests.filter((item) => item.status === 'CANCELED').length,
+    }),
+    [requests],
   );
-}
 
-function CreateApiKeyModal({
-  clientId,
-  onClose,
-  onCreated,
-  open,
-  tenantId,
-}: {
-  clientId: number;
-  onClose: () => void;
-  onCreated: () => void;
-  open: boolean;
-  tenantId: number;
-}) {
-  const defaultExpiresDate = useMemo(() => addDaysString(DEFAULT_API_KEY_VALID_DAYS), []);
-  const [name, setName] = useState('');
-  const [selectedScopes, setSelectedScopes] = useState<ApiKeyScope[]>([]);
-  const expiresDate = defaultExpiresDate;
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [createdKey, setCreatedKey] = useState<CreatedApiKey | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [notifiedCreated, setNotifiedCreated] = useState(false);
+  const keySummary = useMemo(
+    () => ({
+      active: keys.filter((item) => item.status === 'ACTIVE').length,
+      revoked: keys.filter((item) => item.status === 'REVOKED').length,
+      expired: keys.filter((item) => item.status === 'EXPIRED').length,
+    }),
+    [keys],
+  );
 
-  function resetAndClose() {
-    if (createdKey && !notifiedCreated) {
-      onCreated();
-    }
-    setName('');
-    setSelectedScopes([]);
-    setSubmitting(false);
-    setFormError(null);
-    setCreatedKey(null);
-    setCopied(false);
-    setNotifiedCreated(false);
-    onClose();
-  }
+  const requestColumns: DataTableColumn<ApiKeyRequestItem>[] = [
+    {
+      key: 'requestedAt',
+      header: '요청일시',
+      width: '150px',
+      cell: (item) => <span className="text-sm text-slate-700">{formatDateTime(item.requestedAt)}</span>,
+    },
+    {
+      key: 'name',
+      header: '키 이름',
+      width: '190px',
+      cell: (item) => <div className="truncate font-semibold text-slate-950">{item.name}</div>,
+    },
+    {
+      key: 'scope',
+      header: '발급 범위',
+      width: '140px',
+      cell: (item) => <ScopeBadge item={item} />,
+    },
+    {
+      key: 'systemName',
+      header: '사용 시스템',
+      width: '180px',
+      cell: (item) => <div className="truncate text-sm text-slate-700">{item.systemName}</div>,
+    },
+    {
+      key: 'allowedScope',
+      header: '권한',
+      width: '190px',
+      cell: (item) => <ScopeList scopes={item.allowedScope} />,
+    },
+    {
+      key: 'status',
+      header: '상태',
+      width: '110px',
+      cell: (item) => <Badge tone={requestStatusTone(item.status)}>{requestStatusLabel(item.status)}</Badge>,
+    },
+    {
+      key: 'reviewComment',
+      header: '비고',
+      width: '220px',
+      cell: (item) => <div className="truncate text-sm text-slate-600">{item.reviewComment ?? item.purpose}</div>,
+    },
+    {
+      key: 'actions',
+      header: '처리',
+      sticky: 'right',
+      width: '250px',
+      cell: (item) => (
+        <div className="flex flex-wrap justify-end gap-2">
+          {canManage && item.status === 'REQUESTED' ? (
+            <>
+              <Button onClick={() => handleApprove(item)} size="sm" variant="primary">
+                승인
+              </Button>
+              <Button
+                onClick={() => {
+                  setRejectTarget(item);
+                  setRejectComment('');
+                }}
+                size="sm"
+                variant="danger"
+              >
+                반려
+              </Button>
+            </>
+          ) : null}
+          {canOpenReveal(item, userId) ? (
+            <Button onClick={() => setRevealTarget(item)} size="sm" variant="secondary">
+              Key 보기
+            </Button>
+          ) : null}
+          {item.status === 'REQUESTED' && canCancel(item) ? (
+            <Button onClick={() => handleCancel(item)} size="sm" variant="secondary">
+              요청 취소
+            </Button>
+          ) : null}
+          {item.status === 'ISSUED' && !item.keyRevealAvailable && hasRevealCompleted(item) && canReveal(item, userId) ? (
+            <span className="inline-flex items-center text-xs font-semibold text-slate-400">열람 완료</span>
+          ) : null}
+        </div>
+      ),
+    },
+  ];
 
-  function applyPreset(scopes: ApiKeyScope[], defaultName: string) {
-    setSelectedScopes(scopes);
-    setName((current) => current || defaultName);
-  }
+  const keyColumns: DataTableColumn<ApiKeyItem>[] = [
+    {
+      key: 'name',
+      header: '키 이름',
+      width: '200px',
+      cell: (item) => <div className="truncate font-semibold text-slate-950">{item.name}</div>,
+    },
+    {
+      key: 'scope',
+      header: '발급 범위',
+      width: '150px',
+      cell: (item) => <ScopeBadge item={item} />,
+    },
+    {
+      key: 'allowedScope',
+      header: '권한',
+      width: '220px',
+      cell: (item) => <ScopeList scopes={item.allowedScope} />,
+    },
+    {
+      key: 'status',
+      header: '상태',
+      width: '110px',
+      cell: (item) => <Badge tone={keyStatusTone(item.status)}>{keyStatusLabel(item.status)}</Badge>,
+    },
+    {
+      key: 'expiresAt',
+      header: '만료일시',
+      width: '150px',
+      cell: (item) => <span className="text-sm text-slate-700">{formatDateTime(item.expiresAt)}</span>,
+    },
+    {
+      key: 'lastUsedAt',
+      header: '마지막 호출',
+      width: '150px',
+      cell: (item) => <span className="text-sm text-slate-700">{formatDateTime(item.lastUsedAt)}</span>,
+    },
+    {
+      key: 'actions',
+      header: '처리',
+      sticky: 'right',
+      width: '160px',
+      cell: (item) => (
+        <div className="flex justify-end">
+          {item.status === 'ACTIVE' ? (
+            <Button
+              onClick={() => {
+                setRevokeTarget(item);
+                setRevokeReason('');
+              }}
+              size="sm"
+              variant="danger"
+            >
+              폐기
+            </Button>
+          ) : (
+            <span className="text-xs text-slate-400">처리 완료</span>
+          )}
+        </div>
+      ),
+    },
+  ];
 
-  function toggleScope(scope: ApiKeyScope) {
-    setSelectedScopes((current) =>
-      current.includes(scope) ? current.filter((item) => item !== scope) : [...current, scope],
+  if (!tenantId) {
+    return (
+      <Card className="border-red-200 bg-red-50 px-5 py-4">
+        <p className="text-sm font-semibold text-red-700">물류사 계정 정보가 없어 API Key 화면을 열 수 없습니다.</p>
+      </Card>
     );
   }
 
-  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  return (
+    <div className="space-y-5">
+      <Card className="p-5">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge tone="teal">외부 연동</Badge>
+              <Badge tone="neutral">tenant-wide API Key</Badge>
+            </div>
+            <div>
+              <h2 className="text-2xl font-bold text-slate-950">API Key 요청/관리</h2>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                물류사 운영자는 tenant-wide API Key 발급을 요청하고, 물류사 관리자는 요청 승인과 Key 발급, 폐기를 관리합니다.
+              </p>
+            </div>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {canRequest ? (
+              <Button onClick={() => setRequestModalOpen(true)} variant="primary">
+                API Key 요청
+              </Button>
+            ) : null}
+            {canManage ? (
+              <Button onClick={() => setIssueModalOpen(true)} variant="secondary">
+                즉시 발급
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      </Card>
 
-    const trimmedName = name.trim();
-    if (!trimmedName) {
-      setFormError('Key 이름을 입력해 주세요.');
+      {tab === 'requests' ? (
+        <div className="grid gap-3 md:grid-cols-4">
+          <SummaryCard label="요청 대기" tone="amber" value={requestSummary.requested} />
+          <SummaryCard label="발급 완료" tone="teal" value={requestSummary.issued} />
+          <SummaryCard label="반려" tone="red" value={requestSummary.rejected} />
+          <SummaryCard label="취소" tone="neutral" value={requestSummary.canceled} />
+        </div>
+      ) : (
+        <div className="grid gap-3 md:grid-cols-3">
+          <SummaryCard label="활성 Key" tone="teal" value={keySummary.active} />
+          <SummaryCard label="폐기" tone="red" value={keySummary.revoked} />
+          <SummaryCard label="만료" tone="amber" value={keySummary.expired} />
+        </div>
+      )}
+
+      <Card className="p-1">
+        <div className="flex gap-1">
+          <TabButton active={tab === 'requests'} label="신청 관리" onClick={() => setTab('requests')} />
+          {canManage ? <TabButton active={tab === 'keys'} label="API Key 관리" onClick={() => setTab('keys')} /> : null}
+        </div>
+      </Card>
+
+      <Card className="p-4 sm:p-5">
+        <div className={`grid gap-3 ${tab === 'requests' ? 'lg:grid-cols-[180px_180px_auto]' : 'lg:grid-cols-[180px_180px_auto]'}`}>
+          <Select
+            label="고객사"
+            onChange={(event) => {
+              setClientFilter(event.target.value);
+              setRequestPage(1);
+              setKeyPage(1);
+            }}
+            options={clientOptions}
+            value={clientFilter}
+          />
+          {tab === 'requests' ? (
+            <Select
+              label="요청 상태"
+              onChange={(event) => {
+                setRequestStatus(event.target.value as RequestStatusFilter);
+                setRequestPage(1);
+              }}
+              options={requestStatusOptions}
+              value={requestStatus}
+            />
+          ) : (
+            <Select
+              label="Key 상태"
+              onChange={(event) => {
+                setKeyStatus(event.target.value as KeyStatusFilter);
+                setKeyPage(1);
+              }}
+              options={keyStatusOptions}
+              value={keyStatus}
+            />
+          )}
+          <div className="flex items-end">
+            <Button onClick={() => setReloadSeq((current) => current + 1)} variant="secondary">
+              새로고침
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {errorMessage ? (
+        <Card className="border-red-200 bg-red-50 px-5 py-4">
+          <p className="text-sm font-semibold text-red-700">{errorMessage}</p>
+        </Card>
+      ) : null}
+
+      {tab === 'requests' ? (
+        <>
+          <Card className="p-0">
+            {loadingRequests ? (
+              <div className="px-5 py-12 text-center text-sm text-slate-500">API Key 요청 목록을 불러오는 중입니다.</div>
+            ) : (
+              <DataTable
+                columns={requestColumns}
+                data={requests}
+                emptyDescription="운영자가 등록한 API Key 요청이 아직 없습니다."
+                emptyTitle="표시할 요청이 없습니다."
+                getRowKey={(item) => String(item.id)}
+                renderMobileCard={(item) => (
+                  <RequestMobileCard
+                    canManage={canManage}
+                    item={item}
+                    onApprove={handleApprove}
+                    onCancel={handleCancel}
+                    onReject={setRejectTarget}
+                    onReveal={setRevealTarget}
+                    userId={userId}
+                  />
+                )}
+              />
+            )}
+          </Card>
+          <Pagination
+            onPageChange={setRequestPage}
+            page={requestPage}
+            total={requestResponse?.totalElements ?? 0}
+            totalPages={Math.max(1, requestResponse?.totalPages ?? 1)}
+          />
+        </>
+      ) : (
+        <>
+          <Card className="p-0">
+            {loadingKeys ? (
+              <div className="px-5 py-12 text-center text-sm text-slate-500">API Key 목록을 불러오는 중입니다.</div>
+            ) : (
+              <DataTable
+                columns={keyColumns}
+                data={keys}
+                emptyDescription="발급된 tenant-wide API Key가 없습니다."
+                emptyTitle="표시할 API Key가 없습니다."
+                getRowKey={(item) => String(item.id)}
+                renderMobileCard={(item) => <KeyMobileCard item={item} onRevoke={setRevokeTarget} />}
+              />
+            )}
+          </Card>
+          <Pagination
+            onPageChange={setKeyPage}
+            page={keyPage}
+            total={keyResponse?.totalElements ?? 0}
+            totalPages={Math.max(1, keyResponse?.totalPages ?? 1)}
+          />
+        </>
+      )}
+
+      <Modal onClose={() => !submitting && setRequestModalOpen(false)} open={requestModalOpen} title="tenant-wide API Key 요청">
+        <div className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              label="키 이름"
+              onChange={(event) => updateRequestForm('name', event.target.value)}
+              placeholder="예: WMS 운영 연동 Key"
+              value={requestForm.name}
+            />
+            <Input
+              label="사용 시스템"
+              onChange={(event) => updateRequestForm('systemName', event.target.value)}
+              placeholder="예: MJ WMS"
+              value={requestForm.systemName}
+            />
+            <Input
+              label="담당자명"
+              onChange={(event) => updateRequestForm('contactName', event.target.value)}
+              value={requestForm.contactName}
+            />
+            <Input
+              label="담당자 이메일"
+              onChange={(event) => updateRequestForm('contactEmail', event.target.value)}
+              type="email"
+              value={requestForm.contactEmail}
+            />
+            <Input
+              label="담당자 연락처"
+              onChange={(event) => updateRequestForm('contactPhone', event.target.value)}
+              value={requestForm.contactPhone}
+            />
+            <Input
+              label="희망 만료일시"
+              onChange={(event) => updateRequestForm('requestedExpiresAt', event.target.value)}
+              type="datetime-local"
+              value={requestForm.requestedExpiresAt}
+            />
+          </div>
+          <TextAreaField
+            label="사용 목적"
+            onChange={(value) => updateRequestForm('purpose', value)}
+            placeholder="연동 목적, 사용 예정 업무, 운영 범위를 입력해 주세요."
+            value={requestForm.purpose}
+          />
+          <ScopeCheckboxGroup selected={requestForm.allowedScope} onChange={(next) => updateRequestForm('allowedScope', next)} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setRequestModalOpen(false)} variant="secondary">
+              닫기
+            </Button>
+            <Button disabled={submitting} onClick={submitRequest} variant="primary">
+              요청 등록
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal onClose={() => !submitting && setIssueModalOpen(false)} open={issueModalOpen} title="tenant-wide API Key 즉시 발급">
+        <div className="space-y-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            즉시 발급은 관리자만 사용할 수 있습니다. 발급된 Key 원문은 완료 후 한 번만 표시됩니다.
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <Input
+              label="키 이름"
+              onChange={(event) => updateIssueForm('name', event.target.value)}
+              placeholder="예: WMS 운영 기본 Key"
+              value={issueForm.name}
+            />
+            <Input
+              label="만료일시"
+              onChange={(event) => updateIssueForm('expiresAt', event.target.value)}
+              type="datetime-local"
+              value={issueForm.expiresAt}
+            />
+          </div>
+          <ScopeCheckboxGroup selected={issueForm.allowedScope} onChange={(next) => updateIssueForm('allowedScope', next)} />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setIssueModalOpen(false)} variant="secondary">
+              닫기
+            </Button>
+            <Button disabled={submitting} onClick={submitDirectIssue} variant="primary">
+              발급
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        onClose={() => !submitting && setRejectTarget(null)}
+        open={Boolean(rejectTarget)}
+        title="API Key 요청 반려"
+      >
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">반려 사유를 남기면 요청자가 확인할 수 있습니다.</p>
+          <TextAreaField
+            label="반려 사유"
+            onChange={setRejectComment}
+            placeholder="예: 운영 목적과 사용 권한 범위를 보완해 주세요."
+            value={rejectComment}
+          />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setRejectTarget(null)} variant="secondary">
+              닫기
+            </Button>
+            <Button disabled={submitting} onClick={submitReject} variant="danger">
+              반려 처리
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        onClose={() => !submitting && setRevealTarget(null)}
+        open={Boolean(revealTarget)}
+        title="승인된 API Key 보기"
+      >
+        <div className="space-y-4">
+          <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm leading-6 text-amber-900">
+            이 API Key 원문은 확인을 누른 뒤 1회만 볼 수 있습니다. 닫은 후에는 다시 조회할 수 없습니다.
+          </div>
+          <p className="text-sm text-slate-600">지금 승인된 API Key 원문을 확인하시겠습니까?</p>
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setRevealTarget(null)} variant="secondary">
+              취소
+            </Button>
+            <Button disabled={submitting} onClick={submitRevealIssuedKey} variant="primary">
+              확인
+            </Button>
+          </div>
+        </div>
+      </Modal>
+
+      <Modal
+        onClose={() => {
+          setRevealedKey(null);
+          setCopiedKey(false);
+        }}
+        open={Boolean(revealedKey)}
+        title={revealedKey?.title ?? 'API Key 원문'}
+      >
+        {revealedKey ? (
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 rounded-md border border-teal-200 bg-teal-50 px-4 py-3">
+              <p className="min-w-0 flex-1 break-all font-mono text-sm font-semibold text-slate-950">{revealedKey.apiKey}</p>
+              <Button
+                onClick={() => void copyRevealedKey()}
+                size="sm"
+                variant="secondary"
+              >
+                {copiedKey ? '복사됨' : '복사'}
+              </Button>
+            </div>
+            <p className="text-sm leading-6 text-slate-600">{revealedKey.description}</p>
+            <div className="flex justify-end">
+              <Button
+                onClick={() => {
+                  setRevealedKey(null);
+                  setCopiedKey(false);
+                }}
+                variant="primary"
+              >
+                확인 완료
+              </Button>
+            </div>
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal onClose={() => !submitting && setRevokeTarget(null)} open={Boolean(revokeTarget)} title="API Key 폐기">
+        <div className="space-y-4">
+          <p className="text-sm text-slate-600">폐기 후에는 해당 Key로 외부 API를 호출할 수 없습니다.</p>
+          <TextAreaField
+            label="폐기 사유"
+            onChange={setRevokeReason}
+            placeholder="예: 로테이션 발급 완료"
+            value={revokeReason}
+          />
+          <div className="flex justify-end gap-2">
+            <Button onClick={() => setRevokeTarget(null)} variant="secondary">
+              닫기
+            </Button>
+            <Button disabled={submitting} onClick={submitRevoke} variant="danger">
+              폐기
+            </Button>
+          </div>
+        </div>
+      </Modal>
+    </div>
+  );
+
+  function updateRequestForm<K extends keyof RequestFormState>(key: K, value: RequestFormState[K]) {
+    setRequestForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateIssueForm<K extends keyof DirectIssueFormState>(key: K, value: DirectIssueFormState[K]) {
+    setIssueForm((current) => ({ ...current, [key]: value }));
+  }
+
+  async function submitRequest() {
+    if (!tenantId || submitting) {
       return;
     }
-
-    if (selectedScopes.length === 0) {
-      setFormError('권한을 하나 이상 선택해 주세요.');
+    if (!requestForm.name.trim() || !requestForm.purpose.trim() || !requestForm.systemName.trim()) {
+      setErrorMessage('키 이름, 사용 목적, 사용 시스템은 필수입니다.');
+      return;
+    }
+    if (requestForm.allowedScope.length === 0) {
+      setErrorMessage('최소 1개 API 권한을 선택해 주세요.');
       return;
     }
 
     setSubmitting(true);
-    setFormError(null);
-
+    setErrorMessage(null);
     try {
-      const response = await omsApi.apiKeys.create({
+      await omsApi.apiKeys.requests.create({
         tenantId,
-        clientId,
-        name: trimmedName,
-        allowedScope: selectedScopes,
-        expiresAt: `${expiresDate}T23:59:59`,
+        scopeType: 'TENANT',
+        name: requestForm.name.trim(),
+        purpose: requestForm.purpose.trim(),
+        systemName: requestForm.systemName.trim(),
+        contactName: blankToUndefined(requestForm.contactName),
+        contactEmail: blankToUndefined(requestForm.contactEmail),
+        contactPhone: blankToUndefined(requestForm.contactPhone),
+        allowedScope: requestForm.allowedScope,
+        requestedExpiresAt: blankToUndefined(requestForm.requestedExpiresAt),
       });
-      setCreatedKey(response);
-      setCopied(false);
-      setNotifiedCreated(true);
-      onCreated();
+      setRequestModalOpen(false);
+      setRequestForm(defaultRequestForm());
+      setRequestPage(1);
+      setReloadSeq((current) => current + 1);
     } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'API Key 발급에 실패했습니다.');
+      setErrorMessage(formatApiError(error));
     } finally {
       setSubmitting(false);
     }
   }
 
-  async function copyCreatedKey() {
-    if (!createdKey) {
+  async function submitDirectIssue() {
+    if (!tenantId || submitting) {
+      return;
+    }
+    if (!issueForm.name.trim()) {
+      setErrorMessage('키 이름을 입력해 주세요.');
+      return;
+    }
+    if (issueForm.allowedScope.length === 0) {
+      setErrorMessage('최소 1개 API 권한을 선택해 주세요.');
       return;
     }
 
+    setSubmitting(true);
+    setErrorMessage(null);
     try {
-      await navigator.clipboard.writeText(createdKey.apiKey);
-      setCopied(true);
-    } catch {
-      setFormError('클립보드 복사에 실패했습니다. Key를 직접 선택해 복사해 주세요.');
+      const created = await omsApi.apiKeys.create({
+        tenantId,
+        clientId: null,
+        scopeType: 'TENANT',
+        name: issueForm.name.trim(),
+        allowedScope: issueForm.allowedScope,
+        expiresAt: blankToUndefined(issueForm.expiresAt) ?? null,
+      });
+      setCopiedKey(false);
+      setRevealedKey({
+        apiKey: created.apiKey,
+        title: '발급된 API Key 원문',
+        description: '보안 정책상 원문은 지금 1회만 확인할 수 있습니다.',
+      });
+      setIssueModalOpen(false);
+      setIssueForm(defaultIssueForm());
+      setTab('keys');
+      setKeyPage(1);
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
     }
   }
 
+  async function handleApprove(item: ApiKeyRequestItem) {
+    if (!tenantId || submitting) {
+      return;
+    }
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await omsApi.apiKeys.requests.approve(
+        item.id,
+        { tenantId, clientId: item.clientId ?? undefined },
+        { comment: 'tenant-wide API Key 요청을 승인했습니다.' },
+      );
+      setTab('requests');
+      setRequestStatus('ISSUED');
+      setRequestPage(1);
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitReject() {
+    if (!tenantId || !rejectTarget || submitting) {
+      return;
+    }
+    if (!rejectComment.trim()) {
+      setErrorMessage('반려 사유를 입력해 주세요.');
+      return;
+    }
+
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await omsApi.apiKeys.requests.reject(
+        rejectTarget.id,
+        { tenantId, clientId: rejectTarget.clientId ?? undefined },
+        { comment: rejectComment.trim() },
+      );
+      setRejectTarget(null);
+      setRejectComment('');
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitRevealIssuedKey() {
+    if (!tenantId || !revealTarget || submitting) {
+      return;
+    }
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      const result = await omsApi.apiKeys.requests.reveal(revealTarget.id, {
+        tenantId,
+        clientId: revealTarget.clientId ?? undefined,
+      });
+      setRevealTarget(null);
+      setCopiedKey(false);
+      setRevealedKey({
+        apiKey: result.apiKey,
+        title: '승인된 API Key 원문',
+        description: '이 원문은 방금 1회 열람 처리되어 다시 조회할 수 없습니다.',
+      });
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleCancel(item: ApiKeyRequestItem) {
+    if (!tenantId || submitting) {
+      return;
+    }
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await omsApi.apiKeys.requests.cancel(item.id, { tenantId, clientId: item.clientId ?? undefined });
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function submitRevoke() {
+    if (!revokeTarget || submitting) {
+      return;
+    }
+    setSubmitting(true);
+    setErrorMessage(null);
+    try {
+      await omsApi.apiKeys.revoke(revokeTarget.id, blankToUndefined(revokeReason));
+      setRevokeTarget(null);
+      setRevokeReason('');
+      setReloadSeq((current) => current + 1);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  function canCancel(item: ApiKeyRequestItem) {
+    return canManage || (userId !== null && item.requestedBy === userId);
+  }
+
+  async function copyRevealedKey() {
+    if (!revealedKey?.apiKey) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(revealedKey.apiKey);
+      setCopiedKey(true);
+      window.setTimeout(() => setCopiedKey(false), 1500);
+    } catch (error) {
+      setErrorMessage(formatApiError(error));
+    }
+  }
+}
+
+function SummaryCard({ label, tone, value }: { label: string; tone: 'neutral' | 'teal' | 'amber' | 'red'; value: number }) {
   return (
-    <Modal onClose={resetAndClose} open={open} title={createdKey ? 'API Key 발급 완료' : 'API Key 신규 발급'}>
-      {createdKey ? (
-        <div className="space-y-5">
-          <div className="rounded-lg border border-teal-200 bg-teal-50 p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge tone="green">발급 완료</Badge>
-              <CodeCell value={`KEY-${createdKey.id}`} />
-            </div>
-            <p className="mt-3 text-sm leading-6 text-teal-800">
-              API Key 원문은 지금 한 번만 확인할 수 있습니다. 외부 시스템 담당자에게 전달하기 전에 반드시 복사해 주세요.
-            </p>
-          </div>
-
-          <div>
-            <p className="mb-2 text-xs font-semibold text-slate-600">발급된 API Key</p>
-            <div className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 md:flex-row md:items-center">
-              <code className="min-w-0 flex-1 break-all rounded-md bg-white px-3 py-2 font-mono text-sm text-slate-950">
-                {createdKey.apiKey}
-              </code>
-              <Button onClick={copyCreatedKey} variant={copied ? 'primary' : 'secondary'}>
-                {copied ? '복사 완료' : '복사'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="grid gap-3 rounded-lg border border-slate-200 p-4 text-sm md:grid-cols-3">
-            <SummaryItem label="Key 이름" value={name} />
-            <SummaryItem label="권한" value={selectedScopes.join(', ')} />
-            <SummaryItem label="만료" value={`${expiresDate} 23:59:59`} />
-          </div>
-
-          {formError ? <ErrorMessage message={formError} /> : null}
-
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button onClick={resetAndClose} variant="primary">닫기</Button>
-          </div>
-        </div>
-      ) : (
-        <form className="space-y-5" onSubmit={handleSubmit}>
-          <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-            <p className="text-sm font-semibold text-slate-900">이 Key는 특정 배치에 묶이지 않습니다.</p>
-            <p className="mt-2 text-sm leading-6 text-slate-700">
-              발급된 Key는 선택한 권한 범위 안에서 확정 완료된 데이터를 조회합니다. 배치 선택은 외부 API 호출 시 batchId 또는 deliveryDate 파라미터로 정합니다.
-            </p>
-          </div>
-
-          <div className="grid gap-3 md:grid-cols-3">
-            <PresetButton
-              active={isSameScopeSet(selectedScopes, ['WOS_SCAN_READ'])}
-              label="WOS용"
-              onClick={() => applyPreset(['WOS_SCAN_READ'], 'WOS 운영 연동 Key')}
-            />
-            <PresetButton
-              active={isSameScopeSet(selectedScopes, ['PL_READ'])}
-              label="PL용"
-              onClick={() => applyPreset(['PL_READ'], 'PL 운영 연동 Key')}
-            />
-            <PresetButton
-              active={isSameScopeSet(selectedScopes, ['WOS_SCAN_READ', 'PL_READ'])}
-              label="WOS + PL용"
-              onClick={() => applyPreset(['WOS_SCAN_READ', 'PL_READ'], 'WOS/PL 운영 연동 Key')}
-            />
-          </div>
-
-          <div className="grid gap-4 md:grid-cols-2">
-            <Input label="Key 이름" onChange={(event) => setName(event.target.value)} placeholder="예: WOS 운영 연동 Key" value={name} />
-            <div>
-              <p className="mb-1 text-xs font-semibold text-slate-600">기본 만료일</p>
-              <div className="flex h-10 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-semibold text-slate-900">
-                {expiresDate}
-              </div>
-              <p className="mt-1 text-xs leading-5 text-slate-500">기본 유효기간은 {DEFAULT_API_KEY_VALID_DAYS}일입니다.</p>
-            </div>
-          </div>
-
-          <section className="rounded-lg border border-slate-200">
-            <div className="border-b border-slate-100 px-4 py-3">
-              <p className="font-semibold text-slate-950">권한 선택</p>
-              <p className="mt-1 text-xs text-slate-500">외부 시스템에 필요한 API 권한만 선택해 주세요.</p>
-            </div>
-            <div className="grid gap-0 divide-y divide-slate-100">
-              {scopeOptions.map((option) => (
-                <label className="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-slate-50" key={option.scope}>
-                  <input
-                    checked={selectedScopes.includes(option.scope)}
-                    className="mt-1 h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-600"
-                    onChange={() => toggleScope(option.scope)}
-                    type="checkbox"
-                  />
-                  <span className="min-w-0">
-                    <span className="block text-sm font-semibold text-slate-900">{option.label}</span>
-                    <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
-                    <span className="mt-2 inline-block"><CodeCell value={option.scope} /></span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          </section>
-
-          {formError ? <ErrorMessage message={formError} /> : null}
-
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button disabled={submitting} onClick={resetAndClose} variant="secondary">취소</Button>
-            <Button disabled={submitting} type="submit" variant="primary">{submitting ? '발급 중' : '발급'}</Button>
-          </div>
-        </form>
-      )}
-    </Modal>
+    <Card className="p-4">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-semibold text-slate-600">{label}</p>
+        <Badge tone={tone}>{label}</Badge>
+      </div>
+      <p className="mt-3 text-3xl font-bold text-slate-950">{value}</p>
+    </Card>
   );
 }
 
-function PresetButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
+function TabButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <button
-      aria-pressed={active}
-      className={`inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-semibold transition ${
-        active
-          ? 'border-teal-700 bg-teal-700 text-white shadow-sm ring-2 ring-teal-100 hover:bg-teal-800'
-          : 'border-slate-300 bg-white text-slate-800 hover:bg-slate-50'
+      className={`inline-flex h-10 items-center justify-center rounded-md px-4 text-sm font-semibold transition ${
+        active ? 'bg-teal-700 text-white' : 'text-slate-600 hover:bg-slate-100'
       }`}
       onClick={onClick}
       type="button"
@@ -441,136 +970,311 @@ function PresetButton({ active, label, onClick }: { active: boolean; label: stri
   );
 }
 
-function SummaryItem({ label, value }: { label: string; value: string }) {
+function ScopeCheckboxGroup({ onChange, selected }: { selected: string[]; onChange: (next: string[]) => void }) {
   return (
-    <div className="min-w-0">
-      <p className="text-xs font-semibold text-slate-500">{label}</p>
-      <p className="mt-1 break-words font-medium text-slate-900">{value || '-'}</p>
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-slate-600">API 권한</p>
+      <div className="grid gap-2 sm:grid-cols-2">
+        {scopeOptions.map((scope) => {
+          const checked = selected.includes(scope.value);
+          return (
+            <label className="flex items-start gap-3 rounded-md border border-slate-200 px-3 py-3 text-sm text-slate-700" key={scope.value}>
+              <input
+                checked={checked}
+                className="mt-0.5 h-4 w-4 rounded border-slate-300 text-teal-700 focus:ring-teal-100"
+                onChange={(event) =>
+                  onChange(
+                    event.target.checked ? [...selected, scope.value] : selected.filter((value) => value !== scope.value),
+                  )
+                }
+                type="checkbox"
+              />
+              <span>{scope.label}</span>
+            </label>
+          );
+        })}
+      </div>
     </div>
   );
 }
 
-function ErrorMessage({ message }: { message: string }) {
+function TextAreaField({
+  label,
+  onChange,
+  placeholder,
+  value,
+}: {
+  label: string;
+  onChange: (value: string) => void;
+  placeholder?: string;
+  value: string;
+}) {
   return (
-    <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm leading-6 text-red-700">
-      {message}
-    </p>
+    <label className="block min-w-0">
+      <span className="mb-1 block text-xs font-semibold text-slate-600">{label}</span>
+      <textarea
+        className="min-h-28 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-teal-600 focus:ring-2 focus:ring-teal-100"
+        onChange={(event) => onChange(event.target.value)}
+        placeholder={placeholder}
+        value={value}
+      />
+    </label>
   );
 }
 
-function addDaysString(days: number) {
-  const date = new Date();
-  date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
-}
-
-function isSameScopeSet(left: ApiKeyScope[], right: ApiKeyScope[]) {
-  return left.length === right.length && right.every((scope) => left.includes(scope));
-}
-
-function createColumns(): DataTableColumn<ApiKeyItem>[] {
-  return [
-    { key: 'name', header: 'Key 이름', width: '220px', cell: (item) => <KeyName item={item} /> },
-    { key: 'status', header: '상태', width: '100px', cell: (item) => <Badge tone={item.status === 'ACTIVE' ? 'green' : 'neutral'}>{statusLabel(item.status)}</Badge> },
-    { key: 'scope', header: '권한', width: '260px', cell: (item) => <ScopeList scopes={item.allowedScope} /> },
-    { key: 'client', header: '고객사', width: '140px', cell: (item) => clientDisplayName(item) },
-    { key: 'expiresAt', header: '만료', width: '160px', cell: (item) => formatDateTime(item.expiresAt) },
-    { key: 'lastUsedAt', header: '마지막 사용', width: '160px', cell: (item) => formatDateTime(item.lastUsedAt) },
-    { key: 'actions', header: '관리', align: 'center', width: '120px', cell: () => <Button size="sm" variant="secondary">상세</Button> },
-  ];
-}
-
-function KeyName({ item }: { item: ApiKeyItem }) {
+function RequestMobileCard({
+  canManage,
+  item,
+  onApprove,
+  onCancel,
+  onReject,
+  onReveal,
+  userId,
+}: {
+  canManage: boolean;
+  item: ApiKeyRequestItem;
+  onApprove: (item: ApiKeyRequestItem) => void;
+  onCancel: (item: ApiKeyRequestItem) => void;
+  onReject: (item: ApiKeyRequestItem) => void;
+  onReveal: (item: ApiKeyRequestItem) => void;
+  userId: number | null;
+}) {
+  const canCancel = canManage || (userId !== null && item.requestedBy === userId);
+  const revealAvailable = canOpenReveal(item, userId);
   return (
-    <div className="space-y-1">
-      <p className="font-semibold text-slate-900">{item.name}</p>
-      <CodeCell muted value={`KEY-${item.id}`} />
+    <div
+      className={`space-y-3 ${revealAvailable ? 'cursor-pointer' : ''}`}
+      onClick={revealAvailable ? () => onReveal(item) : undefined}
+      role={revealAvailable ? 'button' : undefined}
+      tabIndex={revealAvailable ? 0 : undefined}
+      onKeyDown={
+        revealAvailable
+          ? (event) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onReveal(item);
+              }
+            }
+          : undefined
+      }
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-semibold text-slate-950">{item.name}</p>
+          <p className="text-xs text-slate-500">{formatDateTime(item.requestedAt)}</p>
+        </div>
+        <Badge tone={requestStatusTone(item.status)}>{requestStatusLabel(item.status)}</Badge>
+      </div>
+      <div className="space-y-1 text-sm text-slate-600">
+        <p>범위: {scopeText(item.scopeType, item.clientName)}</p>
+        <p>시스템: {item.systemName}</p>
+        <p>권한: {scopeNames(item.allowedScope)}</p>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {canManage && item.status === 'REQUESTED' ? (
+          <>
+            <Button onClick={() => onApprove(item)} size="sm" variant="primary">
+              승인
+            </Button>
+            <Button onClick={() => onReject(item)} size="sm" variant="danger">
+              반려
+            </Button>
+          </>
+        ) : null}
+        {revealAvailable ? (
+          <Button
+            onClick={(event) => {
+              event.stopPropagation();
+              onReveal(item);
+            }}
+            size="sm"
+            variant="secondary"
+          >
+            Key 보기
+          </Button>
+        ) : null}
+        {item.status === 'REQUESTED' && canCancel ? (
+          <Button onClick={() => onCancel(item)} size="sm" variant="secondary">
+            요청 취소
+          </Button>
+        ) : null}
+        {item.status === 'ISSUED' && !item.keyRevealAvailable && hasRevealCompleted(item) && canReveal(item, userId) ? (
+          <span className="inline-flex items-center text-xs font-semibold text-slate-400">열람 완료</span>
+        ) : null}
+      </div>
     </div>
   );
 }
 
-function ScopeList({ scopes }: { scopes: string[] }) {
-  return (
-    <div className="flex flex-wrap gap-1.5">
-      {scopes.map((scope) => (
-        <CodeCell key={scope} value={scope} />
-      ))}
-    </div>
-  );
-}
-
-function renderApiKeyMobileCard(item: ApiKeyItem) {
+function KeyMobileCard({ item, onRevoke }: { item: ApiKeyItem; onRevoke: (item: ApiKeyItem) => void }) {
   return (
     <div className="space-y-3">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge tone={item.status === 'ACTIVE' ? 'green' : 'neutral'}>{statusLabel(item.status)}</Badge>
-            <CodeCell muted value={`KEY-${item.id}`} />
-          </div>
-          <p className="mt-2 truncate text-sm font-bold text-slate-950" title={item.name}>{item.name}</p>
-          <p className="mt-1 truncate text-xs text-slate-500" title={clientDisplayName(item)}>{clientDisplayName(item)}</p>
+          <p className="truncate font-semibold text-slate-950">{item.name}</p>
+          <p className="text-xs text-slate-500">범위: {scopeText(item.scopeType, item.clientName)}</p>
         </div>
-        <div className="shrink-0 text-right">
-          <p className="text-xs font-semibold text-slate-500">만료</p>
-          <p className="text-sm font-bold text-slate-950">{formatDateTime(item.expiresAt)}</p>
-        </div>
+        <Badge tone={keyStatusTone(item.status)}>{keyStatusLabel(item.status)}</Badge>
       </div>
-      <div className="grid grid-cols-2 gap-2 text-xs text-slate-600">
-        <MobileFact label="권한" value={item.allowedScope.join(', ') || '-'} />
-        <MobileFact label="마지막 사용" value={formatDateTime(item.lastUsedAt)} />
+      <div className="space-y-1 text-sm text-slate-600">
+        <p>권한: {scopeNames(item.allowedScope)}</p>
+        <p>만료: {formatDateTime(item.expiresAt)}</p>
+        <p>마지막 호출: {formatDateTime(item.lastUsedAt)}</p>
       </div>
+      {item.status === 'ACTIVE' ? (
+        <Button onClick={() => onRevoke(item)} size="sm" variant="danger">
+          폐기
+        </Button>
+      ) : null}
     </div>
   );
 }
 
-function MobileFact({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="min-w-0 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="text-[11px] font-semibold text-slate-500">{label}</p>
-      <div className="mt-1 min-w-0 truncate font-semibold text-slate-800">{value}</div>
-    </div>
-  );
+function ScopeBadge({ item }: { item: Pick<ApiKeyItem, 'clientName' | 'scopeType'> | Pick<ApiKeyRequestItem, 'clientName' | 'scopeType'> }) {
+  return <Badge tone={item.scopeType === 'TENANT' ? 'teal' : 'blue'}>{scopeText(item.scopeType, item.clientName)}</Badge>;
 }
 
-function clientDisplayName(item: ApiKeyItem) {
-  if (item.clientName?.trim()) {
-    return item.clientName;
+function ScopeList({ scopes }: { scopes: string[] }) {
+  return <div className="truncate text-sm text-slate-700">{scopeNames(scopes)}</div>;
+}
+
+function canReveal(item: ApiKeyRequestItem, userId: number | null) {
+  return userId !== null && item.requestedBy === userId;
+}
+
+function canOpenReveal(item: ApiKeyRequestItem, userId: number | null) {
+  return item.status === 'ISSUED' && !hasRevealCompleted(item) && canReveal(item, userId);
+}
+
+function hasRevealCompleted(item: ApiKeyRequestItem) {
+  return Boolean(item.keyRevealedAt);
+}
+
+function requestStatusLabel(status: ApiKeyRequestStatus) {
+  switch (status) {
+    case 'REQUESTED':
+      return '요청 대기';
+    case 'ISSUED':
+      return '발급 완료';
+    case 'REJECTED':
+      return '반려';
+    case 'CANCELED':
+      return '취소';
+    default:
+      return status;
   }
-  if (!item.clientId) {
-    return '-';
+}
+
+function requestStatusTone(status: ApiKeyRequestStatus): 'amber' | 'teal' | 'red' | 'neutral' {
+  switch (status) {
+    case 'REQUESTED':
+      return 'amber';
+    case 'ISSUED':
+      return 'teal';
+    case 'REJECTED':
+      return 'red';
+    case 'CANCELED':
+    default:
+      return 'neutral';
   }
-  return `고객사 ${item.clientId}`;
 }
 
-function Metric({ description, label, tone, value }: { description: string; label: string; tone: 'blue' | 'green' | 'teal'; value: number }) {
-  return (
-    <Card className="p-3 sm:p-4">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-sm font-semibold text-slate-600">{label}</p>
-          <p className="mt-2 text-2xl font-bold text-slate-950">{value.toLocaleString()}</p>
-        </div>
-        <Badge tone={tone}>{label}</Badge>
-      </div>
-      <p className="mt-3 hidden text-xs leading-5 text-slate-500 sm:block">{description}</p>
-    </Card>
-  );
+function keyStatusLabel(status: string) {
+  switch (status) {
+    case 'ACTIVE':
+      return '활성';
+    case 'REVOKED':
+      return '폐기';
+    case 'EXPIRED':
+      return '만료';
+    default:
+      return status;
+  }
 }
 
-function statusLabel(status: string) {
-  const labels: Record<string, string> = {
-    ACTIVE: '활성',
-    REVOKED: '폐기',
-  };
+function keyStatusTone(status: string): 'teal' | 'red' | 'amber' | 'neutral' {
+  switch (status) {
+    case 'ACTIVE':
+      return 'teal';
+    case 'REVOKED':
+      return 'red';
+    case 'EXPIRED':
+      return 'amber';
+    default:
+      return 'neutral';
+  }
+}
 
-  return labels[status] ?? status;
+function scopeText(scopeType: string, clientName?: string | null) {
+  if (scopeType === 'TENANT') {
+    return 'TENANT 전체';
+  }
+  return clientName ? `고객사 ${clientName}` : '고객사';
+}
+
+function scopeNames(scopes: string[]) {
+  return scopes
+    .map((scope) => {
+      if (scope === 'WOS_SCAN_READ') {
+        return 'WOS Scan 조회';
+      }
+      if (scope === 'PL_READ') {
+        return 'PL Picking List 조회';
+      }
+      return scope;
+    })
+    .join(', ');
 }
 
 function formatDateTime(value?: string | null) {
   if (!value) {
     return '-';
   }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat('ko-KR', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
+}
 
-  return value.replace('T', ' ').slice(0, 16);
+function blankToUndefined(value: string) {
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function defaultRequestForm(): RequestFormState {
+  return {
+    name: '',
+    purpose: '',
+    systemName: '',
+    contactName: '',
+    contactEmail: '',
+    contactPhone: '',
+    requestedExpiresAt: '',
+    allowedScope: ['WOS_SCAN_READ'],
+  };
+}
+
+function defaultIssueForm(): DirectIssueFormState {
+  return {
+    name: '',
+    expiresAt: '',
+    allowedScope: ['WOS_SCAN_READ'],
+  };
+}
+
+function formatApiError(error: unknown) {
+  if (error instanceof OmsApiError) {
+    return error.message;
+  }
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return '서버 오류가 발생했습니다.';
 }

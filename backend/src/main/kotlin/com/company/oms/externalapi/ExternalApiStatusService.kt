@@ -2,6 +2,7 @@ package com.company.oms.externalapi
 
 import com.company.oms.auth.ApiKeyEntity
 import com.company.oms.auth.ApiKeyRepository
+import com.company.oms.auth.ApiKeyScopeType
 import com.company.oms.auth.AccessScopeService
 import com.company.oms.auth.UserRole
 import com.company.oms.batch.UploadBatchEntity
@@ -189,7 +190,7 @@ class ExternalApiStatusService(
 		val now = LocalDateTime.now()
 		return apiKeyRepository.findAllByTenantIdAndStatus(tenantId, "ACTIVE")
 			.asSequence()
-			.filter { it.clientId == clientId }
+			.filter { it.clientId == clientId || (it.scopeType == ApiKeyScopeType.TENANT && it.clientId == null) }
 			.filter { it.expiresAt == null || it.expiresAt!!.isAfter(now) }
 			.flatMap { apiKey -> parseScopes(apiKey.allowedScope).map { scope -> scope to apiKey } }
 			.groupBy({ it.first }, { it.second })
@@ -202,6 +203,7 @@ class ExternalApiStatusService(
 		ExternalApiChannel.entries.associate { channel ->
 			channel.endpoint to
 				apiCallLogRepository.findAllByTenantIdAndClientIdAndPath(tenantId, clientId, channel.endpoint)
+					.plus(apiCallLogRepository.findAllByTenantIdAndClientIdIsNullAndPath(tenantId, channel.endpoint))
 					.maxByOrNull { it.createdAt ?: LocalDateTime.MIN }
 		}.filterValues { it != null }
 			.mapValues { requireNotNull(it.value) }

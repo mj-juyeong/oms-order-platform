@@ -84,6 +84,9 @@ data class ClientPublicProductMasterItemResponse(
 	val temperatureType: String?,
 	val cbm: BigDecimal?,
 	val activeYn: Boolean,
+	val latestConfirmedBatchId: Long?,
+	val latestConfirmedBatchNo: String?,
+	val latestConfirmedBatchAt: LocalDateTime?,
 )
 
 data class ClientPublicStoreRouteMasterItemResponse(
@@ -100,4 +103,25 @@ data class ClientPublicStoreRouteMasterItemResponse(
 	val address: String?,
 	val activeYn: Boolean,
 	val internalFieldsVisible: Boolean,
+	val latestConfirmedBatchId: Long?,
+	val latestConfirmedBatchNo: String?,
+	val latestConfirmedBatchAt: LocalDateTime?,
+)
+
+data class ClientPublicProductMasterDetailResponse(
+	val item: ClientPublicProductMasterItemResponse,
+	val lastUpload: MasterDetailUploadResponse?,
+	val usage: MasterUsageSummaryResponse,
+	val recentBatches: List<MasterRelatedBatchResponse>,
+	val recentOrders: List<MasterRelatedOrderResponse>,
+	val validationErrors: List<MasterRelatedValidationErrorResponse>,
+)
+
+data class ClientPublicStoreRouteMasterDetailResponse(
+	val item: ClientPublicStoreRouteMasterItemResponse,
+	val lastUpload: MasterDetailUploadResponse?,
+	val usage: MasterUsageSummaryResponse,
+	val recentBatches: List<MasterRelatedBatchResponse>,
+	val recentOrders: List<MasterRelatedOrderResponse>,
+	val validationErrors: List<MasterRelatedValidationErrorResponse>,
 )

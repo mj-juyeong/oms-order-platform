@@ -5,9 +5,9 @@ import { omsApi } from '../api/oms';
 import { canManageMasters, fakeCurrentUser } from '../app/auth';
 import { Badge, Button, Card, FullScreenLoadingOverlay, Input, Modal, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel } from '../components/domain';
+import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel, ProductMasterDetailModal } from '../components/domain';
 import type { PageResponse } from '../types/api';
-import type { MasterUploadPreviewResult, MasterUploadStatus, ProductMasterItem, ProductMasterUploadHistory, ProductMasterUploadResult } from '../types/master';
+import type { MasterUploadPreviewResult, MasterUploadStatus, ProductMasterDetail, ProductMasterItem, ProductMasterUploadHistory, ProductMasterUploadResult } from '../types/master';
 import { areFilterStatesEqual } from '../utils/filterState';
 
 type ProductOperationStatus = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -33,13 +33,13 @@ const maxMasterUploadBytes = maxMasterUploadMb * 1024 * 1024;
 const maxMasterUploadLabel = `${maxMasterUploadMb}MB`;
 
 const productColumns: DataTableColumn<ProductMasterItem>[] = [
-  { key: 'ezadminCode', header: '상품코드', width: '150px', cell: (item) => <CodeCell value={item.ezadminCode} /> },
   {
     key: 'productName',
     header: '상품명',
-    width: '180px',
+    width: '320px',
     cell: (item) => <span className="font-semibold text-slate-900">{item.productName ?? '-'}</span>,
   },
+  { key: 'ezadminCode', header: '상품코드', width: '110px', cell: (item) => <CodeCell value={item.ezadminCode} /> },
   {
     key: 'customerProductCode',
     header: '거래처 상품코드',
@@ -51,6 +51,7 @@ const productColumns: DataTableColumn<ProductMasterItem>[] = [
   { key: 'temp', header: '보관온도', cell: (item) => item.temperatureType ?? item.storageTemperature ?? '-' },
   { key: 'cbm', header: 'CBM', align: 'right', cell: (item) => formatNumber(item.cbm, 6) },
   { key: 'status', header: '운영여부', cell: (item) => <OperationStatusBadge item={item} /> },
+  { key: 'latestConfirmedBatchAt', header: '최근 확정 배치', width: '180px', cell: (item) => formatConfirmedBatchUsage(item) },
   { key: 'rowNo', header: 'rowNo', align: 'right', cell: (item) => item.rowNo ?? '-' },
 ];
 
@@ -82,6 +83,10 @@ export function ProductMasterPage() {
   const [uploadResult, setUploadResult] = useState<ProductMasterUploadResult | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<ProductMasterItem | null>(null);
+  const [productDetail, setProductDetail] = useState<ProductMasterDetail | null>(null);
+  const [loadingProductDetail, setLoadingProductDetail] = useState(false);
+  const [productDetailError, setProductDetailError] = useState<string | null>(null);
   const [loadingProducts, setLoadingProducts] = useState(true);
   const [loadingUploads, setLoadingUploads] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -328,6 +333,30 @@ export function ProductMasterPage() {
     setPage(0);
   }
 
+  async function openProductDetail(item: ProductMasterItem) {
+    if (!tenantId) return;
+
+    setSelectedProduct(item);
+    setProductDetail(null);
+    setProductDetailError(null);
+    setLoadingProductDetail(true);
+
+    try {
+      const detail = await omsApi.masters.products.detail({ tenantId, productId: item.id });
+      setProductDetail(detail);
+    } catch (error) {
+      setProductDetailError(formatApiError(error));
+    } finally {
+      setLoadingProductDetail(false);
+    }
+  }
+
+  function closeProductDetail() {
+    setSelectedProduct(null);
+    setProductDetail(null);
+    setProductDetailError(null);
+  }
+
   return (
     <div className="space-y-5">
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -382,6 +411,7 @@ export function ProductMasterPage() {
               emptyDescription="상품코드, 상품명, 운영여부, 보관온도 필터를 다시 확인해 주세요."
               emptyTitle="조회 결과가 없습니다."
               getRowKey={(item) => String(item.id)}
+              onRowClick={openProductDetail}
               renderMobileCard={renderProductMobileCard}
             />
             <Pagination
@@ -470,6 +500,14 @@ export function ProductMasterPage() {
           />
         )}
       </Modal>
+
+      <ProductMasterDetailModal
+        detail={productDetail}
+        error={productDetailError}
+        fallbackItem={selectedProduct}
+        loading={loadingProductDetail}
+        onClose={closeProductDetail}
+      />
     </div>
   );
 }
@@ -495,7 +533,7 @@ function renderProductMobileCard(item: ProductMasterItem) {
         <MobileFact label="거래처 상품" value={<CodeCell value={item.customerProductCode ?? item.clientProductCode ?? ''} />} />
         <MobileFact label="박스 입수" value={formatNumber(item.boxQty, 3)} />
         <MobileFact label="CBM" value={formatNumber(item.cbm, 6)} />
-        <MobileFact label="rowNo" value={item.rowNo ?? '-'} />
+        <MobileFact label="최근 확정 배치" value={formatConfirmedBatchUsage(item)} />
       </div>
     </div>
   );
@@ -795,6 +833,15 @@ function formatDateTime(value?: string | null) {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date);
+}
+
+function formatConfirmedBatchUsage(item: ProductMasterItem) {
+  if (!item.latestConfirmedBatchAt) {
+    return '-';
+  }
+
+  const batchNo = item.latestConfirmedBatchNo ? `${item.latestConfirmedBatchNo} · ` : '';
+  return `${batchNo}${formatDateTime(item.latestConfirmedBatchAt)}`;
 }
 
 function formatUploadCounts(upload: ProductMasterUploadResult | ProductMasterUploadHistory | null) {

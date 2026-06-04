@@ -25,6 +25,7 @@ import org.springframework.web.multipart.MultipartFile
 @Profile("local")
 class MasterController(
 	private val masterUpsertService: MasterUpsertService,
+	private val masterDetailService: MasterDetailService,
 	private val clientCodeMappingService: ClientCodeMappingService,
 	private val accessScopeService: AccessScopeService,
 ) {
@@ -130,6 +131,15 @@ class MasterController(
 			page = page,
 			size = size,
 		)
+	}
+
+	@GetMapping("/products/{productId}")
+	fun getProductDetail(
+		@PathVariable productId: Long,
+		@RequestParam tenantId: Long,
+	): ProductMasterDetailResponse {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterDetailService.getProductDetail(resolvedTenantId, productId)
 	}
 
 	@PostMapping("/store-routes/uploads", consumes = [MediaType.MULTIPART_FORM_DATA_VALUE])
@@ -244,6 +254,15 @@ class MasterController(
 			page = page,
 			size = size,
 		)
+	}
+
+	@GetMapping("/store-routes/{storeRouteId}")
+	fun getStoreRouteDetail(
+		@PathVariable storeRouteId: Long,
+		@RequestParam tenantId: Long,
+	): StoreRouteMasterDetailResponse {
+		val resolvedTenantId = requireReadableTenant(tenantId)
+		return masterDetailService.getStoreRouteDetail(resolvedTenantId, storeRouteId)
 	}
 
 	@GetMapping("/client-product-code-mappings")

@@ -3,6 +3,8 @@ package com.company.oms.auth
 import com.company.oms.common.persistence.BaseTimeEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
@@ -17,6 +19,10 @@ class ApiKeyEntity(
 
 	@Column(name = "client_id")
 	var clientId: Long? = null,
+
+	@Enumerated(EnumType.STRING)
+	@Column(name = "scope_type", nullable = false, length = 32)
+	var scopeType: ApiKeyScopeType = ApiKeyScopeType.CLIENT,
 
 	@Column(name = "name", nullable = false, length = 100)
 	var name: String = "",
@@ -44,3 +50,7 @@ class ApiKeyEntity(
 	var id: Long? = null
 }
 
+enum class ApiKeyScopeType {
+	TENANT,
+	CLIENT,
+}

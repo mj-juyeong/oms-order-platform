@@ -10,5 +10,9 @@ interface ApiCallLogRepository : JpaRepository<ApiCallLogEntity, Long> {
 		clientId: Long,
 		path: String,
 	): List<ApiCallLogEntity>
-}
 
+	fun findAllByTenantIdAndClientIdIsNullAndPath(
+		tenantId: Long,
+		path: String,
+	): List<ApiCallLogEntity>
+}

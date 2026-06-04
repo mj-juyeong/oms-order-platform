@@ -95,12 +95,12 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     title: 'API 사용 안내',
     description: '외부 연동 담당자에게 전달할 endpoint, 인증 헤더, 조회 조건, 호출 예시를 확인합니다.',
     breadcrumbs: [{ label: '외부 연동' }, { label: 'API 사용 안내' }],
-    notice: '외부 API는 로그인 없이 X-Api-Key 헤더로 호출합니다. API Key 발급과 제공현황 조회는 내부 운영자 권한이 필요합니다.',
+    notice: '외부 API는 로그인 없이 X-Api-Key 헤더로 호출합니다. 고객사는 API Key를 신청하고 물류사 승인 후 사용할 수 있습니다.',
   },
   '/external-api/api-keys': {
-    title: 'API Key 관리',
-    description: '외부 시스템 호출에 사용하는 API Key의 상태, 권한, 만료와 마지막 사용 시각을 확인합니다.',
-    breadcrumbs: [{ label: '외부 연동' }, { label: 'API Key 관리' }],
+    title: 'API Key 관리/신청',
+    description: '외부 시스템 호출에 사용하는 API Key 신청, 승인 상태, 권한과 만료를 확인합니다.',
+    breadcrumbs: [{ label: '외부 연동' }, { label: 'API Key 관리/신청' }],
     notice: 'API Key 원문은 발급 직후 1회만 표시하고, 이후에는 다시 조회하지 않습니다.',
   },
   '/masters/products': {
@@ -122,6 +122,11 @@ export const routeMetaByPath: Record<string, RouteMeta> = {
     title: '고객사별 마스터 공개 설정',
     description: '고객사별 상품과 발주고/배송지 마스터 공개 범위를 관리합니다.',
     breadcrumbs: [{ label: '마스터' }, { label: '고객사별 마스터 공개 설정' }],
+  },
+  '/masters/requests': {
+    title: '마스터 요청 처리',
+    description: '고객사가 등록한 마스터 추가 요청을 검토하고 처리 상태를 관리합니다.',
+    breadcrumbs: [{ label: '마스터' }, { label: '마스터 요청 처리' }],
   },
   '/users': {
     title: '사용자 관리',

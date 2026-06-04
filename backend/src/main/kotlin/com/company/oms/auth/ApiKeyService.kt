@@ -49,29 +49,61 @@ class ApiKeyService(
 	@Transactional
 	fun createApiKey(request: CreateApiKeyRequest): CreateApiKeyResponse {
 		val currentUser = accessScopeService.requireTenantAdmin()
-		if (request.clientId == null) {
+		if (request.scopeType == ApiKeyScopeType.CLIENT && request.clientId == null) {
 			throw OmsException(
 				errorCode = ErrorCode.INVALID_REQUEST,
 				message = "1차 MVP의 외부 API Key는 고객사(clientId) 단위로 발급해야 합니다.",
 			)
 		}
+		if (request.scopeType == ApiKeyScopeType.TENANT && request.clientId != null) {
+			throw OmsException(
+				errorCode = ErrorCode.INVALID_REQUEST,
+				message = "TENANT API Key must not include clientId.",
+			)
+		}
 		val resolvedTenantId = accessScopeService.requireTenantAccess(request.tenantId)
-		accessScopeService.requireClientAccess(resolvedTenantId, request.clientId)
-		validateScopes(request.allowedScope)
-		validateExpiresAt(request.expiresAt)
+		if (request.scopeType == ApiKeyScopeType.CLIENT) {
+			accessScopeService.requireClientAccess(resolvedTenantId, requireNotNull(request.clientId))
+		}
+		return issueApiKey(
+			tenantId = resolvedTenantId,
+			clientId = request.clientId,
+			scopeType = request.scopeType,
+			name = request.name,
+			allowedScope = request.allowedScope,
+			expiresAt = request.expiresAt,
+			createdBy = currentUser.userId,
+		)
+	}
+
+	@Transactional
+	fun issueApiKey(
+		tenantId: Long,
+		clientId: Long?,
+		scopeType: ApiKeyScopeType,
+		name: String,
+		allowedScope: Set<String>,
+		expiresAt: LocalDateTime?,
+		createdBy: Long?,
+	): CreateApiKeyResponse {
+		val trimmedName = name.trim().takeIf { it.isNotBlank() }
+			?: throw OmsException(ErrorCode.INVALID_REQUEST, message = "API Key 이름을 입력해 주세요.")
+		validateScopes(allowedScope)
+		validateExpiresAt(expiresAt)
 
 		val plainKey = ApiKeyHash.generatePlainKey()
 		val entity =
 			apiKeyRepository.save(
 				ApiKeyEntity(
-					tenantId = resolvedTenantId,
-					clientId = request.clientId,
-					name = request.name,
+					tenantId = tenantId,
+					clientId = clientId,
+					scopeType = scopeType,
+					name = trimmedName,
 					keyHash = ApiKeyHash.sha256Hex(plainKey),
 					status = "ACTIVE",
-					allowedScope = scopesToJson(request.allowedScope),
-					expiresAt = request.expiresAt,
-					createdBy = currentUser.userId,
+					allowedScope = scopesToJson(allowedScope),
+					expiresAt = expiresAt,
+					createdBy = createdBy,
 				),
 			)
 		return CreateApiKeyResponse(
@@ -146,6 +178,7 @@ class ApiKeyService(
 			id = requireNotNull(id),
 			tenantId = tenantId,
 			clientId = clientId,
+			scopeType = scopeType,
 			clientName = clientName,
 			name = name,
 			status = status,

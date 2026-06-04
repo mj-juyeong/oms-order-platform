@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Profile
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
+import java.time.LocalDateTime
 
 @Service
 @Profile("local")
@@ -20,6 +21,8 @@ class ClientMasterVisibilityService(
 	private val storeRouteScopeRepository: ClientStoreRouteMasterScopeRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val masterDetailService: MasterDetailService,
+	private val masterConfirmedUsageService: MasterConfirmedUsageService,
 ) {
 
 	@Transactional(readOnly = true)
@@ -224,11 +227,16 @@ class ClientMasterVisibilityService(
 				}
 			}
 
+		val usageByCode = masterConfirmedUsageService.latestProductUsageByTenant(tenantId, clientId)
+
 		return products
 			.filter { ezadminCode.isNullOrBlank() || it.ezadminCode.contains(ezadminCode.trim(), ignoreCase = true) }
 			.filter { productName.isNullOrBlank() || it.productName?.contains(productName.trim(), ignoreCase = true) == true }
-			.sortedBy { it.ezadminCode }
-			.map { it.toClientPublicResponse() }
+			.sortedWith(
+				compareByDescending<ProductMasterItemEntity> { usageByCode[it.ezadminCode]?.latestConfirmedAt ?: LocalDateTime.MIN }
+					.thenBy { it.ezadminCode },
+			)
+			.map { it.toClientPublicResponse(usageByCode[it.ezadminCode]) }
 			.toPageResponse(page, size)
 	}
 
@@ -267,6 +275,8 @@ class ClientMasterVisibilityService(
 				}
 			}
 
+		val usageByCode = masterConfirmedUsageService.latestStoreRouteUsageByTenant(tenantId, clientId)
+
 		return storeRoutes
 			.filter { baljugoCode.isNullOrBlank() || it.baljugoCode.contains(baljugoCode.trim(), ignoreCase = true) }
 			.filter { customerCode.isNullOrBlank() || it.customerCode?.contains(customerCode.trim(), ignoreCase = true) == true }
@@ -274,9 +284,84 @@ class ClientMasterVisibilityService(
 			.filter { storeName.isNullOrBlank() || it.storeName?.contains(storeName.trim(), ignoreCase = true) == true }
 			.filter { area.isNullOrBlank() || it.area?.contains(area.trim(), ignoreCase = true) == true }
 			.filter { deliveryRound.isNullOrBlank() || it.deliveryRound?.contains(deliveryRound.trim(), ignoreCase = true) == true }
-			.sortedBy { it.baljugoCode }
-			.map { it.toClientPublicResponse(setting.showStoreRouteInternalFieldsYn) }
+			.sortedWith(
+				compareByDescending<StoreRouteMasterItemEntity> { usageByCode[it.baljugoCode]?.latestConfirmedAt ?: LocalDateTime.MIN }
+					.thenBy { it.baljugoCode },
+			)
+			.map { it.toClientPublicResponse(setting.showStoreRouteInternalFieldsYn, usageByCode[it.baljugoCode]) }
 			.toPageResponse(page, size)
+	}
+
+	@Transactional(readOnly = true)
+	fun getClientProductDetail(
+		tenantId: Long,
+		clientId: Long,
+		productId: Long,
+	): ClientPublicProductMasterDetailResponse {
+		val setting = getSetting(tenantId, clientId)
+		val product = productMasterItemRepository.findById(productId)
+			.filter { it.tenantId == tenantId && it.activeYn }
+			.orElseThrow { notFound("공개 상품 마스터를 찾을 수 없습니다.") }
+		if (setting.productVisibilityMode == ClientProductMasterVisibilityMode.SCOPED_ONLY) {
+			val scope = productScopeRepository.findByTenantIdAndClientIdAndProductMasterItemId(
+				tenantId = tenantId,
+				clientId = clientId,
+				productMasterItemId = productId,
+			)
+			if (scope?.status != ClientMasterScopeStatus.ACTIVE) {
+				throw notFound("공개 상품 마스터를 찾을 수 없습니다.")
+			}
+		}
+
+		val detail = masterDetailService.getProductDetail(
+			tenantId = tenantId,
+			productId = productId,
+			clientId = clientId,
+		)
+		return ClientPublicProductMasterDetailResponse(
+			item = product.toClientPublicResponse(),
+			lastUpload = detail.lastUpload,
+			usage = detail.usage.copy(activeClientScopeCount = 1),
+			recentBatches = detail.recentBatches,
+			recentOrders = detail.recentOrders,
+			validationErrors = detail.validationErrors,
+		)
+	}
+
+	@Transactional(readOnly = true)
+	fun getClientStoreRouteDetail(
+		tenantId: Long,
+		clientId: Long,
+		storeRouteId: Long,
+	): ClientPublicStoreRouteMasterDetailResponse {
+		val setting = getSetting(tenantId, clientId)
+		val storeRoute = storeRouteMasterItemRepository.findById(storeRouteId)
+			.filter { it.tenantId == tenantId && it.activeYn }
+			.orElseThrow { notFound("공개 배송지/차량 마스터를 찾을 수 없습니다.") }
+		if (setting.storeRouteVisibilityMode == ClientStoreRouteMasterVisibilityMode.SCOPED_ONLY) {
+			val scope = storeRouteScopeRepository.findByTenantIdAndClientIdAndStoreRouteMasterItemId(
+				tenantId = tenantId,
+				clientId = clientId,
+				storeRouteMasterItemId = storeRouteId,
+			)
+			if (scope?.status != ClientMasterScopeStatus.ACTIVE) {
+				throw notFound("공개 배송지/차량 마스터를 찾을 수 없습니다.")
+			}
+		}
+
+		val detail = masterDetailService.getStoreRouteDetail(
+			tenantId = tenantId,
+			storeRouteId = storeRouteId,
+			clientId = clientId,
+		)
+		return ClientPublicStoreRouteMasterDetailResponse(
+			item = storeRoute.toClientPublicResponse(setting.showStoreRouteInternalFieldsYn),
+			lastUpload = detail.lastUpload,
+			usage = detail.usage.copy(activeClientScopeCount = 1),
+			recentBatches = detail.recentBatches,
+			recentOrders = detail.recentOrders,
+			validationErrors = detail.validationErrors,
+		)
 	}
 
 	private fun notFound(message: String): OmsException =
@@ -349,7 +434,9 @@ private fun ClientStoreRouteMasterScopeEntity.toItemResponse(
 		storeRoute = storeRoute?.toClientPublicResponse(showInternalFields = true),
 	)
 
-private fun ProductMasterItemEntity.toClientPublicResponse(): ClientPublicProductMasterItemResponse =
+private fun ProductMasterItemEntity.toClientPublicResponse(
+	confirmedUsage: MasterConfirmedUsageSummary? = null,
+): ClientPublicProductMasterItemResponse =
 	ClientPublicProductMasterItemResponse(
 		id = id ?: 0,
 		ezadminCode = ezadminCode,
@@ -360,10 +447,14 @@ private fun ProductMasterItemEntity.toClientPublicResponse(): ClientPublicProduc
 		temperatureType = temperatureType,
 		cbm = cbm,
 		activeYn = activeYn,
+		latestConfirmedBatchId = confirmedUsage?.latestBatchId,
+		latestConfirmedBatchNo = confirmedUsage?.latestBatchNo,
+		latestConfirmedBatchAt = confirmedUsage?.latestConfirmedAt,
 	)
 
 private fun StoreRouteMasterItemEntity.toClientPublicResponse(
 	showInternalFields: Boolean,
+	confirmedUsage: MasterConfirmedUsageSummary? = null,
 ): ClientPublicStoreRouteMasterItemResponse =
 	ClientPublicStoreRouteMasterItemResponse(
 		id = id ?: 0,
@@ -379,4 +470,7 @@ private fun StoreRouteMasterItemEntity.toClientPublicResponse(
 		address = address.takeIf { showInternalFields },
 		activeYn = activeYn,
 		internalFieldsVisible = showInternalFields,
+		latestConfirmedBatchId = confirmedUsage?.latestBatchId,
+		latestConfirmedBatchNo = confirmedUsage?.latestBatchNo,
+		latestConfirmedBatchAt = confirmedUsage?.latestConfirmedAt,
 	)

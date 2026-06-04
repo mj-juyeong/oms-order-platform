@@ -18,6 +18,13 @@ export const endpoints = {
     detail: (apiKeyId: number) => `/api-keys/${apiKeyId}`,
     revoke: (apiKeyId: number) => `/api-keys/${apiKeyId}/revoke`,
   },
+  apiKeyRequests: {
+    list: '/api-key-requests',
+    approve: (requestId: number | string) => `/api-key-requests/${requestId}/approve`,
+    reject: (requestId: number | string) => `/api-key-requests/${requestId}/reject`,
+    cancel: (requestId: number | string) => `/api-key-requests/${requestId}/cancel`,
+    reveal: (requestId: number | string) => `/api-key-requests/${requestId}/reveal-issued-key`,
+  },
   batches: {
     list: '/order-excel-batches',
     detail: (batchId: number) => `/order-excel-batches/${batchId}`,
@@ -54,12 +61,14 @@ export const endpoints = {
   },
   masters: {
     products: '/masters/products',
+    productDetail: (productId: number | string) => `/masters/products/${productId}`,
     productUploads: '/masters/products/uploads',
     productUploadPreview: '/masters/products/uploads/preview',
     productUploadApply: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/apply`,
     productUploadCancel: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/cancel`,
     productUploadRowErrors: (uploadId: number | string) => `/masters/products/uploads/${uploadId}/row-errors`,
     storeRoutes: '/masters/store-routes',
+    storeRouteDetail: (storeRouteId: number | string) => `/masters/store-routes/${storeRouteId}`,
     storeRouteUploads: '/masters/store-routes/uploads',
     storeRouteUploadPreview: '/masters/store-routes/uploads/preview',
     storeRouteUploadApply: (uploadId: number | string) => `/masters/store-routes/uploads/${uploadId}/apply`,
@@ -75,7 +84,17 @@ export const endpoints = {
   },
   clientMasters: {
     products: '/client-masters/products',
+    productDetail: (productId: number | string) => `/client-masters/products/${productId}`,
     storeRoutes: '/client-masters/store-routes',
+    storeRouteDetail: (storeRouteId: number | string) => `/client-masters/store-routes/${storeRouteId}`,
+  },
+  masterDataAddRequests: {
+    list: '/master-data-add-requests',
+    detail: (requestId: number | string) => `/master-data-add-requests/${requestId}`,
+    approve: (requestId: number | string) => `/master-data-add-requests/${requestId}/approve`,
+    apply: (requestId: number | string) => `/master-data-add-requests/${requestId}/apply`,
+    needsMoreInfo: (requestId: number | string) => `/master-data-add-requests/${requestId}/needs-more-info`,
+    reject: (requestId: number | string) => `/master-data-add-requests/${requestId}/reject`,
   },
   audit: {
     batches: '/audit/batches',

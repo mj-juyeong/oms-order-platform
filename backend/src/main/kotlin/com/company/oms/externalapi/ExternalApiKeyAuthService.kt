@@ -3,6 +3,7 @@ package com.company.oms.externalapi
 import com.company.oms.auth.ApiKeyEntity
 import com.company.oms.auth.ApiKeyHash
 import com.company.oms.auth.ApiKeyRepository
+import com.company.oms.auth.ApiKeyScopeType
 import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
 import jakarta.servlet.http.HttpServletRequest
@@ -36,7 +37,7 @@ class ExternalApiKeyAuthService(
 		if (apiKey.expiresAt != null && !apiKey.expiresAt!!.isAfter(LocalDateTime.now())) {
 			throw OmsException(ErrorCode.INVALID_API_KEY, status = HttpStatus.UNAUTHORIZED)
 		}
-		if (apiKey.clientId == null) {
+		if (apiKey.scopeType == ApiKeyScopeType.CLIENT && apiKey.clientId == null) {
 			throw OmsException(
 				errorCode = ErrorCode.FORBIDDEN,
 				message = "1차 MVP 외부 API는 고객사 단위 API Key만 사용할 수 있습니다.",

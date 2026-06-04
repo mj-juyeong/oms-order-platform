@@ -561,6 +561,154 @@ class Phase8AuthLogApiTest @Autowired constructor(
 	}
 
 	@Test
+	fun clientUserCanCreateAndListOwnMasterDataAddRequests() {
+		val scope = createScope()
+		val otherClient = clientRepository.saveAndFlush(
+			ClientEntity(
+				tenantId = scope.tenantId,
+				code = "client-${UUID.randomUUID()}",
+				name = "Other Client",
+			),
+		)
+		val clientViewerUserId = createUser(scope, "VIEWER", UserScopeType.CLIENT, scope.clientId)
+		val tenantAdminUserId = createUser(scope, "ADMIN")
+
+		mockMvc.post("/api/v1/master-data-add-requests") {
+			header("X-User-Id", clientViewerUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "requestType": "PRODUCT",
+				  "title": "신상품 추가 요청",
+				  "requestFields": {
+				    "productName": "상온 신상품",
+				    "customerProductCode": "CP-001",
+				    "outboundUnit": "EA"
+				  },
+				  "requestMemo": "다음 배치 전에 반영 요청"
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("REQUESTED") }
+			jsonPath("$.data.requestType") { value("PRODUCT") }
+			jsonPath("$.data.clientId") { value(scope.clientId.toInt()) }
+			jsonPath("$.data.requestFields.productName") { value("상온 신상품") }
+		}
+
+		mockMvc.get("/api/v1/master-data-add-requests") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(1) }
+			jsonPath("$.data.items[0].title") { value("신상품 추가 요청") }
+		}
+
+		mockMvc.get("/api/v1/master-data-add-requests") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", otherClient.id!!.toString())
+		}.andExpect {
+			status { isForbidden() }
+		}
+
+		mockMvc.post("/api/v1/master-data-add-requests") {
+			header("X-User-Id", tenantAdminUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "requestType": "STORE_ROUTE",
+				  "title": "배송지 추가 요청",
+				  "requestFields": {
+				    "storeName": "강남점",
+				    "customerCode": "S-001"
+				  }
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.requestType") { value("STORE_ROUTE") }
+		}
+	}
+
+	@Test
+	fun tenantOperatorCanReviewAndApplyMasterDataAddRequest() {
+		val scope = createScope()
+		val clientViewerUserId = createUser(scope, "VIEWER", UserScopeType.CLIENT, scope.clientId)
+		val tenantOperatorUserId = createUser(scope, "OPERATOR")
+
+		val requestId = mockMvc.post("/api/v1/master-data-add-requests") {
+			header("X-User-Id", clientViewerUserId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "tenantId": ${scope.tenantId},
+				  "clientId": ${scope.clientId},
+				  "requestType": "PRODUCT",
+				  "title": "운영상품 추가 요청",
+				  "requestFields": {
+				    "productName": "상온 컵과일",
+				    "customerProductCode": "CP-7788"
+				  }
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("REQUESTED") }
+		}.andReturn().response.contentAsString
+			.let { "\"id\":(\\d+)".toRegex().find(it)?.groupValues?.get(1)?.toLong() }
+			?: error("master data add request id not found")
+
+		mockMvc.post("/api/v1/master-data-add-requests/$requestId/approve") {
+			header("X-User-Id", tenantOperatorUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "comment": "요청 내용을 확인했습니다."
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("APPROVED") }
+			jsonPath("$.data.reviewComment") { value("요청 내용을 확인했습니다.") }
+		}
+
+		mockMvc.post("/api/v1/master-data-add-requests/$requestId/apply") {
+			header("X-User-Id", tenantOperatorUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """
+				{
+				  "comment": "상품 마스터에 반영 완료"
+				}
+			""".trimIndent()
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("APPLIED") }
+			jsonPath("$.data.reviewComment") { value("상품 마스터에 반영 완료") }
+		}
+
+		mockMvc.post("/api/v1/master-data-add-requests/$requestId/apply") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			contentType = org.springframework.http.MediaType.APPLICATION_JSON
+			content = """{ "comment": "권한 없음" }"""
+		}.andExpect {
+			status { isForbidden() }
+		}
+	}
+
+	@Test
 	fun auditLogQueriesRequireAdminAndReturnTrackedRows() {
 		val scope = createScope()
 		val adminUserId = createUser(scope, "ADMIN")

@@ -6,6 +6,7 @@ data class ApiKeyResponse(
 	val id: Long,
 	val tenantId: Long,
 	val clientId: Long?,
+	val scopeType: ApiKeyScopeType,
 	val clientName: String?,
 	val name: String,
 	val status: String,
@@ -18,6 +19,7 @@ data class ApiKeyResponse(
 data class CreateApiKeyRequest(
 	val tenantId: Long,
 	val clientId: Long? = null,
+	val scopeType: ApiKeyScopeType = ApiKeyScopeType.CLIENT,
 	val name: String,
 	val allowedScope: Set<String>,
 	val expiresAt: LocalDateTime? = null,

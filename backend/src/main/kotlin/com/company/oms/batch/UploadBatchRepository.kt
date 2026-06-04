@@ -25,6 +25,11 @@ interface UploadBatchRepository : JpaRepository<UploadBatchEntity, Long>, JpaSpe
 		status: BatchStatus,
 	): List<UploadBatchEntity>
 
+	fun findAllByTenantIdAndStatus(
+		tenantId: Long,
+		status: BatchStatus,
+	): List<UploadBatchEntity>
+
 	fun findAllByTenantIdAndClientIdAndDeliveryDate(
 		tenantId: Long,
 		clientId: Long,

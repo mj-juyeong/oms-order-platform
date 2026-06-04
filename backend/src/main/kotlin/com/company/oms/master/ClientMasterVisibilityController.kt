@@ -6,6 +6,7 @@ import com.company.oms.common.persistence.ClientMasterScopeStatus
 import com.company.oms.common.response.PageResponse
 import org.springframework.context.annotation.Profile
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
 import org.springframework.web.bind.annotation.RequestBody
@@ -157,6 +158,21 @@ class ClientPublicMasterController(
 		)
 	}
 
+	@GetMapping("/products/{productId}")
+	fun getProductDetail(
+		@PathVariable productId: Long,
+		@RequestParam(required = false) tenantId: Long?,
+		@RequestParam(required = false) clientId: Long?,
+	): ClientPublicProductMasterDetailResponse {
+		accessScopeService.requireAnyRole(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)
+		val scope = accessScopeService.resolveRequiredClientScope(tenantId, clientId)
+		return clientMasterVisibilityService.getClientProductDetail(
+			tenantId = scope.tenantId,
+			clientId = requireNotNull(scope.clientId),
+			productId = productId,
+		)
+	}
+
 	@GetMapping("/store-routes")
 	fun listStoreRoutes(
 		@RequestParam(required = false) tenantId: Long?,
@@ -185,6 +201,21 @@ class ClientPublicMasterController(
 			activeYn = activeYn,
 			page = page,
 			size = size,
+		)
+	}
+
+	@GetMapping("/store-routes/{storeRouteId}")
+	fun getStoreRouteDetail(
+		@PathVariable storeRouteId: Long,
+		@RequestParam(required = false) tenantId: Long?,
+		@RequestParam(required = false) clientId: Long?,
+	): ClientPublicStoreRouteMasterDetailResponse {
+		accessScopeService.requireAnyRole(UserRole.ADMIN, UserRole.OPERATOR, UserRole.VIEWER)
+		val scope = accessScopeService.resolveRequiredClientScope(tenantId, clientId)
+		return clientMasterVisibilityService.getClientStoreRouteDetail(
+			tenantId = scope.tenantId,
+			clientId = requireNotNull(scope.clientId),
+			storeRouteId = storeRouteId,
 		)
 	}
 }

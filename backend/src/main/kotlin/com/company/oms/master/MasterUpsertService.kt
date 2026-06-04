@@ -32,6 +32,7 @@ class MasterUpsertService(
 	private val masterUploadRowErrorRepository: MasterUploadRowErrorRepository,
 	private val productMasterItemRepository: ProductMasterItemRepository,
 	private val storeRouteMasterItemRepository: StoreRouteMasterItemRepository,
+	private val masterConfirmedUsageService: MasterConfirmedUsageService,
 	private val objectMapper: ObjectMapper,
 ) {
 
@@ -259,8 +260,18 @@ class MasterUpsertService(
 			?: productMasterItemRepository.findAllByTenantId(tenantId))
 			.filter { ezadminCode.isNullOrBlank() || it.ezadminCode.contains(ezadminCode.trim(), ignoreCase = true) }
 			.filter { productName.isNullOrBlank() || it.productName?.contains(productName.trim(), ignoreCase = true) == true }
-			.sortedBy { it.ezadminCode }
-			.map { it.toResponse() }
+			.let { products ->
+				val uploadById = masterUploadBatchRepository.findAllById(products.mapNotNull { it.lastMasterUploadBatchId })
+					.associateBy { it.id ?: 0 }
+				val usageByCode = masterConfirmedUsageService.latestProductUsageByTenant(tenantId)
+				products
+					.sortedWith(
+						compareByDescending<ProductMasterItemEntity> { usageByCode[it.ezadminCode]?.latestConfirmedAt ?: LocalDateTime.MIN }
+							.thenByDescending { uploadById[it.lastMasterUploadBatchId]?.reflectedAt() ?: LocalDateTime.MIN }
+							.thenBy { it.ezadminCode },
+					)
+					.map { it.toResponse(uploadById[it.lastMasterUploadBatchId], usageByCode[it.ezadminCode]) }
+			}
 			.toPage(page, size)
 
 	@Transactional(readOnly = true)
@@ -286,8 +297,18 @@ class MasterUpsertService(
 			.filter { area.isNullOrBlank() || it.area?.contains(area.trim(), ignoreCase = true) == true }
 			.filter { deliveryRound.isNullOrBlank() || it.deliveryRound?.contains(deliveryRound.trim(), ignoreCase = true) == true }
 			.filter { vehicleName.isNullOrBlank() || it.vehicleName?.contains(vehicleName.trim(), ignoreCase = true) == true }
-			.sortedBy { it.baljugoCode }
-			.map { it.toResponse() }
+			.let { storeRoutes ->
+				val uploadById = masterUploadBatchRepository.findAllById(storeRoutes.mapNotNull { it.lastMasterUploadBatchId })
+					.associateBy { it.id ?: 0 }
+				val usageByCode = masterConfirmedUsageService.latestStoreRouteUsageByTenant(tenantId)
+				storeRoutes
+					.sortedWith(
+						compareByDescending<StoreRouteMasterItemEntity> { usageByCode[it.baljugoCode]?.latestConfirmedAt ?: LocalDateTime.MIN }
+							.thenByDescending { uploadById[it.lastMasterUploadBatchId]?.reflectedAt() ?: LocalDateTime.MIN }
+							.thenBy { it.baljugoCode },
+					)
+					.map { it.toResponse(uploadById[it.lastMasterUploadBatchId], usageByCode[it.baljugoCode]) }
+			}
 			.toPage(page, size)
 
 	private fun buildProductUploadPlan(
@@ -429,6 +450,9 @@ class MasterUpsertService(
 				)
 				inserted++
 			} else if (existing.hasSameContent(row)) {
+				existing.lastMasterUploadBatchId = uploadId
+				existing.rowNo = row.rowNo
+				existing.rawRowJson = objectMapper.writeValueAsString(row.rawRow)
 				unchanged++
 			} else {
 				existing.productName = row.productName
@@ -495,6 +519,9 @@ class MasterUpsertService(
 				)
 				inserted++
 			} else if (existing.hasSameContent(row)) {
+				existing.lastMasterUploadBatchId = uploadId
+				existing.rowNo = row.rowNo
+				existing.rawRowJson = objectMapper.writeValueAsString(row.rawRow)
 				unchanged++
 			} else {
 				existing.customerCode = row.customerCode
@@ -768,7 +795,13 @@ private fun MasterUploadBatchEntity.toHistoryResponse(): MasterUploadHistoryResp
 		message = message,
 	)
 
-private fun ProductMasterItemEntity.toResponse(): ProductMasterItemResponse =
+private fun MasterUploadBatchEntity.reflectedAt(): LocalDateTime =
+	appliedAt ?: uploadedAt
+
+private fun ProductMasterItemEntity.toResponse(
+	lastUpload: MasterUploadBatchEntity? = null,
+	confirmedUsage: MasterConfirmedUsageSummary? = null,
+): ProductMasterItemResponse =
 	ProductMasterItemResponse(
 		id = id ?: 0,
 		ezadminCode = ezadminCode,
@@ -779,10 +812,18 @@ private fun ProductMasterItemEntity.toResponse(): ProductMasterItemResponse =
 		temperatureType = temperatureType,
 		cbm = cbm,
 		activeYn = activeYn,
+		lastMasterUploadBatchId = lastMasterUploadBatchId,
+		lastMasterUploadedAt = lastUpload?.appliedAt ?: lastUpload?.uploadedAt,
+		latestConfirmedBatchId = confirmedUsage?.latestBatchId,
+		latestConfirmedBatchNo = confirmedUsage?.latestBatchNo,
+		latestConfirmedBatchAt = confirmedUsage?.latestConfirmedAt,
 		rowNo = rowNo,
 	)
 
-private fun StoreRouteMasterItemEntity.toResponse(): StoreRouteMasterItemResponse =
+private fun StoreRouteMasterItemEntity.toResponse(
+	lastUpload: MasterUploadBatchEntity? = null,
+	confirmedUsage: MasterConfirmedUsageSummary? = null,
+): StoreRouteMasterItemResponse =
 	StoreRouteMasterItemResponse(
 		id = id ?: 0,
 		baljugoCode = baljugoCode,
@@ -796,6 +837,11 @@ private fun StoreRouteMasterItemEntity.toResponse(): StoreRouteMasterItemRespons
 		driverName = driverName,
 		address = address,
 		activeYn = activeYn,
+		lastMasterUploadBatchId = lastMasterUploadBatchId,
+		lastMasterUploadedAt = lastUpload?.appliedAt ?: lastUpload?.uploadedAt,
+		latestConfirmedBatchId = confirmedUsage?.latestBatchId,
+		latestConfirmedBatchNo = confirmedUsage?.latestBatchNo,
+		latestConfirmedBatchAt = confirmedUsage?.latestConfirmedAt,
 		rowNo = rowNo,
 	)
 

@@ -84,7 +84,7 @@ class ExternalApiController(
 	private fun <T> recordApiCall(
 		request: HttpServletRequest,
 		requiredScope: String,
-		block: (tenantId: Long, clientId: Long) -> T,
+		block: (tenantId: Long, clientId: Long?) -> T,
 	): T {
 		val startedNanos = System.nanoTime()
 		var apiKeyId: Long? = null
@@ -94,17 +94,17 @@ class ExternalApiController(
 			val apiKey = externalApiKeyAuthService.requireApiKey(request, requiredScope)
 			apiKeyId = apiKey.id
 			tenantId = apiKey.tenantId
-			clientId = requireNotNull(apiKey.clientId)
+			clientId = apiKey.clientId
 			val response = block(tenantId, clientId)
 			externalApiLogService.record(request, tenantId, clientId, apiKeyId, 200, startedNanos)
 			response
 		} catch (exception: OmsException) {
-			if (tenantId != null && clientId != null) {
+			if (tenantId != null) {
 				externalApiLogService.record(request, tenantId, clientId, apiKeyId, exception.status.value(), startedNanos)
 			}
 			throw exception
 		} catch (exception: RuntimeException) {
-			if (tenantId != null && clientId != null) {
+			if (tenantId != null) {
 				externalApiLogService.record(request, tenantId, clientId, apiKeyId, 500, startedNanos)
 			}
 			throw exception

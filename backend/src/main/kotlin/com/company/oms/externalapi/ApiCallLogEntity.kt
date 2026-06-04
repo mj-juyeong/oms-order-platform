@@ -14,8 +14,8 @@ class ApiCallLogEntity(
 	@Column(name = "tenant_id", nullable = false)
 	var tenantId: Long = 0,
 
-	@Column(name = "client_id", nullable = false)
-	var clientId: Long = 0,
+	@Column(name = "client_id")
+	var clientId: Long? = null,
 
 	@Column(name = "api_key_id")
 	var apiKeyId: Long? = null,
@@ -45,4 +45,3 @@ class ApiCallLogEntity(
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	var id: Long? = null
 }
-

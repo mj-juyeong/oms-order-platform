@@ -13,6 +13,7 @@ import { ExternalApiGuidePage } from '../pages/ExternalApiGuidePage';
 import { ClientManagementPage } from '../pages/ClientManagementPage';
 import { LabelWorkspacePage } from '../pages/LabelWorkspacePage';
 import { LoginPage } from '../pages/LoginPage';
+import { MasterDataAddRequestsPage } from '../pages/MasterDataAddRequestsPage';
 import { NotificationsPage } from '../pages/NotificationsPage';
 import { OrdersPage } from '../pages/OrdersPage';
 import { PlLinesPage } from '../pages/PlLinesPage';
@@ -131,7 +132,7 @@ export const router = createBrowserRouter([
           {
             path: '/external-api/guide',
             element: (
-              <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
+              <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
                 <ExternalApiGuidePage />
               </ProtectedRoute>
             ),
@@ -139,7 +140,7 @@ export const router = createBrowserRouter([
           {
             path: '/external-api/status',
             element: (
-              <ProtectedRoute requiredRoles={['VIEWER', 'OPERATOR', 'ADMIN']} requiredScopes={['TENANT', 'CLIENT']}>
+              <ProtectedRoute requiredRoles={['ADMIN']} requiredScopes={['TENANT']}>
                 <ExternalApiStatusPage />
               </ProtectedRoute>
             ),
@@ -147,7 +148,7 @@ export const router = createBrowserRouter([
           {
             path: '/external-api/api-keys',
             element: (
-              <ProtectedRoute requiredRoles={['ADMIN']} requiredScopes={['TENANT']}>
+              <ProtectedRoute requiredRoles={['OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
                 <ApiKeysPage />
               </ProtectedRoute>
             ),
@@ -181,6 +182,14 @@ export const router = createBrowserRouter([
             element: (
               <ProtectedRoute requiredRoles={['ADMIN']} requiredScopes={['TENANT']}>
                 <ClientMasterVisibilitySettingsPage />
+              </ProtectedRoute>
+            ),
+          },
+          {
+            path: '/masters/requests',
+            element: (
+              <ProtectedRoute requiredRoles={['OPERATOR', 'ADMIN']} requiredScopes={['TENANT']}>
+                <MasterDataAddRequestsPage />
               </ProtectedRoute>
             ),
           },

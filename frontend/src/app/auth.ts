@@ -92,6 +92,10 @@ export function canManageApiKeys(user: CurrentUser = fakeCurrentUser) {
   return user.userScopeType === 'TENANT' && hasAnyRole(user.roles, ['ADMIN']);
 }
 
+export function canRequestApiKeys(user: CurrentUser = fakeCurrentUser) {
+  return user.userScopeType === 'TENANT' && hasAnyRole(user.roles, ['OPERATOR', 'ADMIN']);
+}
+
 export function canManageUsers(user: CurrentUser = fakeCurrentUser) {
   return (
     (user.userScopeType === 'SYSTEM' && hasAnyRole(user.roles, ['SYSTEM_ADMIN'])) ||

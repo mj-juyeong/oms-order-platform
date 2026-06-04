@@ -23,7 +23,7 @@ data class BatchAuditLogResponse(
 data class ApiCallLogResponse(
 	val id: Long,
 	val tenantId: Long,
-	val clientId: Long,
+	val clientId: Long?,
 	val apiKeyId: Long?,
 	val requestId: String?,
 	val path: String,

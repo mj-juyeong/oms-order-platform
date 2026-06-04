@@ -7,18 +7,27 @@ import type {
   ClientMasterVisibilitySettingRequest,
   ClientProductCodeMapping,
   ClientProductCodeMappingUpsertRequest,
+  MasterDataAddRequest,
+  MasterDataAddRequestCreate,
+  MasterDataAddRequestReview,
+  MasterDataAddRequestStatus,
+  MasterDataAddRequestType,
+  ClientPublicProductMasterDetail,
   ClientProductMasterScopeItem,
   ClientPublicProductMasterItem,
+  ClientPublicStoreRouteMasterDetail,
   ClientPublicStoreRouteMasterItem,
   ClientStoreCodeMapping,
   ClientStoreCodeMappingUpsertRequest,
   ClientStoreRouteMasterScopeItem,
   MasterUploadPreviewResult,
   MasterUploadRowFailure,
+  ProductMasterDetail,
   ProductMasterItem,
   ProductMasterUploadHistory,
   ProductMasterUploadResult,
   StoreRouteMasterItem,
+  StoreRouteMasterDetail,
   StoreRouteMasterUploadHistory,
   StoreRouteMasterUploadResult,
 } from '../types/master';
@@ -36,6 +45,8 @@ export const mastersApi = {
             : undefined);
       return apiData<PageResponse<ProductMasterItem>>(`${endpoints.masters.products}${buildQuery({ ...rest, activeYn })}`);
     },
+    detail: (params: { tenantId: number; productId: number | string }) =>
+      apiData<ProductMasterDetail>(`${endpoints.masters.productDetail(params.productId)}${buildQuery({ tenantId: params.tenantId })}`),
     uploadCsv: (body: { tenantId: number; file: File; uploadedBy?: number }) => {
       const formData = new FormData();
       formData.set('tenantId', String(body.tenantId));
@@ -75,6 +86,8 @@ export const mastersApi = {
             : undefined);
       return apiData<PageResponse<StoreRouteMasterItem>>(`${endpoints.masters.storeRoutes}${buildQuery({ ...rest, activeYn })}`);
     },
+    detail: (params: { tenantId: number; storeRouteId: number | string }) =>
+      apiData<StoreRouteMasterDetail>(`${endpoints.masters.storeRouteDetail(params.storeRouteId)}${buildQuery({ tenantId: params.tenantId })}`),
     uploadXlsx: (body: { tenantId: number; file: File; uploadedBy?: number }) => {
       const formData = new FormData();
       formData.set('tenantId', String(body.tenantId));
@@ -147,10 +160,43 @@ export const mastersApi = {
     products: {
       list: (params: { tenantId?: number; clientId?: number; ezadminCode?: string; productName?: string; activeYn?: boolean; page?: number; size?: number }) =>
         apiData<PageResponse<ClientPublicProductMasterItem>>(`${endpoints.clientMasters.products}${buildQuery(params)}`),
+      detail: (params: { tenantId?: number; clientId?: number; productId: number | string }) =>
+        apiData<ClientPublicProductMasterDetail>(`${endpoints.clientMasters.productDetail(params.productId)}${buildQuery({ tenantId: params.tenantId, clientId: params.clientId })}`),
     },
     storeRoutes: {
       list: (params: { tenantId?: number; clientId?: number; baljugoCode?: string; customerCode?: string; brandName?: string; storeName?: string; area?: string; deliveryRound?: string; activeYn?: boolean; page?: number; size?: number }) =>
         apiData<PageResponse<ClientPublicStoreRouteMasterItem>>(`${endpoints.clientMasters.storeRoutes}${buildQuery(params)}`),
+      detail: (params: { tenantId?: number; clientId?: number; storeRouteId: number | string }) =>
+        apiData<ClientPublicStoreRouteMasterDetail>(`${endpoints.clientMasters.storeRouteDetail(params.storeRouteId)}${buildQuery({ tenantId: params.tenantId, clientId: params.clientId })}`),
     },
+  },
+  masterDataAddRequests: {
+    list: (params: { tenantId?: number; clientId?: number; status?: MasterDataAddRequestStatus; requestType?: MasterDataAddRequestType; page?: number; size?: number }) =>
+      apiData<PageResponse<MasterDataAddRequest>>(`${endpoints.masterDataAddRequests.list}${buildQuery(params)}`),
+    create: (body: MasterDataAddRequestCreate) =>
+      apiData<MasterDataAddRequest>(endpoints.masterDataAddRequests.list, {
+        method: 'POST',
+        body,
+      }),
+    approve: (requestId: number | string, params: { tenantId?: number; clientId?: number }, body?: MasterDataAddRequestReview) =>
+      apiData<MasterDataAddRequest>(`${endpoints.masterDataAddRequests.approve(requestId)}${buildQuery(params)}`, {
+        method: 'POST',
+        body,
+      }),
+    apply: (requestId: number | string, params: { tenantId?: number; clientId?: number }, body?: MasterDataAddRequestReview) =>
+      apiData<MasterDataAddRequest>(`${endpoints.masterDataAddRequests.apply(requestId)}${buildQuery(params)}`, {
+        method: 'POST',
+        body,
+      }),
+    needsMoreInfo: (requestId: number | string, params: { tenantId?: number; clientId?: number }, body?: MasterDataAddRequestReview) =>
+      apiData<MasterDataAddRequest>(`${endpoints.masterDataAddRequests.needsMoreInfo(requestId)}${buildQuery(params)}`, {
+        method: 'POST',
+        body,
+      }),
+    reject: (requestId: number | string, params: { tenantId?: number; clientId?: number }, body?: MasterDataAddRequestReview) =>
+      apiData<MasterDataAddRequest>(`${endpoints.masterDataAddRequests.reject(requestId)}${buildQuery(params)}`, {
+        method: 'POST',
+        body,
+      }),
   },
 };

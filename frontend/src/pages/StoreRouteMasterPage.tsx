@@ -5,9 +5,9 @@ import { omsApi } from '../api/oms';
 import { canManageMasters, fakeCurrentUser } from '../app/auth';
 import { Badge, Button, Card, FullScreenLoadingOverlay, Input, Modal, Select } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
-import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel } from '../components/domain';
+import { CodeCell, FileUploadDropzone, MasterUploadReviewPanel, StoreRouteMasterDetailModal } from '../components/domain';
 import type { PageResponse } from '../types/api';
-import type { MasterUploadPreviewResult, MasterUploadStatus, StoreRouteMasterItem, StoreRouteMasterUploadHistory, StoreRouteMasterUploadResult } from '../types/master';
+import type { MasterUploadPreviewResult, MasterUploadStatus, StoreRouteMasterDetail, StoreRouteMasterItem, StoreRouteMasterUploadHistory, StoreRouteMasterUploadResult } from '../types/master';
 import { areFilterStatesEqual } from '../utils/filterState';
 
 type StoreRouteOperationStatus = 'ALL' | 'ACTIVE' | 'INACTIVE';
@@ -55,6 +55,7 @@ const storeRouteColumns: DataTableColumn<StoreRouteMasterItem>[] = [
   { key: 'vehicle', header: '차량명', width: '130px', cell: (item) => item.vehicleName ?? '-' },
   { key: 'driver', header: '담당기사', width: '110px', cell: (item) => item.driverName ?? '-' },
   { key: 'status', header: '운영여부', cell: (item) => <OperationStatusBadge item={item} /> },
+  { key: 'latestConfirmedBatchAt', header: '최근 확정 배치', width: '180px', cell: (item) => formatConfirmedBatchUsage(item) },
   { key: 'rowNo', header: 'rowNo', align: 'right', cell: (item) => item.rowNo ?? '-' },
 ];
 
@@ -86,6 +87,10 @@ export function StoreRouteMasterPage() {
   const [uploadResult, setUploadResult] = useState<StoreRouteMasterUploadResult | null>(null);
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+  const [selectedStoreRoute, setSelectedStoreRoute] = useState<StoreRouteMasterItem | null>(null);
+  const [storeRouteDetail, setStoreRouteDetail] = useState<StoreRouteMasterDetail | null>(null);
+  const [loadingStoreRouteDetail, setLoadingStoreRouteDetail] = useState(false);
+  const [storeRouteDetailError, setStoreRouteDetailError] = useState<string | null>(null);
   const [loadingStoreRoutes, setLoadingStoreRoutes] = useState(true);
   const [loadingUploads, setLoadingUploads] = useState(true);
   const [uploading, setUploading] = useState(false);
@@ -348,6 +353,30 @@ export function StoreRouteMasterPage() {
     setPage(0);
   }
 
+  async function openStoreRouteDetail(item: StoreRouteMasterItem) {
+    if (!tenantId) return;
+
+    setSelectedStoreRoute(item);
+    setStoreRouteDetail(null);
+    setStoreRouteDetailError(null);
+    setLoadingStoreRouteDetail(true);
+
+    try {
+      const detail = await omsApi.masters.storeRoutes.detail({ tenantId, storeRouteId: item.id });
+      setStoreRouteDetail(detail);
+    } catch (error) {
+      setStoreRouteDetailError(formatApiError(error));
+    } finally {
+      setLoadingStoreRouteDetail(false);
+    }
+  }
+
+  function closeStoreRouteDetail() {
+    setSelectedStoreRoute(null);
+    setStoreRouteDetail(null);
+    setStoreRouteDetailError(null);
+  }
+
   return (
     <div className="space-y-5">
       <section className="grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -402,6 +431,7 @@ export function StoreRouteMasterPage() {
               emptyDescription="발주고코드, 지점명, 차량명, 운영여부 필터를 다시 확인해 주세요."
               emptyTitle="조회 결과가 없습니다."
               getRowKey={(item) => String(item.id)}
+              onRowClick={openStoreRouteDetail}
               renderMobileCard={renderStoreRouteMobileCard}
             />
             <Pagination
@@ -490,6 +520,14 @@ export function StoreRouteMasterPage() {
           />
         )}
       </Modal>
+
+      <StoreRouteMasterDetailModal
+        detail={storeRouteDetail}
+        error={storeRouteDetailError}
+        fallbackItem={selectedStoreRoute}
+        loading={loadingStoreRouteDetail}
+        onClose={closeStoreRouteDetail}
+      />
     </div>
   );
 }
@@ -515,7 +553,7 @@ function renderStoreRouteMobileCard(item: StoreRouteMasterItem) {
         <MobileFact label="거래처" value={<CodeCell value={item.customerCode ?? item.storeCode ?? ''} />} />
         <MobileFact label="권역" value={item.area ?? '-'} />
         <MobileFact label="차량" value={item.vehicleName ?? '-'} />
-        <MobileFact label="기사" value={item.driverName ?? '-'} />
+        <MobileFact label="최근 확정 배치" value={formatConfirmedBatchUsage(item)} />
       </div>
     </div>
   );
@@ -808,6 +846,15 @@ function formatDateTime(value?: string | null) {
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(date);
+}
+
+function formatConfirmedBatchUsage(item: StoreRouteMasterItem) {
+  if (!item.latestConfirmedBatchAt) {
+    return '-';
+  }
+
+  const batchNo = item.latestConfirmedBatchNo ? `${item.latestConfirmedBatchNo} · ` : '';
+  return `${batchNo}${formatDateTime(item.latestConfirmedBatchAt)}`;
 }
 
 function formatUploadCounts(upload: StoreRouteMasterUploadResult | StoreRouteMasterUploadHistory | null) {

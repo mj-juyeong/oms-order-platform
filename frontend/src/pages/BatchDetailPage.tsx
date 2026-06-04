@@ -691,7 +691,6 @@ function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDet
 
   const hasErrors = batch.errorCount > 0 || batch.status === 'VALIDATION_FAILED';
   const needsSupplement = batch.status === 'NEEDS_MORE_INFO';
-  const uploadPath = hasErrors || needsSupplement || batch.status === 'REJECTED' ? `/uploads?supplementOf=${batch.id}` : '/uploads';
 
   return (
     <Card className={`p-5 ${hasErrors ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
@@ -700,7 +699,7 @@ function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDet
           <p className="text-base font-bold text-slate-950">{hasErrors ? '검증 실패 후 처리' : '검증 후 처리 기준'}</p>
           <p className="mt-2 text-sm leading-6 text-slate-700">
             실패하거나 보완 요청된 배치는 그대로 보존합니다. 마스터 보완으로 해결되는 오류는 같은 배치를 재검증하고,
-            엑셀 원본값 자체가 틀린 경우에는 수정한 엑셀을 원 배치에 연결된 보완본으로 업로드하세요.
+            엑셀 원본값 자체가 틀린 경우에는 수정한 엑셀을 새 배치로 업로드하세요.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -730,7 +729,7 @@ function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDet
           {!needsSupplement ? (
             <Link
               className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
-              to={uploadPath}
+              to="/uploads"
             >
               새 엑셀 업로드
             </Link>

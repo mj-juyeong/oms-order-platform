@@ -27,6 +27,12 @@ interface ClientProductMasterScopeRepository : JpaRepository<ClientProductMaster
 		tenantId: Long,
 		clientId: Long,
 	): List<ClientProductMasterScopeEntity>
+
+	fun countByTenantIdAndProductMasterItemIdAndStatus(
+		tenantId: Long,
+		productMasterItemId: Long,
+		status: ClientMasterScopeStatus,
+	): Long
 }
 
 interface ClientStoreRouteMasterScopeRepository : JpaRepository<ClientStoreRouteMasterScopeEntity, Long> {
@@ -46,4 +52,10 @@ interface ClientStoreRouteMasterScopeRepository : JpaRepository<ClientStoreRoute
 		tenantId: Long,
 		clientId: Long,
 	): List<ClientStoreRouteMasterScopeEntity>
+
+	fun countByTenantIdAndStoreRouteMasterItemIdAndStatus(
+		tenantId: Long,
+		storeRouteMasterItemId: Long,
+		status: ClientMasterScopeStatus,
+	): Long
 }
