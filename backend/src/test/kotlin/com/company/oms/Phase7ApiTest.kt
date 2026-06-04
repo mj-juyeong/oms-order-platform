@@ -7,6 +7,7 @@ import com.company.oms.common.scope.TenantRepository
 import com.company.oms.auth.ApiKeyEntity
 import com.company.oms.auth.ApiKeyHash
 import com.company.oms.auth.ApiKeyRepository
+import com.company.oms.auth.ApiKeyScopeType
 import com.company.oms.auth.RoleEntity
 import com.company.oms.auth.RoleRepository
 import com.company.oms.auth.UserEntity
@@ -134,6 +135,20 @@ class Phase7ApiTest @Autowired constructor(
 			jsonPath("$.data.totalElements") { value(0) }
 		}
 
+		mockMvc.get("/api/v1/orders") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("confirmedOnly", "false")
+			param("sortBy", "batchStatus")
+			param("sortDirection", "desc")
+			param("size", "20")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(2) }
+			jsonPath("$.data.items[0].batchId") { value(uploadedOnlyBatchId.toInt()) }
+			jsonPath("$.data.items[0].batchStatus") { value("UPLOADED") }
+		}
+
 		mockMvc.get("/api/v1/scan-lines") {
 			param("tenantId", scope.tenantId.toString())
 			param("clientId", scope.clientId.toString())
@@ -244,7 +259,7 @@ class Phase7ApiTest @Autowired constructor(
 		}.andExpect {
 			status { isOk() }
 			jsonPath("$.data.items[0].batchId") { value(confirmedBatchId.toInt()) }
-			jsonPath("$['data']['items'][0]['바코드']") { value("0000123456789") }
+			jsonPath("$.data.items[0].barcode") { value("0000123456789") }
 			jsonPath("$.meta.requestId") { value("req-wos-phase7") }
 		}
 
@@ -254,8 +269,8 @@ class Phase7ApiTest @Autowired constructor(
 			header("X-Api-Key", apiKey)
 		}.andExpect {
 			status { isOk() }
-			jsonPath("$['data']['items'][0]['주문번호']") { value("0000000001") }
-			jsonPath("$['data']['items'][0]['QR코드']") { value("PL-QR-0001") }
+			jsonPath("$.data.items[0].orderNo") { value("0000000001") }
+			jsonPath("$.data.items[0].qrCode") { value("PL-QR-0001") }
 		}
 
 		mockMvc.get("/external/v1/wos/scan-upload") {
@@ -321,6 +336,59 @@ class Phase7ApiTest @Autowired constructor(
 			jsonPath("$.data.items[0].batchId") { value(firstBatchId.toInt()) }
 			jsonPath("$.data.items[1].batchId") { value(secondBatchId.toInt()) }
 		}
+	}
+
+	@Test
+	fun tenantWideApiKeyExposesConfirmedBatchesAcrossClientsOnlyWithinTenant() {
+		val scope = createScope()
+		val otherClient =
+			clientRepository.saveAndFlush(
+				ClientEntity(
+					tenantId = scope.tenantId,
+					code = "client-${UUID.randomUUID()}",
+					name = "Other Client",
+				),
+			)
+		val otherClientScope = TestScope(scope.tenantId, otherClient.id!!)
+		val otherTenantScope = createScope()
+		seedMasters(scope.tenantId, productCode = "001234", storeCode = "000777", vehicleName = "vehicle-1")
+		seedMasters(scope.tenantId, productCode = "009999", storeCode = "000888", vehicleName = "vehicle-2")
+		seedMasters(otherTenantScope.tenantId, productCode = "007777", storeCode = "000999", vehicleName = "vehicle-3")
+		val apiKey = createApiKey(scope.tenantId, null, setOf("WOS_SCAN_READ", "PL_READ"))
+		val firstBatchId = uploadValidateAndConfirm(scope, productCode = "001234", storeCode = "000777", vehicleName = "vehicle-1")
+		val secondBatchId = uploadValidateAndConfirm(otherClientScope, productCode = "009999", storeCode = "000888", vehicleName = "vehicle-2")
+		uploadValidateAndConfirm(otherTenantScope, productCode = "007777", storeCode = "000999", vehicleName = "vehicle-3")
+
+		mockMvc.get("/external/v1/wos/scan-upload") {
+			param("size", "20")
+			header("X-Api-Key", apiKey)
+			header("X-Request-Id", "req-tenant-wide-wos")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(2) }
+			jsonPath("$.data.items[0].batchId") { value(firstBatchId.toInt()) }
+			jsonPath("$.data.items[0].clientId") { value(scope.clientId.toInt()) }
+			jsonPath("$.data.items[0].clientName") { value("Client") }
+			jsonPath("$.data.items[1].batchId") { value(secondBatchId.toInt()) }
+			jsonPath("$.data.items[1].clientId") { value(otherClient.id!!.toInt()) }
+			jsonPath("$.data.items[1].clientName") { value("Other Client") }
+		}
+
+		mockMvc.get("/external/v1/pl/picking-list") {
+			param("size", "20")
+			header("X-Api-Key", apiKey)
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.totalElements") { value(2) }
+			jsonPath("$.data.items[0].clientId") { value(scope.clientId.toInt()) }
+			jsonPath("$.data.items[1].clientId") { value(otherClient.id!!.toInt()) }
+		}
+
+		val logs = apiCallLogRepository.findAllByTenantIdAndClientIdIsNullAndPath(
+			scope.tenantId,
+			"/external/v1/wos/scan-upload",
+		)
+		assertTrue(logs.any { it.requestId == "req-tenant-wide-wos" && it.responseStatus == 200 })
 	}
 
 	@Test
@@ -466,6 +534,7 @@ class Phase7ApiTest @Autowired constructor(
 			ApiKeyEntity(
 				tenantId = tenantId,
 				clientId = clientId,
+				scopeType = if (clientId == null) ApiKeyScopeType.TENANT else ApiKeyScopeType.CLIENT,
 				name = "phase7-key",
 				keyHash = ApiKeyHash.sha256Hex(plainKey),
 				status = "ACTIVE",

@@ -5,6 +5,7 @@ import com.company.oms.common.scope.ClientEntity
 import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
 import com.company.oms.common.scope.TenantRepository
+import com.company.oms.common.persistence.BatchStatus
 import com.company.oms.master.ClientProductCodeMappingEntity
 import com.company.oms.master.ClientProductCodeMappingRepository
 import com.company.oms.master.ClientStoreCodeMappingEntity
@@ -17,6 +18,7 @@ import com.company.oms.batch.UploadBatchRepository
 import org.apache.poi.xssf.usermodel.XSSFWorkbook
 import org.flywaydb.core.Flyway
 import org.hamcrest.Matchers.hasItem
+import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
@@ -218,6 +220,60 @@ class ValidationConfirmApiTest @Autowired constructor(
 		}
 	}
 
+	@Test
+	fun confirmedSupplementBatchSupersedesFailedParentBatch() {
+		val scope = createScope()
+		seedMasters(scope.tenantId, productCode = "001234", storeCode = "000777", vehicleName = "차량1")
+		val parentBatchId = uploadWorkbook(scope, productCode = "009999", storeCode = "000777", vehicleName = "차량1")
+
+		mockMvc.post("/api/v1/order-excel-batches/$parentBatchId/validate") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("VALIDATION_FAILED") }
+		}
+
+		val supplementBatchId = uploadWorkbook(
+			scope = scope,
+			productCode = "001234",
+			storeCode = "000777",
+			vehicleName = "차량1",
+			parentBatchId = parentBatchId,
+		)
+
+		mockMvc.post("/api/v1/order-excel-batches/$supplementBatchId/validate") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("READY_TO_CONFIRM") }
+			jsonPath("$.data.errorCount") { value(0) }
+		}
+
+		mockMvc.post("/api/v1/order-excel-batches/$supplementBatchId/confirm") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.status") { value("CONFIRMED") }
+		}
+
+		val parentBatch = uploadBatchRepository.findById(parentBatchId).orElseThrow()
+		assertEquals(BatchStatus.CANCELLED, parentBatch.status)
+		assertTrue(parentBatch.cancelledAt != null)
+
+		mockMvc.get("/api/v1/order-excel-batches") {
+			param("tenantId", scope.tenantId.toString())
+			param("clientId", scope.clientId.toString())
+			param("size", "20")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.items[*].id") { value(not(hasItem(parentBatchId.toInt()))) }
+			jsonPath("$.data.items[*].id") { value(hasItem(supplementBatchId.toInt())) }
+		}
+	}
+
 	private fun createScope(): TestScope {
 		val tenant = tenantRepository.saveAndFlush(
 			TenantEntity(
@@ -263,6 +319,7 @@ class ValidationConfirmApiTest @Autowired constructor(
 		productCode: String,
 		storeCode: String,
 		vehicleName: String,
+		parentBatchId: Long? = null,
 	): Long {
 		mockMvc.multipart("/api/v1/order-excel-batches") {
 			file(
@@ -275,6 +332,7 @@ class ValidationConfirmApiTest @Autowired constructor(
 			)
 			param("tenantId", scope.tenantId.toString())
 			param("clientId", scope.clientId.toString())
+			parentBatchId?.let { param("parentBatchId", it.toString()) }
 		}.andExpect {
 			status { isOk() }
 		}

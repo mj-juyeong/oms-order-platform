@@ -21,6 +21,7 @@ import com.company.oms.master.ProductMasterItemRepository
 import com.company.oms.master.StoreRouteMasterItemRepository
 import com.company.oms.pl.PlLineEntity
 import com.company.oms.pl.PlLineRepository
+import com.company.oms.notification.NotificationService
 import com.company.oms.scan.ScanLineEntity
 import com.company.oms.scan.ScanLineRepository
 import org.springframework.context.annotation.Profile
@@ -45,6 +46,7 @@ class BatchValidationService(
 	private val plLineRepository: PlLineRepository,
 	private val labelLineRepository: LabelLineRepository,
 	private val userRepository: UserRepository,
+	private val notificationService: NotificationService,
 ) {
 
 	@Transactional
@@ -122,6 +124,8 @@ class BatchValidationService(
 		batch.confirmedAt = now
 		batch.confirmedBy = resolvedActorId
 		audit(batch, "CONFIRMED", beforeStatus, BatchStatus.CONFIRMED, resolvedActorId, null)
+		markParentBatchSuperseded(batch, now, resolvedActorId)
+		notificationService.notifyBatchConfirmationApproved(batch)
 
 		return batch.toStatusChangeResponse()
 	}
@@ -405,6 +409,26 @@ class BatchValidationService(
 			message = message,
 			status = HttpStatus.BAD_REQUEST,
 		)
+
+	private fun markParentBatchSuperseded(
+		batch: UploadBatchEntity,
+		now: LocalDateTime,
+		actorId: Long?,
+	) {
+		val parentBatchId = batch.parentBatchId ?: return
+		val parentBatch = uploadBatchRepository.findById(parentBatchId)
+			.filter { it.tenantId == batch.tenantId && it.clientId == batch.clientId }
+			.orElse(null)
+			?: return
+		if (parentBatch.status in setOf(BatchStatus.CONFIRMED, BatchStatus.CANCELLED, BatchStatus.ROLLED_BACK)) {
+			return
+		}
+
+		val beforeStatus = parentBatch.status
+		parentBatch.status = BatchStatus.CANCELLED
+		parentBatch.cancelledAt = now
+		audit(parentBatch, "SUPERSEDED_BY_SUPPLEMENT", beforeStatus, BatchStatus.CANCELLED, actorId, "confirmed supplement batch ${batch.batchNo}")
+	}
 
 	private fun resolveActorId(actorId: Long?): Long? =
 		actorId?.takeIf { userRepository.existsById(it) }

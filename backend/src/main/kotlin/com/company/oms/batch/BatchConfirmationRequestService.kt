@@ -50,6 +50,14 @@ class BatchConfirmationRequestService(
 		if (confirmationRequestRepository.existsByBatchIdAndStatusIn(batchId, listOf(BatchConfirmationRequestStatus.REQUESTED))) {
 			throw invalidBatchStatus("이미 처리 대기 중인 확정 요청이 있습니다.")
 		}
+		notificationService.markBatchNotificationsHandled(
+			tenantId = batch.tenantId,
+			batchIds = listOfNotNull(batch.parentBatchId),
+			eventTypes = setOf(
+				com.company.oms.common.persistence.NotificationEventType.BATCH_CONFIRMATION_NEEDS_MORE_INFO,
+				com.company.oms.common.persistence.NotificationEventType.BATCH_CONFIRMATION_REJECTED,
+			),
+		)
 
 		val beforeStatus = batch.status
 		val resolvedActorId = resolveActorId(actorId)
@@ -135,6 +143,7 @@ class BatchConfirmationRequestService(
 		request.supplementType = supplementType ?: BatchSupplementRequestType.CLARIFICATION
 		batch.status = BatchStatus.NEEDS_MORE_INFO
 		audit(batch, "CONFIRMATION_NEEDS_MORE_INFO", beforeStatus, BatchStatus.NEEDS_MORE_INFO, resolvedActorId, comment)
+		notificationService.markBatchConfirmationRequestNotificationHandled(batch.tenantId, request.id ?: 0)
 		notificationService.notifyBatchConfirmationNeedsMoreInfo(batch, comment)
 
 		return request.toResponse(batch)
@@ -168,6 +177,7 @@ class BatchConfirmationRequestService(
 		request.reviewComment = normalizedComment
 		batch.status = BatchStatus.REJECTED
 		audit(batch, "CONFIRMATION_REJECTED", beforeStatus, BatchStatus.REJECTED, resolvedActorId, normalizedComment)
+		notificationService.markBatchConfirmationRequestNotificationHandled(batch.tenantId, request.id ?: 0)
 		notificationService.notifyBatchConfirmationRejected(batch, normalizedComment)
 
 		return request.toResponse(batch)
@@ -200,6 +210,16 @@ class BatchConfirmationRequestService(
 		batch.confirmedAt = now
 		batch.confirmedBy = resolvedActorId
 		audit(batch, "CONFIRMED", beforeStatus, BatchStatus.CONFIRMED, resolvedActorId, comment)
+		markParentBatchSuperseded(batch, now, resolvedActorId)
+		notificationService.markBatchConfirmationRequestNotificationHandled(batch.tenantId, request.id ?: 0)
+		notificationService.markBatchNotificationsHandled(
+			tenantId = batch.tenantId,
+			batchIds = listOfNotNull(batch.id, batch.parentBatchId),
+			eventTypes = setOf(
+				com.company.oms.common.persistence.NotificationEventType.BATCH_CONFIRMATION_NEEDS_MORE_INFO,
+				com.company.oms.common.persistence.NotificationEventType.BATCH_CONFIRMATION_REJECTED,
+			),
+		)
 		notificationService.notifyBatchConfirmationApproved(batch)
 
 		return request.toResponse(batch)
@@ -241,6 +261,26 @@ class BatchConfirmationRequestService(
 
 	private fun invalidBatchStatus(message: String): OmsException =
 		OmsException(ErrorCode.INVALID_BATCH_STATUS, message = message, status = HttpStatus.BAD_REQUEST)
+
+	private fun markParentBatchSuperseded(
+		batch: UploadBatchEntity,
+		now: LocalDateTime,
+		actorId: Long?,
+	) {
+		val parentBatchId = batch.parentBatchId ?: return
+		val parentBatch = uploadBatchRepository.findById(parentBatchId)
+			.filter { it.tenantId == batch.tenantId && it.clientId == batch.clientId }
+			.orElse(null)
+			?: return
+		if (parentBatch.status in setOf(BatchStatus.CONFIRMED, BatchStatus.CANCELLED, BatchStatus.ROLLED_BACK)) {
+			return
+		}
+
+		val beforeStatus = parentBatch.status
+		parentBatch.status = BatchStatus.CANCELLED
+		parentBatch.cancelledAt = now
+		audit(parentBatch, "SUPERSEDED_BY_SUPPLEMENT", beforeStatus, BatchStatus.CANCELLED, actorId, "confirmed supplement batch ${batch.batchNo}")
+	}
 
 	private fun resolveActorId(actorId: Long?): Long? =
 		actorId?.takeIf { userRepository.existsById(it) }

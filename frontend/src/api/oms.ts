@@ -41,7 +41,7 @@ export const omsApi = {
 };
 
 export type { ListParams } from './types';
-export type { ApiKeyItem, CreatedApiKey } from '../types/apiKey';
+export type { ApiKeyItem, ApiKeyRequestItem, ApiKeyRequestStatus, ApiKeyScopeType, CreatedApiKey } from '../types/apiKey';
 export type { BackendApiCallLog, BackendAuditDownloadLog, BackendBatchAuditLog } from '../types/audit';
 export type {
   BackendBatchDetail,

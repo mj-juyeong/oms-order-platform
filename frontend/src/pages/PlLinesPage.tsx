@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { omsApi, type BackendBatchSummary, type BackendPlLine } from '../api/oms';
-import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { readBatchContextSelection, resetBatchContextSelection, saveAllBatchContextSelection, saveBatchIdContextSelection, useBatchContextSelection } from '../app/batchContext';
+import { resetClientContextSelection } from '../app/clientContext';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
   Badge,
@@ -14,8 +15,9 @@ import {
   LoadingState,
   ModalFrame,
 } from '../components/common';
-import { DataTable, Pagination, type DataTableColumn } from '../components/data';
+import { DataTable, Pagination, SortMenu, type DataTableColumn, type DataTableSort } from '../components/data';
 import { BatchSelectionPanel, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
+import { usePageBackButton } from '../components/layout';
 import type { PageResponse } from '../types/api';
 import type { PlLine } from '../types/pl';
 import { todayString, type DateRangeValue } from '../utils/dateRange';
@@ -46,6 +48,20 @@ const initialFilters: PlFilters = {
 };
 
 const pageSize = 20;
+const initialSort: DataTableSort = { field: 'orderNo', direction: 'asc' };
+const plSortOptions = [
+  { label: 'PL 유형', value: 'plType' },
+  { label: '주문번호', value: 'orderNo' },
+  { label: '거래처코드', value: 'storeCode' },
+  { label: '거래처명', value: 'storeName' },
+  { label: '브랜드', value: 'brandName' },
+  { label: '품목코드', value: 'productCode' },
+  { label: '품목명', value: 'productName' },
+  { label: '납기요청일', value: 'dueDate' },
+  { label: '주문량', value: 'orderQty' },
+  { label: '단위', value: 'unit' },
+  { label: '차량명', value: 'vehicleName' },
+];
 
 export function PlLinesPage() {
   const queryScope = useQueryScope();
@@ -60,6 +76,7 @@ export function PlLinesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const [sort, setSort] = useState<DataTableSort>(initialSort);
   const previousClientIdRef = useRef<number | undefined>(undefined);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toPlLine), [pageData]);
@@ -69,12 +86,11 @@ export function PlLinesPage() {
     () => !areFilterStatesEqual(filters, appliedFilters) || plType !== appliedPlType,
     [appliedFilters, appliedPlType, filters, plType],
   );
-  const needsBatchSelection = queryScope.canQuery && !parseNumericFilter(appliedFilters.batchId);
-  const selectedBatchSelection = useMemo(() => {
-    const batchId = parseNumericFilter(appliedFilters.batchId);
-    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
-    return selection && selection.batchId === batchId ? selection : null;
-  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
+  const appliedBatchId = parseNumericFilter(appliedFilters.batchId);
+  const storedBatchSelection = useBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+  const allBatchesSelected = storedBatchSelection?.mode === 'all' && !appliedBatchId;
+  const needsBatchSelection = queryScope.canQuery && Boolean(queryScope.clientId) && !appliedBatchId && !allBatchesSelected;
+  const selectedBatchSelection = storedBatchSelection?.mode === 'batch' && storedBatchSelection.batchId === appliedBatchId ? storedBatchSelection : null;
 
   useEffect(() => {
     const previousClientId = previousClientIdRef.current;
@@ -102,7 +118,7 @@ export function PlLinesPage() {
   useEffect(() => {
     void loadPlLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedFilters.batchId, appliedFilters.dueDateRange, appliedFilters.orderNo, appliedFilters.productCode, appliedFilters.storeCode, appliedFilters.vehicleName, appliedPlType, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq]);
+  }, [appliedFilters.batchId, appliedFilters.dueDateRange, appliedFilters.orderNo, appliedFilters.productCode, appliedFilters.storeCode, appliedFilters.vehicleName, appliedPlType, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq, sort]);
 
   useEffect(() => {
     if (selectedLine && !lines.some((line) => line.id === selectedLine.id)) {
@@ -124,6 +140,8 @@ export function PlLinesPage() {
         clientId: queryScope.clientId,
         page: page - 1,
         size: pageSize,
+        sortBy: sort.field,
+        sortDirection: sort.direction,
         batchId: parseNumericFilter(appliedFilters.batchId),
         plType: appliedPlType === 'ALL' ? undefined : appliedPlType,
         dueDateFrom: appliedFilters.dueDateRange.from || undefined,
@@ -166,6 +184,11 @@ export function PlLinesPage() {
     setFiltersOpen(false);
   }
 
+  function applySort(nextSort: DataTableSort) {
+    setPage(1);
+    setSort(nextSort);
+  }
+
   function selectBatch(batch: BackendBatchSummary) {
     const nextFilters: PlFilters = { ...filters, batchId: String(batch.id), dueDateRange: { preset: 'ALL', from: '', to: '' } };
     setPage(1);
@@ -174,6 +197,10 @@ export function PlLinesPage() {
   }
 
   function chooseDifferentBatch() {
+    if (!queryScope.clientId) {
+      chooseDifferentClient();
+      return;
+    }
     resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
     const nextFilters: PlFilters = { ...filters, batchId: '' };
     setPage(1);
@@ -181,6 +208,48 @@ export function PlLinesPage() {
     setAppliedFilters(nextFilters);
     setPageData(null);
   }
+
+  function chooseDifferentClient() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    resetClientContextSelection();
+    const nextFilters = plFiltersForScope(queryScope.tenantId, undefined);
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  function selectAllBatches() {
+    if (!queryScope.tenantId || !queryScope.clientId) return;
+    saveAllBatchContextSelection({ tenantId: queryScope.tenantId, clientId: queryScope.clientId });
+    const nextFilters: PlFilters = { ...filters, batchId: '', dueDateRange: { preset: 'ALL', from: '', to: '' } };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  const batchStepBackOverride = useMemo(() => {
+    const hasBatchResultStep =
+      Boolean(queryScope.clientId) &&
+      !queryScope.needsClientSelection &&
+      !queryScope.blockedReason &&
+      !needsBatchSelection &&
+      (Boolean(appliedBatchId) || allBatchesSelected);
+
+    return hasBatchResultStep ? { label: '배치 선택으로 돌아가기', onBack: chooseDifferentBatch } : null;
+  }, [
+    allBatchesSelected,
+    appliedBatchId,
+    filters,
+    needsBatchSelection,
+    queryScope.blockedReason,
+    queryScope.clientId,
+    queryScope.needsClientSelection,
+    queryScope.tenantId,
+  ]);
+
+  usePageBackButton(batchStepBackOverride);
 
   if (queryScope.needsClientSelection && queryScope.tenantId) {
     return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
@@ -201,6 +270,8 @@ export function PlLinesPage() {
         clientId={queryScope.clientId}
         clientName={queryScope.clientName}
         description="선택한 배치 기준으로 PL 데이터를 조회합니다."
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
+        onSelectAllBatches={selectAllBatches}
         onSelectBatch={selectBatch}
         tenantId={queryScope.tenantId}
         title="PL 데이터를 조회할 배치를 선택하세요"
@@ -218,6 +289,7 @@ export function PlLinesPage() {
         clientName={queryScope.clientName}
         deliveryDate={selectedBatchSelection?.deliveryDate}
         onChooseBatch={chooseDifferentBatch}
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
       />
 
       <PlFilterPanel
@@ -246,9 +318,12 @@ export function PlLinesPage() {
               행을 선택하면 주문, 상품, 배송 정보를 큰 화면에서 확인합니다.
             </p>
           </div>
-          <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
-            새로고침
-          </Button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <SortMenu onChange={applySort} options={plSortOptions} sort={sort} />
+            <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
+              새로고침
+            </Button>
+          </div>
         </div>
         {loading && !pageData ? (
           <div className="p-5">
@@ -269,7 +344,9 @@ export function PlLinesPage() {
             getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
             getRowKey={(item) => item.id}
             onRowClick={setSelectedLine}
+            onSortChange={applySort}
             renderMobileCard={renderPlMobileCard}
+            sort={sort}
           />
         ) : null}
         <div className="px-5 py-4">
@@ -388,15 +465,15 @@ function PlFilterPanel({
 
 function createColumns(): DataTableColumn<PlLine>[] {
   return [
-    { key: 'type', header: 'PL 유형', width: '90px', cell: (item) => <Badge tone={item.plType === 'EA' ? 'blue' : 'teal'}>{item.plType}</Badge> },
-    { key: 'orderNo', header: '주문번호', width: '180px', cell: (item) => <CodeCell value={item.orderNo} /> },
-    { key: 'source', header: '행 번호', width: '110px', cell: (item) => <span className="text-xs text-slate-500">{item.rowNo}행</span> },
-    { key: 'store', header: '거래처', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.storeCode} /> },
-    { key: 'product', header: '상품', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
-    { key: 'dueDate', header: '납기요청일', width: '120px', cell: (item) => item.dueDate },
-    { key: 'qty', header: '주문량', align: 'right', width: '90px', cell: (item) => item.orderQty.toLocaleString() },
-    { key: 'unit', header: '단위', width: '80px', cell: (item) => <Badge tone={item.unit === 'BOX' ? 'teal' : 'blue'}>{item.unit}</Badge> },
-    { key: 'vehicle', header: '차량명', width: '110px', cell: (item) => item.vehicleName },
+    { key: 'type', header: 'PL 유형', sortKey: 'plType', width: '90px', cell: (item) => <Badge tone={item.plType === 'EA' ? 'blue' : 'teal'}>{item.plType}</Badge> },
+    { key: 'orderNo', header: '주문번호', sortKey: 'orderNo', width: '180px', cell: (item) => <CodeCell value={item.orderNo} /> },
+    { key: 'source', header: '행 번호', sortKey: 'rowNo', width: '110px', cell: (item) => <span className="text-xs text-slate-500">{item.rowNo}행</span> },
+    { key: 'store', header: '거래처', sortKey: 'storeName', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.storeCode} /> },
+    { key: 'product', header: '상품', sortKey: 'productName', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
+    { key: 'dueDate', header: '납기요청일', sortKey: 'dueDate', width: '120px', cell: (item) => item.dueDate },
+    { key: 'qty', header: '주문량', sortKey: 'orderQty', align: 'right', width: '90px', cell: (item) => item.orderQty.toLocaleString() },
+    { key: 'unit', header: '단위', sortKey: 'unit', width: '80px', cell: (item) => <Badge tone={item.unit === 'BOX' ? 'teal' : 'blue'}>{item.unit}</Badge> },
+    { key: 'vehicle', header: '차량명', sortKey: 'vehicleName', width: '110px', cell: (item) => item.vehicleName },
     { key: 'temp', header: '보관온도', width: '90px', cell: (item) => item.storageTemperature },
     { key: 'qr', header: 'QR코드', width: '160px', cell: (item) => <CodeCell value={item.qrCode} /> },
   ];
@@ -470,7 +547,7 @@ function PlDetailModal({ line, onClose }: { line: PlLine | null; onClose: () => 
           </details>
 
           <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
+            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
               배치 상세
             </Link>
             <Button onClick={onClose} variant="primary">확인</Button>
@@ -642,7 +719,7 @@ function plFiltersForScope(tenantId?: number | null, clientId?: number): PlFilte
   const storedBatch = readBatchContextSelection(tenantId, clientId);
   return {
     ...initialFilters,
-    batchId: storedBatch ? String(storedBatch.batchId) : '',
+    batchId: storedBatch?.mode === 'batch' ? String(storedBatch.batchId) : '',
     dueDateRange: storedBatch ? { preset: 'ALL', from: '', to: '' } : initialFilters.dueDateRange,
   };
 }

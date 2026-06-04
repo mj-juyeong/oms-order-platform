@@ -1,11 +1,16 @@
 package com.company.oms.order
 
+import com.company.oms.batch.UploadBatchEntity
 import com.company.oms.common.persistence.CreatedAtEntity
+import com.company.oms.common.scope.ClientEntity
 import jakarta.persistence.Column
 import jakarta.persistence.Entity
+import jakarta.persistence.FetchType
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
+import jakarta.persistence.JoinColumn
+import jakarta.persistence.ManyToOne
 import jakarta.persistence.Table
 import java.math.BigDecimal
 import java.time.LocalDate
@@ -64,5 +69,12 @@ class OrderLineEntity(
 	@Id
 	@GeneratedValue(strategy = GenerationType.IDENTITY)
 	var id: Long? = null
-}
 
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "client_id", referencedColumnName = "id", insertable = false, updatable = false)
+	var client: ClientEntity? = null
+
+	@ManyToOne(fetch = FetchType.LAZY)
+	@JoinColumn(name = "batch_id", referencedColumnName = "id", insertable = false, updatable = false)
+	var batch: UploadBatchEntity? = null
+}

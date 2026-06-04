@@ -3,8 +3,9 @@ package com.company.oms.validation
 import com.company.oms.common.persistence.UploadDomain
 import com.company.oms.common.persistence.ValidationSeverity
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 
-interface ValidationErrorRepository : JpaRepository<ValidationErrorEntity, Long> {
+interface ValidationErrorRepository : JpaRepository<ValidationErrorEntity, Long>, JpaSpecificationExecutor<ValidationErrorEntity> {
 	fun findAllByBatchId(batchId: Long): List<ValidationErrorEntity>
 
 	fun deleteAllByBatchId(batchId: Long)

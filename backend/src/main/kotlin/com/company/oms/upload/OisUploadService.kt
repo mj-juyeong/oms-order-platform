@@ -238,10 +238,10 @@ class OisUploadService(
 				.orElseThrow {
 					OmsException(ErrorCode.BATCH_NOT_FOUND, status = HttpStatus.NOT_FOUND)
 				}
-		if (parentBatch.status != BatchStatus.NEEDS_MORE_INFO) {
+		if (parentBatch.status !in supplementUploadStatuses) {
 			throw OmsException(
 				errorCode = ErrorCode.INVALID_BATCH_STATUS,
-				message = "보완 요청 상태의 배치에 대해서만 보완본을 업로드할 수 있습니다.",
+				message = "검증 실패, 보완 요청, 반려 상태의 배치에 대해서만 보완본을 업로드할 수 있습니다.",
 				status = HttpStatus.BAD_REQUEST,
 			)
 		}
@@ -537,13 +537,16 @@ private fun batchSearchSpec(
 				criteriaBuilder.isNotNull(childBatch.get<Long>("parentBatchId")),
 				criteriaBuilder.equal(childBatch.get<BatchStatus>("status"), BatchStatus.CONFIRMED),
 			)
-		predicates += criteriaBuilder.or(
-			criteriaBuilder.notEqual(root.get<BatchStatus>("status"), BatchStatus.NEEDS_MORE_INFO),
-			criteriaBuilder.not(root.get<Long>("id").`in`(confirmedSupplementParents)),
-		)
+		predicates += criteriaBuilder.not(root.get<Long>("id").`in`(confirmedSupplementParents))
 
 		criteriaBuilder.and(*predicates.toTypedArray())
 	}
+
+private val supplementUploadStatuses = setOf(
+	BatchStatus.VALIDATION_FAILED,
+	BatchStatus.NEEDS_MORE_INFO,
+	BatchStatus.REJECTED,
+)
 
 private fun <TEntity : Any, TResponse> Page<TEntity>.toResponsePage(mapper: (TEntity) -> TResponse): PageResponse<TResponse> =
 	PageResponse(

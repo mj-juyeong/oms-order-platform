@@ -64,6 +64,7 @@ export function Header({ onMenuClick }: HeaderProps) {
 
   const clientOptions = useMemo(() => {
     return [
+      { label: '고객사 선택', value: 'unselected' },
       { label: '전체 고객사', value: 'all' },
       ...clients.map((client) => ({ label: `고객사: ${client.name}`, value: String(client.id) })),
     ];

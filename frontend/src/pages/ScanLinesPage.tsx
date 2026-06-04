@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { omsApi, type BackendBatchSummary, type BackendScanLine } from '../api/oms';
-import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { readBatchContextSelection, resetBatchContextSelection, saveAllBatchContextSelection, saveBatchIdContextSelection, useBatchContextSelection } from '../app/batchContext';
+import { resetClientContextSelection } from '../app/clientContext';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
   Badge,
@@ -14,8 +15,9 @@ import {
   LoadingState,
   ModalFrame,
 } from '../components/common';
-import { DataTable, Pagination, type DataTableColumn } from '../components/data';
+import { DataTable, Pagination, SortMenu, type DataTableColumn, type DataTableSort } from '../components/data';
 import { BatchSelectionPanel, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
+import { usePageBackButton } from '../components/layout';
 import type { PageResponse } from '../types/api';
 import type { ScanLine } from '../types/scan';
 import { todayString, type DateRangeValue } from '../utils/dateRange';
@@ -44,6 +46,19 @@ const initialFilters: ScanFilters = {
 };
 
 const pageSize = 20;
+const initialSort: DataTableSort = { field: 'barcode', direction: 'asc' };
+const scanSortOptions = [
+  { label: '바코드', value: 'barcode' },
+  { label: 'Scan 센터', value: 'scanCenter' },
+  { label: '배송일', value: 'deliveryDate' },
+  { label: '거래처코드', value: 'storeCode' },
+  { label: '거래처명', value: 'storeName' },
+  { label: '품목코드', value: 'productCode' },
+  { label: '품목명', value: 'productName' },
+  { label: '라벨수량', value: 'labelQty' },
+  { label: '단위', value: 'unit' },
+  { label: '버스', value: 'bus' },
+];
 
 export function ScanLinesPage() {
   const queryScope = useQueryScope();
@@ -56,18 +71,18 @@ export function ScanLinesPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [reloadSeq, setReloadSeq] = useState(0);
+  const [sort, setSort] = useState<DataTableSort>(initialSort);
   const previousClientIdRef = useRef<number | undefined>(undefined);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toScanLine), [pageData]);
   const summary = useMemo(() => createScanSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
   const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
   const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
-  const needsBatchSelection = queryScope.canQuery && !parseNumericFilter(appliedFilters.batchId);
-  const selectedBatchSelection = useMemo(() => {
-    const batchId = parseNumericFilter(appliedFilters.batchId);
-    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
-    return selection && selection.batchId === batchId ? selection : null;
-  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
+  const appliedBatchId = parseNumericFilter(appliedFilters.batchId);
+  const storedBatchSelection = useBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+  const allBatchesSelected = storedBatchSelection?.mode === 'all' && !appliedBatchId;
+  const needsBatchSelection = queryScope.canQuery && Boolean(queryScope.clientId) && !appliedBatchId && !allBatchesSelected;
+  const selectedBatchSelection = storedBatchSelection?.mode === 'batch' && storedBatchSelection.batchId === appliedBatchId ? storedBatchSelection : null;
 
   useEffect(() => {
     const previousClientId = previousClientIdRef.current;
@@ -95,7 +110,7 @@ export function ScanLinesPage() {
   useEffect(() => {
     void loadScanLines();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [appliedFilters.batchId, appliedFilters.barcode, appliedFilters.deliveryDateRange, appliedFilters.productCode, appliedFilters.scanCenter, appliedFilters.storeCode, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq]);
+  }, [appliedFilters.batchId, appliedFilters.barcode, appliedFilters.deliveryDateRange, appliedFilters.productCode, appliedFilters.scanCenter, appliedFilters.storeCode, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq, sort]);
 
   useEffect(() => {
     if (selectedLine && !lines.some((line) => line.id === selectedLine.id)) {
@@ -117,6 +132,8 @@ export function ScanLinesPage() {
         clientId: queryScope.clientId,
         page: page - 1,
         size: pageSize,
+        sortBy: sort.field,
+        sortDirection: sort.direction,
         batchId: parseNumericFilter(appliedFilters.batchId),
         deliveryDateFrom: appliedFilters.deliveryDateRange.from || undefined,
         deliveryDateTo: appliedFilters.deliveryDateRange.to || undefined,
@@ -144,6 +161,11 @@ export function ScanLinesPage() {
     setFiltersOpen(false);
   }
 
+  function applySort(nextSort: DataTableSort) {
+    setPage(1);
+    setSort(nextSort);
+  }
+
   function resetFilters() {
     const nextFilters = scanFiltersForScope(queryScope.tenantId, queryScope.clientId);
     setPage(1);
@@ -159,6 +181,10 @@ export function ScanLinesPage() {
   }
 
   function chooseDifferentBatch() {
+    if (!queryScope.clientId) {
+      chooseDifferentClient();
+      return;
+    }
     resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
     const nextFilters: ScanFilters = { ...filters, batchId: '' };
     setPage(1);
@@ -166,6 +192,48 @@ export function ScanLinesPage() {
     setAppliedFilters(nextFilters);
     setPageData(null);
   }
+
+  function chooseDifferentClient() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    resetClientContextSelection();
+    const nextFilters = scanFiltersForScope(queryScope.tenantId, undefined);
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  function selectAllBatches() {
+    if (!queryScope.tenantId || !queryScope.clientId) return;
+    saveAllBatchContextSelection({ tenantId: queryScope.tenantId, clientId: queryScope.clientId });
+    const nextFilters: ScanFilters = { ...filters, batchId: '', deliveryDateRange: { preset: 'ALL', from: '', to: '' } };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  const batchStepBackOverride = useMemo(() => {
+    const hasBatchResultStep =
+      Boolean(queryScope.clientId) &&
+      !queryScope.needsClientSelection &&
+      !queryScope.blockedReason &&
+      !needsBatchSelection &&
+      (Boolean(appliedBatchId) || allBatchesSelected);
+
+    return hasBatchResultStep ? { label: '배치 선택으로 돌아가기', onBack: chooseDifferentBatch } : null;
+  }, [
+    allBatchesSelected,
+    appliedBatchId,
+    filters,
+    needsBatchSelection,
+    queryScope.blockedReason,
+    queryScope.clientId,
+    queryScope.needsClientSelection,
+    queryScope.tenantId,
+  ]);
+
+  usePageBackButton(batchStepBackOverride);
 
   if (queryScope.needsClientSelection && queryScope.tenantId) {
     return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
@@ -186,6 +254,8 @@ export function ScanLinesPage() {
         clientId={queryScope.clientId}
         clientName={queryScope.clientName}
         description="선택한 배치 기준으로 Scan 데이터를 조회합니다."
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
+        onSelectAllBatches={selectAllBatches}
         onSelectBatch={selectBatch}
         tenantId={queryScope.tenantId}
         title="Scan 데이터를 조회할 배치를 선택하세요"
@@ -203,6 +273,7 @@ export function ScanLinesPage() {
         clientName={queryScope.clientName}
         deliveryDate={selectedBatchSelection?.deliveryDate}
         onChooseBatch={chooseDifferentBatch}
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
       />
 
       <ScanFilterPanel
@@ -229,9 +300,12 @@ export function ScanLinesPage() {
               행을 선택하면 바코드, 상품, 배송지 정보를 큰 화면에서 확인합니다.
             </p>
           </div>
-          <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
-            새로고침
-          </Button>
+          <div className="flex shrink-0 flex-wrap gap-2">
+            <SortMenu onChange={applySort} options={scanSortOptions} sort={sort} />
+            <Button onClick={() => setReloadSeq((current) => current + 1)} size="sm" variant="secondary">
+              새로고침
+            </Button>
+          </div>
         </div>
         {loading && !pageData ? (
           <div className="p-5">
@@ -252,7 +326,9 @@ export function ScanLinesPage() {
             getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
             getRowKey={(item) => item.id}
             onRowClick={setSelectedLine}
+            onSortChange={applySort}
             renderMobileCard={renderScanMobileCard}
+            sort={sort}
           />
         ) : null}
         <div className="px-5 py-4">
@@ -364,16 +440,16 @@ function ScanFilterPanel({
 
 function createColumns(): DataTableColumn<ScanLine>[] {
   return [
-    { key: 'barcode', header: '바코드', width: '190px', cell: (item) => <CodeCell value={item.barcode} /> },
-    { key: 'source', header: '파일 위치', width: '170px', cell: (item) => <SourceCell sheetName={item.sheetName} rowNo={item.rowNo} /> },
-    { key: 'center', header: 'Scan 센터', width: '110px', cell: (item) => <Badge tone="teal">{item.scanCenter}</Badge> },
-    { key: 'deliveryDate', header: '배송일', width: '120px', cell: (item) => item.deliveryDate },
-    { key: 'store', header: '거래처', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.orderBusinessSiteCode} /> },
-    { key: 'product', header: '상품', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
-    { key: 'labelQty', header: '라벨수량', align: 'right', width: '90px', cell: (item) => item.labelQty.toLocaleString() },
-    { key: 'unit', header: '단위', width: '80px', cell: (item) => <Badge tone={item.unit === 'BOX' ? 'teal' : 'blue'}>{item.unit}</Badge> },
+    { key: 'barcode', header: '바코드', sortKey: 'barcode', width: '190px', cell: (item) => <CodeCell value={item.barcode} /> },
+    { key: 'source', header: '파일 위치', sortKey: 'rowNo', width: '170px', cell: (item) => <SourceCell sheetName={item.sheetName} rowNo={item.rowNo} /> },
+    { key: 'center', header: 'Scan 센터', sortKey: 'scanCenter', width: '110px', cell: (item) => <Badge tone="teal">{item.scanCenter}</Badge> },
+    { key: 'deliveryDate', header: '배송일', sortKey: 'deliveryDate', width: '120px', cell: (item) => item.deliveryDate },
+    { key: 'store', header: '거래처', sortKey: 'storeName', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.orderBusinessSiteCode} /> },
+    { key: 'product', header: '상품', sortKey: 'productName', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
+    { key: 'labelQty', header: '라벨수량', sortKey: 'labelQty', align: 'right', width: '90px', cell: (item) => item.labelQty.toLocaleString() },
+    { key: 'unit', header: '단위', sortKey: 'unit', width: '80px', cell: (item) => <Badge tone={item.unit === 'BOX' ? 'teal' : 'blue'}>{item.unit}</Badge> },
     { key: 'temperature', header: '온도', width: '90px', cell: (item) => item.temperatureType },
-    { key: 'bus', header: '버스', width: '90px', cell: (item) => item.bus },
+    { key: 'bus', header: '버스', sortKey: 'bus', width: '90px', cell: (item) => item.bus },
   ];
 }
 
@@ -443,7 +519,7 @@ function ScanDetailModal({ line, onClose }: { line: ScanLine | null; onClose: ()
           </details>
 
           <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
+            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
               배치 상세
             </Link>
             <Button onClick={onClose} variant="primary">확인</Button>
@@ -611,7 +687,7 @@ function scanFiltersForScope(tenantId?: number | null, clientId?: number): ScanF
   const storedBatch = readBatchContextSelection(tenantId, clientId);
   return {
     ...initialFilters,
-    batchId: storedBatch ? String(storedBatch.batchId) : '',
+    batchId: storedBatch?.mode === 'batch' ? String(storedBatch.batchId) : '',
     deliveryDateRange: storedBatch ? { preset: 'ALL', from: '', to: '' } : initialFilters.deliveryDateRange,
   };
 }

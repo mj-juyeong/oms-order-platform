@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchSummary, type ClientSummary, type ValidationErrorItem } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
+import { saveAllBatchContextSelection } from '../app/batchContext';
 import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelection, useClientScope } from '../app/clientContext';
 import { Badge, Button, Card, Select } from '../components/common';
 import { FilterBar } from '../components/data';
@@ -24,6 +25,7 @@ interface IssueSummary {
 interface DueDateSummaryRow {
   dueDate: string;
   confirmedLineCount: number;
+  errorBatchId?: number;
   errorCount: number;
   orderLineCount: number;
   orderNoCount: number;
@@ -98,7 +100,7 @@ function PlatformAdminDashboard() {
   const recentTenants = tenants.slice(-5).reverse();
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-clip">
       {errorMessage ? <DashboardError message={errorMessage} onRetry={() => setReloadSeq((current) => current + 1)} /> : null}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -108,8 +110,8 @@ function PlatformAdminDashboard() {
         <PlatformMetric loading={loading} label="사용자" tone="slate" value={userCount} />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-        <Card className="p-5">
+      <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-950">플랫폼 관리 홈</h2>
@@ -127,7 +129,7 @@ function PlatformAdminDashboard() {
           </div>
         </Card>
 
-        <Card className="p-5">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">물류사 상태</h2>
@@ -308,7 +310,7 @@ function TenantOperationsDashboard() {
   }, [tenantId, visibleBatches]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-clip">
       <FilterBar hideActions>
         <Select
           aria-label="dashboard-client-context"
@@ -331,8 +333,8 @@ function TenantOperationsDashboard() {
 
       {errorMessage ? <DashboardError message={errorMessage} onRetry={() => setReloadSeq((current) => current + 1)} /> : null}
 
-      <section className="grid gap-5 2xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,1fr)]">
-        <Card className="p-5">
+      <section className="grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1.2fr)_minmax(420px,1fr)]">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h2 className="text-base font-bold text-slate-950">처리 현황</h2>
@@ -364,7 +366,7 @@ function TenantOperationsDashboard() {
           </div>
         </Card>
 
-        <Card className="p-5">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">검증 이슈 요약</h2>
@@ -388,8 +390,8 @@ function TenantOperationsDashboard() {
         </Card>
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,1fr)]">
-        <Card className="p-5">
+      <section className="grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1.6fr)_minmax(360px,1fr)]">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="mb-5 flex items-center justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">우선 처리 배치</h2>
@@ -412,7 +414,7 @@ function TenantOperationsDashboard() {
           )}
         </Card>
 
-        <Card className="p-5">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">오류 유형 TOP 3</h2>
@@ -434,13 +436,13 @@ function TenantOperationsDashboard() {
         </Card>
       </section>
 
-      <Card className="p-5">
+      <Card className="min-w-0 overflow-hidden p-5">
         <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-base font-bold text-slate-950">외부 제공 준비 상태</h2>
             <p className="mt-1 text-xs text-slate-500">확정 완료 배치만 외부 API 응답과 라벨 다운로드 대상입니다.</p>
           </div>
-          <div className="grid gap-4 sm:grid-cols-3 lg:w-[560px]">
+          <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:w-[560px]">
             <ExternalStatusTile label="API 제공 가능" tone="green" value={summary.confirmedBatches.length} />
             <ExternalStatusTile label="라벨 가능" tone="green" value={summary.confirmedBatches.length} />
             <ExternalStatusTile label="제외" tone="amber" value={summary.externalExcludedBatches.length} />
@@ -522,6 +524,11 @@ function ClientOperationsDashboard() {
   const selectedDueDateRow = dueDateRows.find((row) => row.dueDate === selectedDueDate) ?? dueDateRows[0] ?? null;
   const priorityItems = useMemo(() => priorityBatches(visibleBatches).slice(0, 3), [visibleBatches]);
 
+  function selectAllBatchesForOrderView() {
+    if (!tenantId || !clientId) return;
+    saveAllBatchContextSelection({ tenantId, clientId });
+  }
+
   useEffect(() => {
     const firstDatedRow = dueDateRows.find((row) => isIsoDate(row.dueDate));
     if (!firstDatedRow) {
@@ -582,7 +589,7 @@ function ClientOperationsDashboard() {
   }, [tenantId, visibleBatches]);
 
   return (
-    <div className="space-y-6">
+    <div className="min-w-0 max-w-full space-y-6 overflow-x-clip">
       <FilterBar hideActions>
         <Select
           label="업로드 기간"
@@ -617,10 +624,10 @@ function ClientOperationsDashboard() {
         </div>
       </Card>
 
-      <section className="grid gap-5 2xl:grid-cols-[minmax(0,1.45fr)_minmax(420px,0.9fr)]">
-        <Card className="p-5">
+      <section className="grid min-w-0 max-w-full gap-5 2xl:grid-cols-[minmax(0,1.45fr)_minmax(420px,0.9fr)]">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-base font-bold text-slate-950">주문 현황</h2>
               <p className="mt-1 text-sm text-slate-600">선택한 업로드 기간의 주문을 납기일 기준으로 확인합니다.</p>
             </div>
@@ -629,20 +636,22 @@ function ClientOperationsDashboard() {
             </Badge>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
+          <div className="mt-5 grid min-w-0 grid-cols-2 gap-3 lg:grid-cols-4">
             <ClientSmallStat label="주문 항목" value={orderSummary.orderLineCount} />
             <ClientSmallStat label="납품처" value={orderSummary.storeCount} />
             <ClientSmallStat label="품목" value={orderSummary.productCount} />
             <ClientSmallStat label="총 수량" value={orderSummary.totalQty} />
           </div>
 
-          <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
+          <div className="mt-6 grid min-w-0 gap-5 xl:grid-cols-[minmax(0,1fr)_320px]">
             <DueDateVolumeChart
               loading={loading}
+              onOpenOrders={selectAllBatchesForOrderView}
+              onSelectDueDate={setSelectedDueDate}
               rows={dueDateRows}
               selectedDueDate={selectedDueDateRow?.dueDate ?? ''}
             />
-            <DueDateDetailPanel loading={loading} row={selectedDueDateRow} />
+            <DueDateDetailPanel loading={loading} onOpenOrders={selectAllBatchesForOrderView} row={selectedDueDateRow} />
           </div>
 
           <div className="mt-5 flex justify-end">
@@ -669,7 +678,7 @@ function ClientOperationsDashboard() {
           ) : null}
 
           <div className="mt-5 overflow-hidden rounded-lg border border-slate-200">
-            <div className="grid grid-cols-[1fr_84px_84px_84px] bg-slate-50 px-4 py-3 text-xs font-bold text-slate-600 sm:grid-cols-[1fr_96px_96px_96px]">
+            <div className="grid grid-cols-[minmax(0,1fr)_48px_48px_48px] gap-1 bg-slate-50 px-2.5 py-3 text-[11px] font-bold text-slate-600 sm:grid-cols-[1fr_96px_96px_96px] sm:px-4 sm:text-xs">
               <span>최근 일정</span>
               <span className="text-right">주문</span>
               <span className="text-right">납품처</span>
@@ -680,11 +689,12 @@ function ClientOperationsDashboard() {
             {!loading
               ? upcomingRows.map((row) => (
                   <Link
-                    className="grid grid-cols-[1fr_84px_84px_84px] items-center border-t border-slate-100 px-4 py-3 text-sm transition hover:bg-teal-50/50 sm:grid-cols-[1fr_96px_96px_96px]"
+                    className="grid grid-cols-[minmax(0,1fr)_48px_48px_48px] items-center gap-1 border-t border-slate-100 px-2.5 py-3 text-[13px] transition hover:bg-teal-50/50 sm:grid-cols-[1fr_96px_96px_96px] sm:px-4 sm:text-sm"
                     key={row.dueDate}
+                    onClick={selectAllBatchesForOrderView}
                     to={isIsoDate(row.dueDate) ? `/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}` : '/orders'}
                   >
-                    <span className="font-semibold text-slate-950">{row.dueDate || '-'}</span>
+                    <span className="min-w-0 truncate font-semibold text-slate-950">{row.dueDate || '-'}</span>
                     <span className="text-right font-mono text-slate-900">{row.orderNoCount.toLocaleString()}</span>
                     <span className="text-right font-mono text-slate-900">{row.storeCount.toLocaleString()}</span>
                     <span className="text-right font-mono text-slate-900">{row.orderLineCount.toLocaleString()}</span>
@@ -694,8 +704,8 @@ function ClientOperationsDashboard() {
           </div>
         </Card>
 
-        <Card className="flex flex-col p-5">
-          <div className="flex items-start justify-between gap-3">
+        <Card className="flex min-w-0 flex-col overflow-hidden p-5">
+          <div className="flex min-w-0 items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">확인 필요 오류</h2>
               <p className="mt-1 text-sm text-slate-600">우선 확인할 오류가 어떤 주문, 납품처, 품목에 영향을 주는지 보여줍니다.</p>
@@ -717,8 +727,8 @@ function ClientOperationsDashboard() {
                   key={`${reason.severity}-${reason.label}`}
                   to={validationIssueLink(reason)}
                 >
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="truncate text-sm font-semibold text-slate-900">{reason.label}</p>
+                  <div className="flex min-w-0 items-center justify-between gap-3">
+                    <p className="min-w-0 truncate text-sm font-semibold text-slate-900">{reason.label}</p>
                     <Badge tone={reason.severity === 'ERROR' ? 'red' : reason.severity === 'WARNING' ? 'amber' : 'neutral'}>{reason.count}건</Badge>
                   </div>
                 </Link>
@@ -737,7 +747,7 @@ function ClientOperationsDashboard() {
         </Card>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-5">
+      <section className="grid min-w-0 grid-cols-2 gap-3 md:gap-4 xl:grid-cols-5">
         <ClientMetricCard label="업로드 배치" loading={loading} value={visibleBatches.length} />
         <ClientMetricCard label="주문 건수" loading={loading} value={orderSummary.orderNoCount} />
         <ClientMetricCard label="오류 영향 주문" loading={loading} tone={validationImpact.errorCount > 0 ? 'red' : validationImpact.warningCount > 0 ? 'amber' : 'default'} value={validationImpact.affectedOrderNoCount} />
@@ -745,8 +755,8 @@ function ClientOperationsDashboard() {
         <ClientMetricCard label="확정 완료" loading={loading} value={requestSummary.confirmed} />
       </section>
 
-      <section className="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-        <Card className="p-5">
+      <section className="grid min-w-0 max-w-full gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">확정 요청 상태</h2>
@@ -764,7 +774,7 @@ function ClientOperationsDashboard() {
           </div>
         </Card>
 
-        <Card className="p-5">
+        <Card className="min-w-0 overflow-hidden p-5">
           <div className="mb-5 flex items-start justify-between gap-3">
             <div>
               <h2 className="text-base font-bold text-slate-950">우선 확인 배치</h2>
@@ -781,7 +791,7 @@ function ClientOperationsDashboard() {
                     key={batch.id}
                     to={batch.errorCount > 0 ? `/batches/${batch.id}/validation?severity=ERROR` : `/batches/${batch.id}`}
                   >
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="truncate font-mono text-sm font-bold text-slate-950">{batch.batchNo}</p>
                       <p className="mt-1 text-xs text-slate-500">업로드 {formatDateTime(batch.uploadedAt)}</p>
                     </div>
@@ -980,9 +990,9 @@ function IssueBar({ count, label, max, severity, to }: { count: number; label: s
   const { accentColor, barColor, borderColor, textColor } = color;
 
   return (
-    <Link className={`block rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm transition hover:border-teal-300 hover:bg-teal-50/40`} to={to}>
+    <Link className={`block min-w-0 rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm transition hover:border-teal-300 hover:bg-teal-50/40`} to={to}>
       <div className="mb-2 flex items-center justify-between gap-3 text-sm">
-        <span className="truncate font-semibold text-slate-800">{label}</span>
+        <span className="min-w-0 truncate font-semibold text-slate-800">{label}</span>
         <span className={`shrink-0 whitespace-nowrap font-mono text-sm font-bold ${textColor}`}>{count.toLocaleString()}건</span>
       </div>
       <div className="relative h-5 overflow-hidden rounded-md bg-slate-100 ring-1 ring-inset ring-slate-200">
@@ -999,9 +1009,9 @@ function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
   const hasError = batch.errorCount > 0;
 
   return (
-    <div className={`rounded-lg border bg-white px-4 py-4 shadow-sm ${hasError ? 'border-red-200 border-l-4 border-l-red-500' : 'border-slate-200 border-l-4 border-l-slate-500'}`}>
-      <div className="flex items-center justify-between gap-3">
-        <Link className="font-mono text-sm font-bold text-slate-950 hover:text-teal-700" to={`/batches/${batch.id}`}>
+    <div className={`min-w-0 overflow-hidden rounded-lg border bg-white px-4 py-4 shadow-sm ${hasError ? 'border-red-200 border-l-4 border-l-red-500' : 'border-slate-200 border-l-4 border-l-slate-500'}`}>
+      <div className="flex min-w-0 items-center justify-between gap-3">
+        <Link className="min-w-0 truncate font-mono text-sm font-bold text-slate-950 hover:text-teal-700" title={batch.batchNo} to={`/batches/${batch.id}`}>
           {batch.batchNo}
         </Link>
         <BatchStatusBadge status={batch.status} />
@@ -1013,7 +1023,7 @@ function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
         <Badge tone={hasError ? 'red' : 'green'}>{hasError ? `Error ${batch.errorCount}` : 'Error 0'}</Badge>
         <Badge tone="amber">Warning {batch.warningCount}</Badge>
         <Link
-          className="ml-auto text-xs font-semibold text-teal-700 hover:underline"
+          className="ml-auto shrink-0 text-xs font-semibold text-teal-700 hover:underline"
           to={hasError ? `/batches/${batch.id}/validation?severity=ERROR` : `/batches/${batch.id}`}
         >
           {hasError ? '오류 확인' : '확정 검토'}
@@ -1032,8 +1042,8 @@ function ExternalStatusTile({ label, tone, value }: { label: string; tone: 'gree
         : 'border-slate-200 bg-slate-50 text-slate-700';
 
   return (
-    <div className={`rounded-lg border px-4 py-3 ${toneClasses}`}>
-      <p className="text-xs font-semibold opacity-80">{label}</p>
+    <div className={`min-w-0 rounded-lg border px-3 py-3 sm:px-4 ${toneClasses}`}>
+      <p className="truncate text-xs font-semibold opacity-80">{label}</p>
       <p className="mt-2 font-mono text-2xl font-bold">{value.toLocaleString()}</p>
     </div>
   );
@@ -1058,8 +1068,8 @@ function ClientMetricCard({
   };
 
   return (
-    <Card className={`p-3 sm:p-4 ${toneClasses[tone]}`}>
-      <p className="text-xs font-semibold opacity-75">{label}</p>
+    <Card className={`min-w-0 overflow-hidden p-3 sm:p-4 ${toneClasses[tone]}`}>
+      <p className="truncate text-xs font-semibold opacity-75">{label}</p>
       <p className="mt-2 text-2xl font-bold tracking-normal sm:text-3xl">{loading ? '-' : value.toLocaleString()}</p>
     </Card>
   );
@@ -1073,8 +1083,8 @@ function ClientSmallStat({ label, tone = 'slate', value }: { label: string; tone
   }[tone];
 
   return (
-    <div className={`rounded-md px-3 py-3 ${toneClass}`}>
-      <p className="text-xs font-semibold opacity-75">{label}</p>
+    <div className={`min-w-0 rounded-md px-3 py-3 ${toneClass}`}>
+      <p className="truncate text-xs font-semibold opacity-75">{label}</p>
       <p className="mt-1 font-mono text-xl font-bold">{value.toLocaleString()}</p>
     </div>
   );
@@ -1088,8 +1098,8 @@ function ClientRequestTile({ label, tone = 'slate', value }: { label: string; to
   }[tone];
 
   return (
-    <div className={`rounded-md border px-4 py-4 ${toneClass}`}>
-      <p className="text-xs font-semibold opacity-75">{label}</p>
+    <div className={`min-w-0 rounded-md border px-3 py-3 sm:px-4 sm:py-4 ${toneClass}`}>
+      <p className="truncate text-xs font-semibold opacity-75">{label}</p>
       <p className="mt-2 font-mono text-2xl font-bold">{value.toLocaleString()}</p>
     </div>
   );
@@ -1097,10 +1107,14 @@ function ClientRequestTile({ label, tone = 'slate', value }: { label: string; to
 
 function DueDateVolumeChart({
   loading,
+  onOpenOrders,
+  onSelectDueDate,
   rows,
   selectedDueDate,
 }: {
   loading: boolean;
+  onOpenOrders: () => void;
+  onSelectDueDate: (dueDate: string) => void;
   rows: DueDateSummaryRow[];
   selectedDueDate: string;
 }) {
@@ -1116,7 +1130,7 @@ function DueDateVolumeChart({
   }
 
   return (
-    <div className="rounded-lg border border-slate-200 p-4">
+    <div className="min-w-0 overflow-hidden rounded-lg border border-slate-200 p-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-sm font-bold text-slate-950">날짜별 주문량</p>
@@ -1131,14 +1145,26 @@ function DueDateVolumeChart({
           const width = Math.max((row.orderNoCount / maxOrders) * 100, 10);
           const issueTone = row.errorCount > 0 ? 'red' : row.warningCount > 0 ? 'amber' : 'teal';
           const issueText = row.errorCount > 0 ? `Error ${row.errorCount}` : row.warningCount > 0 ? `Warning ${row.warningCount}` : '정상';
+          const destination = dueDateVolumeLink(row);
 
           return (
             <Link
-              className={`grid min-h-20 w-full grid-cols-[76px_minmax(0,1fr)] gap-3 rounded-lg border p-3 text-left transition sm:grid-cols-[88px_minmax(0,1fr)_104px] sm:items-center ${
+              aria-current={selected ? 'true' : undefined}
+              className={`grid min-h-20 w-full min-w-0 grid-cols-[64px_minmax(0,1fr)] gap-3 rounded-lg border p-3 text-left transition sm:grid-cols-[88px_minmax(0,1fr)_104px] sm:items-center ${
                 selected ? 'border-teal-500 bg-teal-50 ring-2 ring-inset ring-teal-500' : 'border-slate-200 bg-white hover:border-teal-200 hover:bg-teal-50/50'
               }`}
               key={row.dueDate}
-              to={`/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}`}
+              onClick={(event) => {
+                if (!selected) {
+                  event.preventDefault();
+                  onSelectDueDate(row.dueDate);
+                  return;
+                }
+                if (!row.errorBatchId) {
+                  onOpenOrders();
+                }
+              }}
+              to={destination}
             >
               <div>
                 <p className="font-mono text-base font-bold text-slate-950">{formatCompactDate(row.dueDate)}</p>
@@ -1146,7 +1172,7 @@ function DueDateVolumeChart({
               </div>
 
               <div className="min-w-0">
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center justify-between gap-2">
                   <p className="text-sm font-semibold text-slate-900">주문 {row.orderNoCount.toLocaleString()}건</p>
                   <p className="shrink-0 text-xs text-slate-500">납품처 {row.storeCount.toLocaleString()}곳</p>
                 </div>
@@ -1161,7 +1187,7 @@ function DueDateVolumeChart({
                 <p className="mt-2 text-xs text-slate-500">주문 항목 {row.orderLineCount.toLocaleString()}건 · 품목 {row.productCount.toLocaleString()}개</p>
               </div>
 
-              <div className="col-span-2 flex items-center justify-between gap-2 sm:col-span-1 sm:justify-end">
+              <div className="col-span-2 flex min-w-0 items-center justify-between gap-2 sm:col-span-1 sm:justify-end">
                 <Badge tone={issueTone}>{issueText}</Badge>
                 <span className="text-xs font-semibold text-teal-700">주문 보기</span>
               </div>
@@ -1247,7 +1273,7 @@ function DueDateCalendar({
   );
 }
 
-function DueDateDetailPanel({ loading, row }: { loading: boolean; row: DueDateSummaryRow | null }) {
+function DueDateDetailPanel({ loading, onOpenOrders, row }: { loading: boolean; onOpenOrders: () => void; row: DueDateSummaryRow | null }) {
   if (loading) {
     return <DashboardEmpty message="납기일 정보를 불러오는 중입니다." />;
   }
@@ -1283,6 +1309,7 @@ function DueDateDetailPanel({ loading, row }: { loading: boolean; row: DueDateSu
 
       <Link
         className="mt-4 inline-flex h-9 w-full items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white transition hover:bg-teal-800"
+        onClick={onOpenOrders}
         to={isIsoDate(row.dueDate) ? `/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}` : '/orders'}
       >
         해당 납기일 주문 보기
@@ -1411,18 +1438,19 @@ function groupOrdersByDueDate(orders: BackendOrderLine[], issues: ValidationErro
   return [...grouped.entries()]
     .map(([dueDate, items]) => {
       const impact = issueImpactByDate.get(dueDate);
-      const batchErrorCount = uniqueDefinedValues(items.map((item) => item.batchId))
+      const itemBatches = uniqueDefinedValues(items.map((item) => item.batchId))
         .map((batchId) => batchStatusById.get(Number(batchId)))
-        .filter(Boolean)
+        .filter((batch): batch is BackendBatchSummary => Boolean(batch));
+      const errorBatchId = impact?.errorBatchId ?? itemBatches.find((batch) => batch.errorCount > 0)?.id;
+      const batchErrorCount = itemBatches
         .reduce((sum, batch) => sum + (batch?.errorCount ?? 0), 0);
-      const batchWarningCount = uniqueDefinedValues(items.map((item) => item.batchId))
-        .map((batchId) => batchStatusById.get(Number(batchId)))
-        .filter(Boolean)
+      const batchWarningCount = itemBatches
         .reduce((sum, batch) => sum + (batch?.warningCount ?? 0), 0);
 
       return {
         confirmedLineCount: items.filter((item) => item.confirmed).length,
         dueDate,
+        errorBatchId,
         errorCount: impact?.errorCount ?? batchErrorCount,
         orderLineCount: items.length,
         orderNoCount: uniqueDefinedValues(items.map((item) => item.orderNo)).length,
@@ -1442,12 +1470,15 @@ function groupOrdersByDueDate(orders: BackendOrderLine[], issues: ValidationErro
 
 function createIssueImpactByDate(orders: BackendOrderLine[], issues: ValidationErrorItem[]) {
   const dueDateByOrderNo = new Map(orders.map((order) => [order.orderNo, order.dueDate || '납기일 없음']));
-  const result = new Map<string, { errorCount: number; warningCount: number }>();
+  const result = new Map<string, { errorBatchId?: number; errorCount: number; warningCount: number }>();
 
   issues.forEach((issue) => {
     const dueDate = dueDateByOrderNo.get(issue.orderNo) ?? '납기일 없음';
     const current = result.get(dueDate) ?? { errorCount: 0, warningCount: 0 };
-    if (issue.severity === 'ERROR') current.errorCount += 1;
+    if (issue.severity === 'ERROR') {
+      current.errorBatchId = current.errorBatchId ?? issue.batchId;
+      current.errorCount += 1;
+    }
     if (issue.severity === 'WARNING') current.warningCount += 1;
     result.set(dueDate, current);
   });
@@ -1559,6 +1590,13 @@ function firstErrorLink(issueBatches: BackendBatchSummary[]) {
 
   const severity = batch.errorCount > 0 ? 'ERROR' : batch.warningCount > 0 ? 'WARNING' : 'INFO';
   return `/batches/${batch.id}/validation?severity=${severity}`;
+}
+
+function dueDateVolumeLink(row: DueDateSummaryRow) {
+  if (row.errorBatchId) {
+    return `/batches/${row.errorBatchId}/validation?severity=ERROR`;
+  }
+  return `/orders?dueDateFrom=${row.dueDate}&dueDateTo=${row.dueDate}`;
 }
 
 function validationIssueLink(issue: IssueSummary) {

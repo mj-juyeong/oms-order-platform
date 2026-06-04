@@ -71,13 +71,16 @@ export function ClientSelectionPanel({
             </div>
             <p className="mt-2 text-sm leading-6 text-slate-600">{description}</p>
           </div>
-          <div className="w-full lg:w-80">
+          <div className="grid w-full gap-2 sm:grid-cols-[minmax(0,1fr)_auto] lg:max-w-xl">
             <Input
               label="고객사 검색"
               onChange={(event) => setQuery(event.target.value)}
               placeholder="고객사명, 코드"
               value={query}
             />
+            <Button className="self-end" onClick={() => saveClientContextSelection({ mode: 'all' })} variant="secondary">
+              전체 고객사 보기
+            </Button>
           </div>
         </div>
       </Card>

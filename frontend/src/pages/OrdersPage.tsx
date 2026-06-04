@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode, type UIEvent } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { omsApi, type BackendBatchSummary } from '../api/oms';
-import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { readBatchContextSelection, resetBatchContextSelection, saveAllBatchContextSelection, saveBatchIdContextSelection, useBatchContextSelection } from '../app/batchContext';
+import { resetClientContextSelection } from '../app/clientContext';
 import { fakeCurrentUser } from '../app/auth';
 import { useQueryScope } from '../hooks/useQueryScope';
 import {
@@ -16,14 +17,28 @@ import {
   ModalFrame,
   Select,
 } from '../components/common';
-import { Pagination } from '../components/data/Pagination';
-import { BatchSelectionPanel, BatchStatusBadge, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
+import { Pagination, SortMenu, type DataTableSort } from '../components/data';
+import { BatchSelectionPanel, BatchStatusBadge, ClientSelectionPanel, CodeCell, OrderDetailModal, SelectedBatchScopeBar } from '../components/domain';
+import { usePageBackButton } from '../components/layout';
 import type { PageResponse } from '../types/api';
 import type { BackendOrderLine, OrderLine } from '../types/order';
 import { todayString, type DateRangeValue } from '../utils/dateRange';
 import { areFilterStatesEqual } from '../utils/filterState';
 
 type OrderViewMode = 'ALL' | 'BRANDS' | 'PRODUCTS' | 'STORES' | 'VEHICLES' | 'BATCHES';
+type SortDirection = 'asc' | 'desc';
+type OrderSortField = 'id' | 'orderNo' | 'clientName' | 'batchId' | 'storeCode' | 'storeName' | 'brandName' | 'productCode' | 'productName' | 'dueDate' | 'orderQty' | 'batchStatus';
+type ModalOrderSearchField = 'ALL' | 'orderNo' | 'storeCode' | 'storeName' | 'productCode' | 'productName';
+
+interface OrderSort {
+  field: OrderSortField;
+  direction: SortDirection;
+}
+
+interface ModalOrderSearch {
+  field: ModalOrderSearchField;
+  query: string;
+}
 
 interface OrderFilters {
   batchId: string;
@@ -83,6 +98,32 @@ const unitOptions = [
   { label: 'BOX', value: 'BOX' },
 ];
 
+const orderSortOptions: Array<{ label: string; value: OrderSortField }> = [
+  { label: '주문번호', value: 'orderNo' },
+  { label: '고객사', value: 'clientName' },
+  { label: '배치번호', value: 'batchId' },
+  { label: '거래처코드', value: 'storeCode' },
+  { label: '거래처명', value: 'storeName' },
+  { label: '브랜드', value: 'brandName' },
+  { label: '품목코드', value: 'productCode' },
+  { label: '품목명', value: 'productName' },
+  { label: '납기일', value: 'dueDate' },
+  { label: '수량', value: 'orderQty' },
+  { label: '배치 상태', value: 'batchStatus' },
+];
+
+const modalSearchOptions: Array<{ label: string; value: ModalOrderSearchField }> = [
+  { label: '전체', value: 'ALL' },
+  { label: '주문번호', value: 'orderNo' },
+  { label: '거래처코드', value: 'storeCode' },
+  { label: '거래처명', value: 'storeName' },
+  { label: '품목코드', value: 'productCode' },
+  { label: '품목명', value: 'productName' },
+];
+
+const initialOrderSort: OrderSort = { field: 'orderNo', direction: 'asc' };
+const initialModalSearch: ModalOrderSearch = { field: 'ALL', query: '' };
+
 export function OrdersPage() {
   const queryScope = useQueryScope();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -90,6 +131,7 @@ export function OrdersPage() {
   const [appliedFilters, setAppliedFilters] = useState<OrderFilters>(() => orderFiltersFromSearchParams(searchParams, queryScope.tenantId, queryScope.clientId));
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [viewMode, setViewMode] = useState<OrderViewMode>('ALL');
+  const [sort, setSort] = useState<OrderSort>(initialOrderSort);
   const [selectedGroup, setSelectedGroup] = useState<OrderGroupRow | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<OrderLine | null>(null);
   const [page, setPage] = useState(0);
@@ -106,12 +148,11 @@ export function OrdersPage() {
   const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
   const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
   const batchIdError = appliedFilters.batchId.trim() && !toNumberOrUndefined(appliedFilters.batchId) ? '배치 ID는 숫자로 입력해주세요.' : null;
-  const needsBatchSelection = queryScope.canQuery && !batchIdError && !toNumberOrUndefined(appliedFilters.batchId);
-  const selectedBatchSelection = useMemo(() => {
-    const batchId = toNumberOrUndefined(appliedFilters.batchId);
-    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
-    return selection && selection.batchId === batchId ? selection : null;
-  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
+  const appliedBatchId = toNumberOrUndefined(appliedFilters.batchId);
+  const storedBatchSelection = useBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+  const allBatchesSelected = storedBatchSelection?.mode === 'all' && !appliedBatchId;
+  const needsBatchSelection = queryScope.canQuery && Boolean(queryScope.clientId) && !batchIdError && !appliedBatchId && !allBatchesSelected;
+  const selectedBatchSelection = storedBatchSelection?.mode === 'batch' && storedBatchSelection.batchId === appliedBatchId ? storedBatchSelection : null;
 
   useEffect(() => {
     const nextFilters = orderFiltersFromSearchParams(searchParams, queryScope.tenantId, queryScope.clientId);
@@ -124,9 +165,10 @@ export function OrdersPage() {
     const previousClientId = previousClientIdRef.current;
     if (previousClientId !== undefined && previousClientId !== queryScope.clientId) {
       const storedBatch = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+      const nextBatchId = storedBatch?.mode === 'batch' ? String(storedBatch.batchId) : '';
       setPage(0);
-      setFilters((current) => ({ ...current, batchId: storedBatch ? String(storedBatch.batchId) : '' }));
-      setAppliedFilters((current) => ({ ...current, batchId: storedBatch ? String(storedBatch.batchId) : '' }));
+      setFilters((current) => ({ ...current, batchId: nextBatchId }));
+      setAppliedFilters((current) => ({ ...current, batchId: nextBatchId }));
       setResponse(null);
     }
     previousClientIdRef.current = queryScope.clientId;
@@ -174,7 +216,7 @@ export function OrdersPage() {
     }
 
     omsApi.orders
-      .list(buildOrderQuery(appliedFilters, page, queryScope.tenantId, queryScope.clientId))
+      .list(buildOrderQuery(appliedFilters, sort, page, queryScope.tenantId, queryScope.clientId))
       .then((data) => {
         if (!cancelled) {
           setResponse(data);
@@ -195,7 +237,7 @@ export function OrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [appliedFilters, batchIdError, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq]);
+  }, [appliedFilters, batchIdError, needsBatchSelection, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, reloadSeq, sort]);
 
   function updateFilter<TKey extends keyof OrderFilters>(key: TKey, value: OrderFilters[TKey]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -205,6 +247,11 @@ export function OrdersPage() {
     setPage(0);
     setAppliedFilters(filters);
     setFiltersOpen(false);
+  }
+
+  function applySort(nextSort: DataTableSort) {
+    setPage(0);
+    setSort({ field: nextSort.field as OrderSortField, direction: nextSort.direction });
   }
 
   function resetFilters() {
@@ -226,6 +273,10 @@ export function OrdersPage() {
   }
 
   function chooseDifferentBatch() {
+    if (!queryScope.clientId) {
+      chooseDifferentClient();
+      return;
+    }
     resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
     const nextFilters: OrderFilters = { ...filters, batchId: '' };
     const nextParams = new URLSearchParams(searchParams);
@@ -236,6 +287,55 @@ export function OrdersPage() {
     setResponse(null);
     setSearchParams(nextParams, { replace: true });
   }
+
+  function chooseDifferentClient() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    resetClientContextSelection();
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('batchId');
+    const nextFilters = orderFiltersFromSearchParams(new URLSearchParams(), queryScope.tenantId, undefined);
+    setPage(0);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setResponse(null);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  function selectAllBatches() {
+    if (!queryScope.tenantId || !queryScope.clientId) return;
+    saveAllBatchContextSelection({ tenantId: queryScope.tenantId, clientId: queryScope.clientId });
+    const nextFilters: OrderFilters = { ...filters, batchId: '', dueDateRange: { preset: 'ALL', from: '', to: '' } };
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete('batchId');
+    setPage(0);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setResponse(null);
+    setSearchParams(nextParams, { replace: true });
+  }
+
+  const batchStepBackOverride = useMemo(() => {
+    const hasBatchResultStep =
+      Boolean(queryScope.clientId) &&
+      !queryScope.needsClientSelection &&
+      !queryScope.blockedReason &&
+      !needsBatchSelection &&
+      (Boolean(appliedBatchId) || allBatchesSelected);
+
+    return hasBatchResultStep ? { label: '배치 선택으로 돌아가기', onBack: chooseDifferentBatch } : null;
+  }, [
+    allBatchesSelected,
+    appliedBatchId,
+    filters,
+    needsBatchSelection,
+    queryScope.blockedReason,
+    queryScope.clientId,
+    queryScope.needsClientSelection,
+    queryScope.tenantId,
+    searchParams,
+  ]);
+
+  usePageBackButton(batchStepBackOverride);
 
   if (queryScope.needsClientSelection && queryScope.tenantId) {
     return <ClientSelectionPanel tenantId={queryScope.tenantId} />;
@@ -255,6 +355,8 @@ export function OrdersPage() {
       <BatchSelectionPanel
         clientId={queryScope.clientId}
         clientName={queryScope.clientName}
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
+        onSelectAllBatches={selectAllBatches}
         onSelectBatch={selectBatch}
         tenantId={queryScope.tenantId}
         title="주문을 조회할 배치를 선택하세요"
@@ -272,6 +374,7 @@ export function OrdersPage() {
         clientName={queryScope.clientName}
         deliveryDate={selectedBatchSelection?.deliveryDate}
         onChooseBatch={chooseDifferentBatch}
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
       />
 
       <OrderFilterPanel
@@ -297,16 +400,19 @@ export function OrdersPage() {
               현재 페이지의 <strong className="text-teal-700">{visibleOrders.length.toLocaleString()}</strong>건을 묶어서 보여줍니다.
             </p>
           </div>
-          <div className="oms-table-scroll flex shrink-0 gap-2 overflow-x-auto pb-1">
-            {viewModeOptions.map((option) => (
-              <ViewModeButton
-                active={viewMode === option.value}
-                key={option.value}
-                onClick={() => setViewMode(option.value)}
-              >
-                {option.label}
-              </ViewModeButton>
-            ))}
+          <div className="flex min-w-0 shrink-0 flex-col gap-3 xl:items-end">
+            <div className="oms-table-scroll flex max-w-full gap-2 overflow-x-auto pb-1">
+              {viewModeOptions.map((option) => (
+                <ViewModeButton
+                  active={viewMode === option.value}
+                  key={option.value}
+                  onClick={() => setViewMode(option.value)}
+                >
+                  {option.label}
+                </ViewModeButton>
+              ))}
+            </div>
+            <SortMenu onChange={applySort} options={orderSortOptions} sort={sort} />
           </div>
         </div>
 
@@ -543,10 +649,19 @@ function OrderGroupModal({
   onSelectOrder: (order: OrderLine) => void;
 }) {
   const [visibleCount, setVisibleCount] = useState(modalOrderChunkSize);
+  const [modalSearch, setModalSearch] = useState<ModalOrderSearch>(initialModalSearch);
+  const [appliedModalSearch, setAppliedModalSearch] = useState<ModalOrderSearch>(initialModalSearch);
 
   useEffect(() => {
     setVisibleCount(modalOrderChunkSize);
+    setModalSearch(initialModalSearch);
+    setAppliedModalSearch(initialModalSearch);
   }, [group?.id]);
+
+  const filteredOrders = useMemo(
+    () => filterModalOrders(group?.items ?? [], appliedModalSearch),
+    [appliedModalSearch, group?.items],
+  );
 
   if (!group) {
     return null;
@@ -554,16 +669,29 @@ function OrderGroupModal({
 
   const currentGroup = group;
   const title = mode === 'ALL' ? '전체 주문' : `${viewModeLabel(mode)} 주문`;
-  const visibleOrders = currentGroup.items.slice(0, visibleCount);
-  const hasMore = visibleOrders.length < currentGroup.items.length;
+  const visibleOrders = filteredOrders.slice(0, visibleCount);
+  const hasMore = visibleOrders.length < filteredOrders.length;
   const caption = orderGroupCaption(currentGroup, mode);
+  const hasPendingModalSearch = modalSearch.field !== appliedModalSearch.field || modalSearch.query !== appliedModalSearch.query;
+  const hasActiveModalSearch = appliedModalSearch.query.trim().length > 0;
 
   function handleScroll(event: UIEvent<HTMLDivElement>) {
     const target = event.currentTarget;
     const nearBottom = target.scrollHeight - target.scrollTop - target.clientHeight < 160;
     if (nearBottom && hasMore) {
-      setVisibleCount((current) => Math.min(current + modalOrderChunkSize, currentGroup.items.length));
+      setVisibleCount((current) => Math.min(current + modalOrderChunkSize, filteredOrders.length));
     }
+  }
+
+  function applyModalSearch() {
+    setVisibleCount(modalOrderChunkSize);
+    setAppliedModalSearch({ field: modalSearch.field, query: modalSearch.query.trim() });
+  }
+
+  function resetModalSearch() {
+    setVisibleCount(modalOrderChunkSize);
+    setModalSearch(initialModalSearch);
+    setAppliedModalSearch(initialModalSearch);
   }
 
   return (
@@ -587,14 +715,57 @@ function OrderGroupModal({
           <GroupSummaryTile label="거래처" value={`${currentGroup.storeCount.toLocaleString()}개`} />
         </div>
 
+        <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 sm:mt-4">
+          <div className="flex flex-col gap-2 lg:flex-row lg:items-center">
+            <Select
+              aria-label="모달 주문 검색 유형"
+              className="lg:w-36"
+              onChange={(event) => setModalSearch((current) => ({ ...current, field: event.target.value as ModalOrderSearchField }))}
+              options={modalSearchOptions}
+              value={modalSearch.field}
+            />
+            <div className="min-w-0 flex-1">
+              <Input
+                aria-label="모달 주문 검색어"
+                className="w-full"
+                onChange={(event) => setModalSearch((current) => ({ ...current, query: event.target.value }))}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') {
+                    applyModalSearch();
+                  }
+                }}
+                placeholder="주문번호, 거래처, 품목으로 검색"
+                value={modalSearch.query}
+              />
+            </div>
+            <div className="flex shrink-0 gap-2">
+              <Button disabled={!hasPendingModalSearch} onClick={applyModalSearch} size="sm" variant="primary">
+                검색
+              </Button>
+              <Button disabled={!hasActiveModalSearch && !hasPendingModalSearch} onClick={resetModalSearch} size="sm" variant="secondary">
+                초기화
+              </Button>
+            </div>
+          </div>
+          <div className="mt-2 flex flex-wrap items-center gap-2 text-xs font-semibold text-slate-500">
+            <span>검색 결과 {filteredOrders.length.toLocaleString()}건</span>
+            {hasPendingModalSearch ? <Badge tone="amber">검색 필요</Badge> : null}
+            {hasActiveModalSearch ? <Badge tone="blue">검색 적용</Badge> : null}
+          </div>
+        </div>
+
         <div className="mt-3 min-h-0 flex-1 overflow-y-auto rounded-md border border-slate-200 bg-white sm:mt-4" onScroll={handleScroll}>
-          <ExpandedOrders mode={mode} orders={visibleOrders} onSelectOrder={onSelectOrder} />
+          {filteredOrders.length > 0 ? (
+            <ExpandedOrders mode={mode} orders={visibleOrders} onSelectOrder={onSelectOrder} />
+          ) : (
+            <EmptyState description="검색 유형이나 검색어를 바꿔 다시 검색해 주세요." title="조건에 맞는 주문이 없습니다." />
+          )}
         </div>
 
         <div className="flex shrink-0 items-center justify-center px-4 pt-4 text-xs font-semibold text-slate-500">
           {hasMore
-            ? `${visibleOrders.length.toLocaleString()} / ${currentGroup.items.length.toLocaleString()}건 표시 중 · 아래로 스크롤하면 더 불러옵니다.`
-            : `${currentGroup.items.length.toLocaleString()}건 전체 표시`}
+            ? `${visibleOrders.length.toLocaleString()} / ${filteredOrders.length.toLocaleString()}건 표시 중 · 아래로 스크롤하면 더 불러옵니다.`
+            : `${filteredOrders.length.toLocaleString()}건 전체 표시`}
         </div>
       </div>
     </ModalFrame>
@@ -608,6 +779,27 @@ function orderGroupCaption(group: OrderGroupRow, mode: OrderViewMode) {
   }
 
   return [group.label, group.subLabel].filter(Boolean).join(' · ');
+}
+
+function filterModalOrders(orders: OrderLine[], search: ModalOrderSearch) {
+  const query = search.query.trim().toLowerCase();
+  if (!query) {
+    return orders;
+  }
+
+  return orders.filter((order) =>
+    modalSearchValues(order, search.field).some((value) => value.toLowerCase().includes(query)),
+  );
+}
+
+function modalSearchValues(order: OrderLine, field: ModalOrderSearchField) {
+  if (field === 'orderNo') return [order.orderNo];
+  if (field === 'storeCode') return [order.storeCode];
+  if (field === 'storeName') return [order.storeName];
+  if (field === 'productCode') return [order.productCode];
+  if (field === 'productName') return [order.productName];
+
+  return [order.orderNo, order.storeCode, order.storeName, order.productCode, order.productName];
 }
 
 function GroupSummaryTile({ label, value }: { label: string; value: string }) {
@@ -794,110 +986,13 @@ function InlineCode({ value }: { value?: string }) {
   );
 }
 
-function OrderDetailModal({
-  onBackToList,
-  onClose,
-  order,
-}: {
-  onBackToList?: () => void;
-  onClose: () => void;
-  order: OrderLine | null;
-}) {
-  if (!order) {
-    return null;
-  }
-
-  return (
-    <ModalFrame onClose={onClose} panelClassName="flex max-h-[84vh] w-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-2xl">
-      <div className="flex items-start justify-between gap-4 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="text-lg font-bold text-slate-950">주문 상세</p>
-            <OrderBatchStatus order={order} />
-            <Badge tone={order.unit === 'EA' ? 'blue' : 'teal'}>{order.unit}</Badge>
-          </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap gap-2">
-          {onBackToList ? <Button onClick={onBackToList} size="sm" variant="secondary">주문 목록으로</Button> : null}
-          <Button aria-label="주문 상세 닫기" onClick={onClose} size="sm" variant="ghost">닫기</Button>
-        </div>
-      </div>
-
-      <div className="overflow-y-auto bg-slate-50 px-4 py-4 sm:px-6 sm:py-5">
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <p className="text-base font-bold text-slate-950">{order.productName || '-'}</p>
-          <p className="mt-1 text-sm text-slate-600">{order.storeName || order.storeCode || '-'} · {order.orderQty.toLocaleString()} {order.unit}</p>
-        </div>
-
-        <div className="mt-4 grid gap-4 lg:grid-cols-2">
-          <DetailSection title="주문 정보" description="주문과 배치 기준 정보">
-            <DetailItem label="주문번호" value={<CodeCell value={order.orderNo} />} />
-            <DetailItem label="고객사" value={order.clientName} />
-            <DetailItem label="납기일" value={order.dueDate || '-'} />
-            <DetailItem label="배치 ID" value={<CodeCell value={order.batchId} />} />
-            <DetailItem label="PL 기준" value={<SourcePlCell order={order} />} />
-          </DetailSection>
-
-          <DetailSection title="품목/수량" description="출고할 품목과 주문 수량">
-            <DetailItem label="품목코드" value={<CodeCell value={order.productCode} />} />
-            <DetailItem label="품목명" value={order.productName || '-'} />
-            <DetailItem label="브랜드" value={order.brandName || '-'} />
-            <DetailItem label="주문수량" value={`${order.orderQty.toLocaleString()} ${order.unit}`} />
-            <DetailItem label="보관온도" value={order.storageTemperature} />
-          </DetailSection>
-
-          <DetailSection title="거래처/배송" description="거래처와 배송 참고 정보">
-            <DetailItem label="거래처코드" value={<CodeCell value={order.storeCode} />} />
-            <DetailItem label="거래처명" value={order.storeName || '-'} />
-            <DetailItem label="권역" value={order.area || '-'} />
-            <DetailItem label="차량명" value={order.vehicleName || '-'} />
-            <DetailItem label="차수" value={order.deliveryRound || '-'} />
-          </DetailSection>
-        </div>
-
-        <div className="mt-5 flex flex-wrap justify-end gap-2">
-          {onBackToList ? <Button onClick={onBackToList} variant="secondary">주문 목록으로</Button> : null}
-          <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${order.batchId}`}>
-            배치 상세
-          </Link>
-          <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to="/pl-lines">
-            PL 보기
-          </Link>
-          <Button onClick={onClose} variant="primary">확인</Button>
-        </div>
-      </div>
-    </ModalFrame>
-  );
-}
-
-function DetailSection({ children, description, title }: { children: ReactNode; description: string; title: string }) {
-  return (
-    <section className="rounded-lg border border-slate-200 bg-white">
-      <div className="border-b border-slate-100 px-4 py-3">
-        <p className="text-sm font-bold text-slate-950">{title}</p>
-        <p className="mt-1 text-xs text-slate-500">{description}</p>
-      </div>
-      <dl className="grid gap-3 p-4 text-sm">{children}</dl>
-    </section>
-  );
-}
-
-function DetailItem({ label, value }: { label: string; value: ReactNode }) {
-  return (
-    <div className="grid grid-cols-[104px_minmax(0,1fr)] items-center gap-3 rounded-md border border-slate-200 bg-white p-4">
-      <dt className="text-xs font-semibold text-slate-500">{label}</dt>
-      <dd className="min-w-0 text-slate-900">{value}</dd>
-    </div>
-  );
-}
-
 function orderFiltersFromSearchParams(
   searchParams: URLSearchParams,
   tenantId?: number | null,
   clientId?: number,
 ): OrderFilters {
   const storedBatch = readBatchContextSelection(tenantId, clientId);
-  const batchId = searchParams.get('batchId') ?? (storedBatch ? String(storedBatch.batchId) : initialFilters.batchId);
+  const batchId = searchParams.get('batchId') ?? (storedBatch?.mode === 'batch' ? String(storedBatch.batchId) : initialFilters.batchId);
   const dueDateFrom = searchParams.get('dueDateFrom') ?? '';
   const dueDateTo = searchParams.get('dueDateTo') ?? '';
 
@@ -912,12 +1007,14 @@ function orderFiltersFromSearchParams(
   };
 }
 
-function buildOrderQuery(filters: OrderFilters, page: number, tenantId: number | null, clientId?: number) {
+function buildOrderQuery(filters: OrderFilters, sort: OrderSort, page: number, tenantId: number | null, clientId?: number) {
   return {
     tenantId: requireTenantId(tenantId),
     clientId,
     page,
     size: pageSize,
+    sortBy: sort.field,
+    sortDirection: sort.direction,
     batchId: toNumberOrUndefined(filters.batchId),
     dueDateFrom: filters.dueDateRange.from || undefined,
     dueDateTo: filters.dueDateRange.to || undefined,

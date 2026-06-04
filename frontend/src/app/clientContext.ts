@@ -8,6 +8,9 @@ const CLIENT_CONTEXT_CHANGED_EVENT = 'oms:client-context-changed';
 
 export type ClientContextSelection =
   | {
+      mode: 'unselected';
+    }
+  | {
       mode: 'all';
     }
   | {
@@ -17,7 +20,7 @@ export type ClientContextSelection =
     };
 
 export const defaultClientContextSelection: ClientContextSelection = {
-  mode: 'all',
+  mode: 'unselected',
 };
 
 export function readClientContextSelection(): ClientContextSelection {
@@ -30,6 +33,7 @@ export function readClientContextSelection(): ClientContextSelection {
     const raw = localStorage.getItem(clientContextStorageKey());
     if (!raw) return defaultClientContextSelection;
     const parsed = JSON.parse(raw) as ClientContextSelection;
+    if (parsed.mode === 'unselected') return defaultClientContextSelection;
     if (parsed.mode === 'all') return { mode: 'all' };
     if (parsed.mode === 'client' && Number.isFinite(parsed.clientId)) {
       return {
@@ -84,6 +88,10 @@ export function subscribeClientContextSelection(listener: (selection: ClientCont
 }
 
 export function clientSelectionFromValue(value: string, clients: ClientSummary[]): ClientContextSelection {
+  if (value === 'unselected') {
+    return defaultClientContextSelection;
+  }
+
   if (value === 'all') {
     return { mode: 'all' };
   }
@@ -98,6 +106,7 @@ export function clientSelectionFromValue(value: string, clients: ClientSummary[]
 }
 
 export function clientSelectionValue(selection: ClientContextSelection) {
+  if (selection.mode === 'unselected') return 'unselected';
   return selection.mode === 'all' ? 'all' : String(selection.clientId);
 }
 
@@ -115,7 +124,13 @@ export function useClientScope() {
       clientId: selection.mode === 'client' ? selection.clientId : undefined,
       clientName: selection.mode === 'client' ? selection.clientName : undefined,
       isAllClients: selection.mode === 'all',
-      scopeLabel: selection.mode === 'all' ? '전체 고객사' : selection.clientName ?? `고객사 #${selection.clientId}`,
+      isClientUnselected: selection.mode === 'unselected',
+      scopeLabel:
+        selection.mode === 'unselected'
+          ? '고객사 선택 필요'
+          : selection.mode === 'all'
+            ? '전체 고객사'
+            : selection.clientName ?? `고객사 #${selection.clientId}`,
     }),
     [selection],
   );

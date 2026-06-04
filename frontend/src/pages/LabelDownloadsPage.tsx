@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
 import { useClientScope } from '../app/clientContext';
@@ -78,17 +78,13 @@ export function LabelDownloadsPage() {
   const [downloadingBatchId, setDownloadingBatchId] = useState<string | null>(null);
   const [downloadResult, setDownloadResult] = useState<DownloadResult | null>(null);
 
-  useEffect(() => {
-    void loadRows();
-  }, [clientId, tenantId]);
-
   const activeFilterCount = useMemo(() => countActiveFilters(appliedFilters), [appliedFilters]);
   const hasPendingFilters = useMemo(() => !areFilterStatesEqual(filters, appliedFilters), [appliedFilters, filters]);
   const filteredRows = useMemo(() => filterRows(rows, appliedFilters), [appliedFilters, rows]);
   const summary = useMemo(() => createSummary(rows), [rows]);
   const recentDownloads = useMemo(() => rows.filter((item) => item.lastDownloadedAt).slice(0, 6), [rows]);
 
-  async function loadRows() {
+  const loadRows = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -115,7 +111,11 @@ export function LabelDownloadsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [clientId, tenantId]);
+
+  useEffect(() => {
+    void loadRows();
+  }, [loadRows]);
 
   function updateFilter<TKey extends keyof LabelDownloadFilters>(key: TKey, value: LabelDownloadFilters[TKey]) {
     setFilters((current) => ({ ...current, [key]: value }));
@@ -221,6 +221,7 @@ export function LabelDownloadsPage() {
           getRowClassName={(item) => (item.downloadable ? '' : 'bg-slate-50/80')}
           getRowKey={(item) => item.id}
           onRowClick={handleDownload}
+          renderMobileCard={(item) => renderLabelDownloadCard(item, handleDownload, downloadingBatchId)}
         />
         <div className="flex flex-col gap-2 px-5 py-4 lg:flex-row lg:items-center lg:justify-between">
           <p className="text-xs text-slate-500">다운로드가 성공하면 다운로드 로그가 저장됩니다.</p>
@@ -325,7 +326,10 @@ function LabelDownloadFilterPanel({
 }) {
   return (
     <Card className="px-4 py-4">
-      <div className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between" onClick={onToggleOpen}>
+      <div
+        className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between"
+        onClick={onToggleOpen}
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
@@ -406,6 +410,7 @@ function createColumns(onDownload: (row: LabelDownloadRow) => void, downloadingB
     { key: 'by', header: '다운로드자', width: '110px', cell: (item) => item.downloadedBy ?? '-' },
     {
       key: 'action',
+      sticky: 'right',
       header: '액션',
       width: '130px',
       cell: (item) => (
@@ -415,6 +420,50 @@ function createColumns(onDownload: (row: LabelDownloadRow) => void, downloadingB
       ),
     },
   ];
+}
+
+function renderLabelDownloadCard(
+  row: LabelDownloadRow,
+  onDownload: (row: LabelDownloadRow) => void,
+  downloadingBatchId: string | null,
+) {
+  return (
+    <div className="space-y-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <CodeCell value={row.batchId} />
+          <p className="mt-2 truncate text-sm font-semibold text-slate-950" title={row.clientName}>{row.clientName}</p>
+          <p className="mt-1 text-xs text-slate-500">{row.deliveryDate}</p>
+        </div>
+        <BatchStatusBadge status={row.status} />
+      </div>
+      <div className="grid grid-cols-3 gap-2 text-sm">
+        <CompactValue label="EA" value={row.labelEaCount.toLocaleString()} />
+        <CompactValue label="BOX" value={row.labelBoxCount.toLocaleString()} />
+        <CompactValue label="Stores" value={row.storeCount.toLocaleString()} />
+      </div>
+      <div className="flex items-center justify-between gap-3">
+        <DownloadableCell row={row} />
+        <Button
+          disabled={!row.downloadable || downloadingBatchId === row.id}
+          onClick={() => onDownload(row)}
+          size="sm"
+          variant={row.downloadable ? 'primary' : 'secondary'}
+        >
+          {downloadingBatchId === row.id ? '처리 중' : '다운로드'}
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function CompactValue({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="min-w-0 rounded-md bg-slate-50 px-2 py-2">
+      <p className="truncate text-[11px] font-semibold text-slate-500">{label}</p>
+      <p className="mt-1 truncate font-mono text-sm font-bold text-slate-950">{value}</p>
+    </div>
+  );
 }
 
 function DownloadableCell({ row }: { row: LabelDownloadRow }) {

@@ -11,6 +11,8 @@ interface BatchSelectionPanelProps {
   tenantId: number;
   clientId: number;
   clientName?: string;
+  onChooseClient?: () => void;
+  onSelectAllBatches: () => void;
   onSelectBatch: (batch: BackendBatchSummary) => void;
   title?: string;
   description?: string;
@@ -28,11 +30,14 @@ export function BatchSelectionPanel({
   tenantId,
   clientId,
   clientName,
+  onChooseClient,
+  onSelectAllBatches,
   onSelectBatch,
   title = '배치를 선택하세요',
   description = '선택한 배치 기준으로 주문, Scan, PL, Label 데이터를 조회합니다.',
 }: BatchSelectionPanelProps) {
   const [mode, setMode] = useState<BatchListMode>('UPCOMING');
+  const [appliedMode, setAppliedMode] = useState<BatchListMode>('UPCOMING');
   const [keyword, setKeyword] = useState('');
   const [appliedKeyword, setAppliedKeyword] = useState('');
   const [batches, setBatches] = useState<BackendBatchSummary[]>([]);
@@ -53,7 +58,7 @@ export function BatchSelectionPanel({
         size: pageSize,
         keyword: appliedKeyword.trim() || undefined,
         status: 'CONFIRMED',
-        deliveryDateFrom: mode === 'UPCOMING' ? todayString() : undefined,
+        deliveryDateFrom: appliedMode === 'UPCOMING' ? todayString() : undefined,
       })
       .then((response) => {
         if (!ignore) setBatches(response.items.filter((batch) => batch.status === 'CONFIRMED'));
@@ -68,19 +73,21 @@ export function BatchSelectionPanel({
     return () => {
       ignore = true;
     };
-  }, [appliedKeyword, clientId, mode, reloadSeq, tenantId]);
+  }, [appliedKeyword, appliedMode, clientId, reloadSeq, tenantId]);
 
-  const hasPendingKeyword = keyword.trim() !== appliedKeyword.trim();
+  const hasPendingSearch = keyword.trim() !== appliedKeyword.trim() || mode !== appliedMode;
   const subtitle = clientName ? `${clientName} 고객사의 배치를 선택합니다.` : description;
 
   function applySearch() {
     setAppliedKeyword(keyword);
+    setAppliedMode(mode);
   }
 
   function resetSearch() {
     setKeyword('');
     setAppliedKeyword('');
     setMode('UPCOMING');
+    setAppliedMode('UPCOMING');
   }
 
   function selectBatch(batch: BackendBatchSummary) {
@@ -93,6 +100,16 @@ export function BatchSelectionPanel({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap justify-end gap-2">
+        {onChooseClient ? (
+          <Button onClick={onChooseClient} variant="ghost">
+            고객사 선택하기
+          </Button>
+        ) : null}
+        <Button onClick={onSelectAllBatches} variant="secondary">
+          전체 배치 보기
+        </Button>
+      </div>
       <Card className="p-5">
         <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div className="max-w-3xl">
@@ -105,7 +122,7 @@ export function BatchSelectionPanel({
           </div>
           <div className="grid w-full gap-2 sm:grid-cols-[minmax(0,1fr)_160px_auto_auto] xl:max-w-3xl">
             <Input
-              label="배치 검색"
+              label="배치 찾기"
               onChange={(event) => setKeyword(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') applySearch();
@@ -114,9 +131,9 @@ export function BatchSelectionPanel({
               value={keyword}
             />
             <Select label="조회 범위" onChange={(event) => setMode(event.target.value as BatchListMode)} options={modeOptions} value={mode} />
-            <Button className="self-end" onClick={applySearch} variant={hasPendingKeyword ? 'primary' : 'secondary'}>
+            <Button className="self-end" onClick={applySearch} variant={hasPendingSearch ? 'primary' : 'secondary'}>
               <ListFilter aria-hidden="true" size={16} />
-              검색
+              배치 찾기
             </Button>
             <Button className="self-end" onClick={resetSearch} variant="ghost">
               초기화
@@ -132,9 +149,16 @@ export function BatchSelectionPanel({
       ) : batches.length === 0 ? (
         <EmptyState
           action={
-            <Button onClick={() => setMode(mode === 'UPCOMING' ? 'RECENT' : 'UPCOMING')} variant="secondary">
+            <Button
+              onClick={() => {
+                const nextMode = appliedMode === 'UPCOMING' ? 'RECENT' : 'UPCOMING';
+                setMode(nextMode);
+                setAppliedMode(nextMode);
+              }}
+              variant="secondary"
+            >
               <RotateCw aria-hidden="true" size={16} />
-              {mode === 'UPCOMING' ? '최근 업로드 보기' : '오늘 이후 예정 보기'}
+              {appliedMode === 'UPCOMING' ? '최근 업로드 보기' : '오늘 이후 예정 보기'}
             </Button>
           }
           description="조회 범위와 검색어를 조정해 주세요."

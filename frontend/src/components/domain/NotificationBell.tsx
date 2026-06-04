@@ -1,9 +1,15 @@
 import { Bell, Check, ExternalLink } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { OmsApiError } from '../../api/client';
 import { omsApi } from '../../api/oms';
 import { fakeCurrentUser } from '../../app/auth';
+import { dispatchNotificationsChanged, subscribeNotificationsChanged } from '../../app/notificationEvents';
+import {
+  acknowledgeWorkItemCount,
+  readAcknowledgedWorkItemCount,
+  subscribeWorkItemAcknowledgementChanged,
+} from '../../app/workItemAcknowledgement';
 import { Badge, Button } from '../common';
 import type { NotificationItem, NotificationSeverity, WorkItemSummary } from '../../types/notification';
 
@@ -13,56 +19,78 @@ export function NotificationBell() {
   const [items, setItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [workItemSummary, setWorkItemSummary] = useState<WorkItemSummary | null>(null);
+  const [, setAcknowledgementVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
   const params = useMemo(() => notificationParams(), []);
+  const userKey = useMemo(() => userAcknowledgementKey(), []);
+
+  const reload = useCallback(async () => {
+    if (!params) {
+      return;
+    }
+
+    const [countResult, listResult, summaryResult] = await Promise.all([
+      omsApi.notifications.unreadCount(params),
+      omsApi.notifications.list({ ...params, readStatus: 'UNREAD', page: 0, size: 10 }),
+      omsApi.workItems.summary(params),
+    ]);
+    setUnreadCount(countResult.unreadCount);
+    setItems(listResult.items);
+    setWorkItemSummary(summaryResult);
+    setErrorMessage(null);
+  }, [params]);
 
   useEffect(() => {
     if (!params) {
       return;
     }
 
-    const requestParams = params;
     let ignore = false;
     async function load() {
       try {
-        const [countResult, listResult, summaryResult] = await Promise.all([
-          omsApi.notifications.unreadCount(requestParams),
-          omsApi.notifications.list({ ...requestParams, readStatus: 'UNREAD', page: 0, size: 10 }),
-          omsApi.workItems.summary(requestParams),
-        ]);
-        if (!ignore) {
-          setUnreadCount(countResult.unreadCount);
-          setItems(listResult.items);
-          setWorkItemSummary(summaryResult);
-          setErrorMessage(null);
-        }
+        await reload();
       } catch (error) {
         if (!ignore) setErrorMessage(formatError(error));
       }
     }
-
     load();
-    const intervalId = window.setInterval(load, 20_000);
+    const intervalId = window.setInterval(load, 10_000);
     return () => {
       ignore = true;
       window.clearInterval(intervalId);
     };
-  }, [params]);
+  }, [params, reload]);
 
-  async function reload() {
+  useEffect(() => {
+    if (!params) return undefined;
+    return subscribeNotificationsChanged(() => {
+      reload().catch((error) => setErrorMessage(formatError(error)));
+    });
+  }, [params, reload]);
+
+  useEffect(() => subscribeWorkItemAcknowledgementChanged(() => setAcknowledgementVersion((current) => current + 1)), []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target;
+      if (target instanceof Node && !containerRef.current?.contains(target)) {
+        setOpen(false);
+      }
+    }
+
+    window.addEventListener('pointerdown', handlePointerDown);
+    return () => window.removeEventListener('pointerdown', handlePointerDown);
+  }, [open]);
+
+  async function reloadWithLoading() {
     if (!params) return;
     setLoading(true);
     try {
-      const [countResult, listResult, summaryResult] = await Promise.all([
-        omsApi.notifications.unreadCount(params),
-        omsApi.notifications.list({ ...params, readStatus: 'UNREAD', page: 0, size: 10 }),
-        omsApi.workItems.summary(params),
-      ]);
-      setUnreadCount(countResult.unreadCount);
-      setItems(listResult.items);
-      setWorkItemSummary(summaryResult);
-      setErrorMessage(null);
+      await reload();
     } catch (error) {
       setErrorMessage(formatError(error));
     } finally {
@@ -72,11 +100,15 @@ export function NotificationBell() {
 
   async function handleNotificationClick(item: NotificationItem) {
     if (!params) return;
+    if (!item.readAt) {
+      setUnreadCount((current) => Math.max(0, current - 1));
+      setItems((current) => current.filter((notification) => notification.id !== item.id));
+    }
     try {
       await omsApi.notifications.markRead(item.id, params);
-      await reload();
+      dispatchNotificationsChanged();
     } catch {
-      // Navigation is still useful even if read state update fails.
+      await reloadWithLoading();
     }
     setOpen(false);
     if (item.linkPath) {
@@ -92,6 +124,7 @@ export function NotificationBell() {
       setUnreadCount(result.unreadCount);
       setItems([]);
       setErrorMessage(null);
+      dispatchNotificationsChanged();
     } catch (error) {
       setErrorMessage(formatError(error));
     } finally {
@@ -99,8 +132,12 @@ export function NotificationBell() {
     }
   }
 
+  const incompleteBatchCount = workItemSummary
+    ? Math.max(0, workItemSummary.incompleteBatches - readAcknowledgedWorkItemCount(userKey, 'incompleteBatches'))
+    : 0;
+
   return (
-    <div className="relative">
+    <div className="relative" ref={containerRef}>
       <button
         aria-label="알림"
         className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50"
@@ -129,10 +166,11 @@ export function NotificationBell() {
           </div>
 
           <div className="max-h-[calc(100dvh-13rem)] overflow-y-auto sm:max-h-[420px]">
-            {workItemSummary && workItemSummary.incompleteBatches > 0 ? (
+            {workItemSummary && incompleteBatchCount > 0 ? (
               <button
                 className="block w-full border-b border-amber-100 bg-amber-50 px-4 py-3 text-left transition hover:bg-amber-100"
                 onClick={() => {
+                  acknowledgeWorkItemCount(userKey, 'incompleteBatches', workItemSummary.incompleteBatches);
                   setOpen(false);
                   navigate('/batches');
                 }}
@@ -140,7 +178,7 @@ export function NotificationBell() {
               >
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-sm font-bold text-slate-950">미완료 배치</span>
-                  <Badge tone="amber">{workItemSummary.incompleteBatches.toLocaleString()}</Badge>
+                  <Badge tone="amber">{incompleteBatchCount.toLocaleString()}</Badge>
                 </div>
                 <p className="mt-1 text-xs leading-5 text-slate-600">검증 또는 확정 처리가 남은 배치가 있습니다.</p>
               </button>
@@ -196,6 +234,15 @@ function notificationParams() {
     tenantId,
     clientId: fakeCurrentUser.userScopeType === 'CLIENT' ? fakeCurrentUser.clientId ?? undefined : undefined,
   };
+}
+
+function userAcknowledgementKey() {
+  return [
+    fakeCurrentUser.userScopeType ?? 'ANONYMOUS',
+    fakeCurrentUser.tenantId ?? 'none',
+    fakeCurrentUser.clientId ?? 'all',
+    fakeCurrentUser.id ?? 'anonymous',
+  ].join(':');
 }
 
 function formatRelativeTime(value: string) {

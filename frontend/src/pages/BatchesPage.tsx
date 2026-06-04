@@ -180,7 +180,10 @@ function BatchFilterPanel({
 }) {
   return (
     <Card className="px-4 py-3">
-      <div className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between" onClick={onToggleOpen}>
+      <div
+        className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between"
+        onClick={onToggleOpen}
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">필터</p>
@@ -405,7 +408,7 @@ function hideResolvedSupplementParents(items: BackendBatchSummary[]) {
     return items;
   }
 
-  return items.filter((item) => !(item.status === 'NEEDS_MORE_INFO' && confirmedSupplementParentIds.has(item.id)));
+  return items.filter((item) => !confirmedSupplementParentIds.has(item.id));
 }
 
 function ApiErrorCard({ message, onRetry }: { message: string; onRetry: () => void }) {

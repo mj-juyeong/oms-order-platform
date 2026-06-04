@@ -76,6 +76,28 @@ enum class MasterUploadStatus {
 	CANCELLED,
 }
 
+enum class MasterDataAddRequestType {
+	PRODUCT,
+	STORE_ROUTE,
+	PRODUCT_CODE_MAPPING,
+	STORE_CODE_MAPPING,
+}
+
+enum class MasterDataAddRequestStatus {
+	REQUESTED,
+	NEEDS_MORE_INFO,
+	REJECTED,
+	APPROVED,
+	APPLIED,
+}
+
+enum class ApiKeyRequestStatus {
+	REQUESTED,
+	REJECTED,
+	CANCELED,
+	ISSUED,
+}
+
 enum class ClientProductMasterVisibilityMode {
 	SCOPED_ONLY,
 	ALL_PRODUCTS,
@@ -121,4 +143,7 @@ enum class NotificationEventType {
 	BATCH_CONFIRMATION_APPROVED,
 	BATCH_CONFIRMATION_NEEDS_MORE_INFO,
 	BATCH_CONFIRMATION_REJECTED,
+	API_KEY_REQUESTED,
+	API_KEY_ISSUED,
+	API_KEY_REJECTED,
 }

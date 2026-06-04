@@ -608,7 +608,7 @@ export function UploadsPage() {
 
           {uploadResult ? (
             <div className="min-w-0">
-              <DataTable columns={columns} data={sheetResults} getRowKey={(item) => item.sheetName} />
+              <DataTable columns={columns} data={sheetResults} getRowKey={(item) => item.sheetName} renderMobileCard={renderSheetResultCard} />
             </div>
           ) : null}
         </div>
@@ -1004,7 +1004,7 @@ function ClientResolvePanel({
     <div className="mt-4 rounded-md border border-slate-200 bg-white px-4 py-4">
       <div className="grid gap-3">
         <Select
-          disabled={disabled}
+          disabled={disabled || loading}
           label="고객사"
           onChange={(event) => handleClientSelect(event.target.value)}
           options={clientSelectOptions}
@@ -1012,7 +1012,7 @@ function ClientResolvePanel({
         />
         {inputMode === 'direct' ? (
           <Input
-            disabled={disabled}
+            disabled={disabled || loading}
             label="기존 고객사명 또는 별칭"
             onChange={(event) => onSearchTextChange(event.target.value)}
             placeholder="예: 웰스토리, 삼성웰스토리"
@@ -1042,7 +1042,7 @@ function ClientResolvePanel({
                 className={`min-h-[76px] rounded-md border px-3 py-3 text-left transition ${
                   selected ? 'border-teal-500 bg-teal-50 ring-2 ring-teal-100' : 'border-slate-200 bg-slate-50 hover:border-teal-200 hover:bg-teal-50/50'
                 }`}
-                disabled={disabled}
+                disabled={disabled || loading}
                 key={candidate.client.id}
                 onClick={() => onSelectClient(candidate.client.id)}
                 type="button"
@@ -1226,7 +1226,7 @@ function hideResolvedSupplementParents(items: BackendBatchSummary[]) {
     return items;
   }
 
-  return items.filter((item) => !(item.status === 'NEEDS_MORE_INFO' && confirmedSupplementParentIds.has(item.id)));
+  return items.filter((item) => !confirmedSupplementParentIds.has(item.id));
 }
 
 function toMasterCriteria(
@@ -1369,6 +1369,31 @@ function sheetTypeLabel(item: SheetResult) {
   }
 
   return 'Label Box';
+}
+
+function renderSheetResultCard(item: SheetResult) {
+  return (
+    <div className="space-y-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-mono text-sm font-bold text-slate-950" title={item.sheetName}>{item.sheetName}</p>
+          <p className="mt-1 text-xs text-slate-500">{sheetTypeLabel(item)} · {item.suffix ?? '-'}</p>
+        </div>
+        <Badge tone={statusTone[item.status]}>{statusLabel[item.status]}</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-500">Rows</p>
+          <p className="mt-1 font-mono font-bold text-slate-950">{item.rowCount.toLocaleString()}</p>
+        </div>
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-500">Type</p>
+          <p className="mt-1 font-semibold text-slate-950">{sheetTypeLabel(item)}</p>
+        </div>
+      </div>
+      <p className="break-words text-xs leading-5 text-slate-500">{displaySheetMessage(item)}</p>
+    </div>
+  );
 }
 
 function actionTitle(phase: UploadPhase, loadingAction: LoadingAction, canConfirm: boolean, confirmationRequested: boolean, confirmed: boolean) {

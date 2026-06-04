@@ -1,3 +1,5 @@
+import type { BatchStatus } from './batch';
+
 export interface MasterVersion {
   id: string;
   versionName: string;
@@ -95,6 +97,11 @@ export interface ProductMasterItem {
   cbm?: number | null;
   activeYn?: boolean;
   operationStatus?: 'ACTIVE' | 'INACTIVE';
+  lastMasterUploadBatchId?: number | null;
+  lastMasterUploadedAt?: string | null;
+  latestConfirmedBatchId?: number | null;
+  latestConfirmedBatchNo?: string | null;
+  latestConfirmedBatchAt?: string | null;
   rowNo?: number | null;
 }
 
@@ -113,7 +120,90 @@ export interface StoreRouteMasterItem {
   address?: string | null;
   activeYn?: boolean;
   operationStatus?: 'ACTIVE' | 'INACTIVE';
+  lastMasterUploadBatchId?: number | null;
+  lastMasterUploadedAt?: string | null;
+  latestConfirmedBatchId?: number | null;
+  latestConfirmedBatchNo?: string | null;
+  latestConfirmedBatchAt?: string | null;
   rowNo?: number | null;
+}
+
+export interface MasterDetailUpload {
+  id: number;
+  fileName: string;
+  status: MasterUploadStatus;
+  uploadedAt: string;
+  appliedAt?: string | null;
+}
+
+export interface MasterUsageSummary {
+  orderCount: number;
+  scanLineCount: number;
+  plLineCount: number;
+  labelLineCount: number;
+  validationErrorCount: number;
+  activeClientScopeCount: number;
+}
+
+export interface MasterRelatedBatch {
+  id: number;
+  batchNo: string;
+  clientId: number;
+  status: BatchStatus;
+  deliveryDate?: string | null;
+  uploadedAt: string;
+  confirmedAt?: string | null;
+}
+
+export interface MasterRelatedOrder {
+  id: number;
+  batchId: number;
+  clientName?: string | null;
+  orderNo?: string | null;
+  storeCode?: string | null;
+  storeName?: string | null;
+  productCode?: string | null;
+  productName?: string | null;
+  unit?: string | null;
+  orderQty?: number | null;
+  dueDate?: string | null;
+  vehicleName?: string | null;
+  deliveryRound?: string | null;
+  area?: string | null;
+  sourcePlLineId?: number | null;
+  batchStatus?: import('./batch').BatchStatus | null;
+  confirmed: boolean;
+}
+
+export interface MasterRelatedValidationError {
+  id: number;
+  batchId: number;
+  severity: 'ERROR' | 'WARNING' | 'INFO';
+  errorCode: string;
+  domain: string;
+  sheetName?: string | null;
+  rowNo?: number | null;
+  columnName?: string | null;
+  message: string;
+  createdAt?: string | null;
+}
+
+export interface ProductMasterDetail {
+  item: ProductMasterItem;
+  lastUpload?: MasterDetailUpload | null;
+  usage: MasterUsageSummary;
+  recentBatches: MasterRelatedBatch[];
+  recentOrders: MasterRelatedOrder[];
+  validationErrors: MasterRelatedValidationError[];
+}
+
+export interface StoreRouteMasterDetail {
+  item: StoreRouteMasterItem;
+  lastUpload?: MasterDetailUpload | null;
+  usage: MasterUsageSummary;
+  recentBatches: MasterRelatedBatch[];
+  recentOrders: MasterRelatedOrder[];
+  validationErrors: MasterRelatedValidationError[];
 }
 
 export type ClientProductMasterVisibilityMode = 'SCOPED_ONLY' | 'ALL_PRODUCTS';
@@ -155,6 +245,9 @@ export interface ClientPublicProductMasterItem {
   temperatureType?: string | null;
   cbm?: number | null;
   activeYn: boolean;
+  latestConfirmedBatchId?: number | null;
+  latestConfirmedBatchNo?: string | null;
+  latestConfirmedBatchAt?: string | null;
 }
 
 export interface ClientPublicStoreRouteMasterItem {
@@ -171,6 +264,27 @@ export interface ClientPublicStoreRouteMasterItem {
   address?: string | null;
   activeYn: boolean;
   internalFieldsVisible: boolean;
+  latestConfirmedBatchId?: number | null;
+  latestConfirmedBatchNo?: string | null;
+  latestConfirmedBatchAt?: string | null;
+}
+
+export interface ClientPublicProductMasterDetail {
+  item: ClientPublicProductMasterItem;
+  lastUpload?: MasterDetailUpload | null;
+  usage: MasterUsageSummary;
+  recentBatches: MasterRelatedBatch[];
+  recentOrders: MasterRelatedOrder[];
+  validationErrors: MasterRelatedValidationError[];
+}
+
+export interface ClientPublicStoreRouteMasterDetail {
+  item: ClientPublicStoreRouteMasterItem;
+  lastUpload?: MasterDetailUpload | null;
+  usage: MasterUsageSummary;
+  recentBatches: MasterRelatedBatch[];
+  recentOrders: MasterRelatedOrder[];
+  validationErrors: MasterRelatedValidationError[];
 }
 
 export interface ClientMasterScope {
@@ -200,6 +314,47 @@ export interface ClientStoreRouteMasterScopeItem {
   status: ClientMasterScopeStatus;
   source: ClientMasterScopeSource;
   storeRoute?: ClientPublicStoreRouteMasterItem | null;
+}
+
+export type MasterDataAddRequestType = 'PRODUCT' | 'STORE_ROUTE' | 'PRODUCT_CODE_MAPPING' | 'STORE_CODE_MAPPING';
+export type MasterDataAddRequestStatus = 'REQUESTED' | 'NEEDS_MORE_INFO' | 'REJECTED' | 'APPROVED' | 'APPLIED';
+
+export interface MasterDataAddRequest {
+  id: number;
+  tenantId: number;
+  clientId: number;
+  requestType: MasterDataAddRequestType;
+  status: MasterDataAddRequestStatus;
+  title: string;
+  requestFields: Record<string, string>;
+  requestMemo?: string | null;
+  requestedBy?: number | null;
+  requestedAt: string;
+  reviewedBy?: number | null;
+  reviewedAt?: string | null;
+  reviewComment?: string | null;
+  appliedMasterType?: 'PRODUCT' | 'STORE_ROUTE' | null;
+  appliedMasterItemId?: number | null;
+}
+
+export interface MasterDataAddRequestCreate {
+  tenantId?: number;
+  clientId?: number;
+  requestType: MasterDataAddRequestType;
+  title: string;
+  requestFields: Record<string, string>;
+  requestMemo?: string | null;
+  requestedBy?: number | null;
+}
+
+export interface MasterDataAddRequestReview {
+  comment?: string | null;
+  actorId?: number | null;
+  appliedMasterType?: 'PRODUCT' | 'STORE_ROUTE' | null;
+  appliedMasterItemId?: number | null;
+  requestFields?: Record<string, string>;
+  activeYn?: boolean;
+  createClientScope?: boolean;
 }
 
 export interface ClientProductCodeMapping {

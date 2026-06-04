@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
+import { dispatchNotificationsChanged } from '../app/notificationEvents';
 import { Badge, Button, Card, Select } from '../components/common';
 import { Pagination } from '../components/data';
 import type { PageResponse } from '../types/api';
@@ -77,6 +78,19 @@ export function NotificationsPage() {
     if (!item.readAt) {
       try {
         await omsApi.notifications.markRead(item.id, params);
+        const readAt = new Date().toISOString();
+        setResponse((current) => {
+          if (!current) return current;
+          const items = current.items
+            .map((notification) => (notification.id === item.id ? { ...notification, readAt } : notification))
+            .filter((notification) => readStatus !== 'UNREAD' || notification.id !== item.id);
+          return {
+            ...current,
+            items,
+            totalElements: readStatus === 'UNREAD' ? Math.max(0, current.totalElements - 1) : current.totalElements,
+          };
+        });
+        dispatchNotificationsChanged();
       } catch {
         // The target screen is still the most useful next step.
       }
@@ -101,6 +115,7 @@ export function NotificationsPage() {
         size: 20,
       });
       setResponse(result);
+      dispatchNotificationsChanged();
     } catch (error) {
       setErrorMessage(formatError(error));
     }
@@ -204,6 +219,13 @@ function WorkItemSummaryCards({ onNavigate, summary }: { onNavigate: (path: stri
       description: '물류사 검토가 필요한 확정 요청',
     },
     {
+      label: 'API Key 요청',
+      value: summary.pendingApiKeyRequests,
+      tone: 'teal' as const,
+      path: '/external-api/api-keys?tab=requests',
+      description: '관리자 승인과 발급 처리가 필요한 API Key 요청',
+    },
+    {
       label: '보완 요청',
       value: summary.needsMoreInfoBatches,
       tone: 'amber' as const,
@@ -220,7 +242,7 @@ function WorkItemSummaryCards({ onNavigate, summary }: { onNavigate: (path: stri
   ];
 
   return (
-    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
       {items.map((item) => (
         <button
           className="rounded-md border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:border-teal-300 hover:bg-teal-50/40"
@@ -254,6 +276,9 @@ function eventTypeLabel(value: string) {
     BATCH_CONFIRMATION_APPROVED: '승인',
     BATCH_CONFIRMATION_NEEDS_MORE_INFO: '보완 요청',
     BATCH_CONFIRMATION_REJECTED: '반려',
+    API_KEY_REQUESTED: 'API Key 요청',
+    API_KEY_ISSUED: 'API Key 발급',
+    API_KEY_REJECTED: 'API Key 반려',
   };
   return labels[value] ?? value;
 }

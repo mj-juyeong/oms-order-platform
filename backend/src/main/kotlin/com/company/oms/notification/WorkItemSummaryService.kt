@@ -1,11 +1,13 @@
 package com.company.oms.notification
 
 import com.company.oms.auth.CurrentUser
+import com.company.oms.auth.ApiKeyRequestRepository
 import com.company.oms.batch.BatchConfirmationRequestRepository
 import com.company.oms.batch.UploadBatchEntity
 import com.company.oms.batch.UploadBatchRepository
 import com.company.oms.common.persistence.BatchConfirmationRequestStatus
 import com.company.oms.common.persistence.BatchStatus
+import com.company.oms.common.persistence.ApiKeyRequestStatus
 import com.company.oms.common.persistence.UserScopeType
 import jakarta.persistence.criteria.CriteriaBuilder
 import jakarta.persistence.criteria.CriteriaQuery
@@ -20,6 +22,7 @@ import org.springframework.transaction.annotation.Transactional
 @Profile("local")
 class WorkItemSummaryService(
 	private val confirmationRequestRepository: BatchConfirmationRequestRepository,
+	private val apiKeyRequestRepository: ApiKeyRequestRepository,
 	private val uploadBatchRepository: UploadBatchRepository,
 	private val notificationService: NotificationService,
 ) {
@@ -36,6 +39,7 @@ class WorkItemSummaryService(
 			unreadNotifications = unreadNotifications,
 			incompleteBatches = countIncompleteBatches(tenantId, scopedClientId),
 			pendingConfirmationRequests = countConfirmationRequests(tenantId, scopedClientId, BatchConfirmationRequestStatus.REQUESTED),
+			pendingApiKeyRequests = countApiKeyRequests(tenantId, scopedClientId, ApiKeyRequestStatus.REQUESTED),
 			needsMoreInfoBatches = countBatches(tenantId, scopedClientId, BatchStatus.NEEDS_MORE_INFO),
 			rejectedConfirmationRequests = countConfirmationRequests(tenantId, scopedClientId, BatchConfirmationRequestStatus.REJECTED),
 			validationErrorBatches = countBatches(tenantId, scopedClientId, BatchStatus.VALIDATION_FAILED),
@@ -65,6 +69,17 @@ class WorkItemSummaryService(
 			confirmationRequestRepository.countByTenantIdAndStatus(tenantId, status)
 		} else {
 			confirmationRequestRepository.countByTenantIdAndClientIdAndStatus(tenantId, clientId, status)
+		}
+
+	private fun countApiKeyRequests(
+		tenantId: Long,
+		clientId: Long?,
+		status: ApiKeyRequestStatus,
+	): Long =
+		if (clientId == null) {
+			apiKeyRequestRepository.countByTenantIdAndStatus(tenantId, status)
+		} else {
+			apiKeyRequestRepository.countByTenantIdAndClientIdAndStatus(tenantId, clientId, status)
 		}
 
 	private fun countBatches(
@@ -118,8 +133,5 @@ private fun unresolvedSupplementParentPredicate(
 			criteriaBuilder.isNotNull(childBatch.get<Long>("parentBatchId")),
 			criteriaBuilder.equal(childBatch.get<BatchStatus>("status"), BatchStatus.CONFIRMED),
 		)
-	return criteriaBuilder.or(
-		criteriaBuilder.notEqual(root.get<BatchStatus>("status"), BatchStatus.NEEDS_MORE_INFO),
-		criteriaBuilder.not(root.get<Long>("id").`in`(confirmedSupplementParents)),
-	)
+	return criteriaBuilder.not(root.get<Long>("id").`in`(confirmedSupplementParents))
 }

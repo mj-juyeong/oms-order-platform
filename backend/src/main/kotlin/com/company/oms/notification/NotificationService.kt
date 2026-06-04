@@ -2,6 +2,7 @@ package com.company.oms.notification
 
 import com.company.oms.batch.UploadBatchEntity
 import com.company.oms.auth.CurrentUser
+import com.company.oms.auth.ApiKeyRequestEntity
 import com.company.oms.common.error.ErrorCode
 import com.company.oms.common.error.OmsException
 import com.company.oms.common.persistence.NotificationEventType
@@ -56,6 +57,45 @@ class NotificationService(
 	}
 
 	@Transactional
+	fun markBatchConfirmationRequestNotificationHandled(
+		tenantId: Long,
+		requestId: Long,
+	) {
+		markNotificationsRead(
+			notificationRepository.findAll(
+				batchNotificationSpec(
+					tenantId = tenantId,
+					relatedResourceType = "BATCH_CONFIRMATION_REQUEST",
+					relatedResourceIds = setOf(requestId.toString()),
+					eventTypes = setOf(NotificationEventType.BATCH_CONFIRMATION_REQUESTED),
+				),
+			),
+		)
+	}
+
+	@Transactional
+	fun markBatchNotificationsHandled(
+		tenantId: Long,
+		batchIds: Collection<Long>,
+		eventTypes: Set<NotificationEventType>,
+	) {
+		val normalizedBatchIds = batchIds.map(Long::toString).toSet()
+		if (normalizedBatchIds.isEmpty() || eventTypes.isEmpty()) {
+			return
+		}
+		markNotificationsRead(
+			notificationRepository.findAll(
+				batchNotificationSpec(
+					tenantId = tenantId,
+					relatedResourceType = "BATCH",
+					relatedResourceIds = normalizedBatchIds,
+					eventTypes = eventTypes,
+				),
+			),
+		)
+	}
+
+	@Transactional
 	fun notifyBatchConfirmationNeedsMoreInfo(
 		batch: UploadBatchEntity,
 		comment: String?,
@@ -84,6 +124,48 @@ class NotificationService(
 			title = "배치 확정 요청 반려",
 			message = "${batch.batchNo} 배치 확정 요청이 반려되었습니다.$suffix",
 			linkPath = "/batches/${batch.id}",
+		)
+	}
+
+	@Transactional
+	fun notifyApiKeyRequested(request: ApiKeyRequestEntity) {
+		create(
+			tenantId = request.tenantId,
+			clientId = null,
+			targetScope = NotificationTargetScope.TENANT,
+			eventType = NotificationEventType.API_KEY_REQUESTED,
+			severity = NotificationSeverity.INFO,
+			title = "API Key 요청 도착",
+			message = "${request.name} API Key 발급 요청이 등록되었습니다.",
+			relatedResourceType = "API_KEY_REQUEST",
+			relatedResourceId = (request.id ?: 0).toString(),
+			linkPath = "/external-api/api-keys?tab=requests",
+		)
+	}
+
+	@Transactional
+	fun notifyApiKeyIssued(request: ApiKeyRequestEntity) {
+		createApiKeyRequestResultNotification(
+			request = request,
+			eventType = NotificationEventType.API_KEY_ISSUED,
+			severity = NotificationSeverity.INFO,
+			title = "API Key 발급 완료",
+			message = "${request.name} API Key 요청이 승인되어 발급되었습니다. API Key 원문은 1회만 확인할 수 있습니다.",
+		)
+	}
+
+	@Transactional
+	fun notifyApiKeyRejected(
+		request: ApiKeyRequestEntity,
+		comment: String?,
+	) {
+		val suffix = comment?.takeIf { it.isNotBlank() }?.let { " 사유: ${it.take(120)}" }.orEmpty()
+		createApiKeyRequestResultNotification(
+			request = request,
+			eventType = NotificationEventType.API_KEY_REJECTED,
+			severity = NotificationSeverity.ERROR,
+			title = "API Key 요청 반려",
+			message = "${request.name} API Key 요청이 반려되었습니다.$suffix",
 		)
 	}
 
@@ -198,9 +280,44 @@ class NotificationService(
 		)
 	}
 
+	private fun createApiKeyRequestResultNotification(
+		request: ApiKeyRequestEntity,
+		eventType: NotificationEventType,
+		severity: NotificationSeverity,
+		title: String,
+		message: String,
+	) {
+		create(
+			tenantId = request.tenantId,
+			clientId = request.clientId,
+			userId = request.requestedBy,
+			targetScope = if (request.requestedBy == null) NotificationTargetScope.CLIENT else NotificationTargetScope.USER,
+			eventType = eventType,
+			severity = severity,
+			title = title,
+			message = message,
+			relatedResourceType = "API_KEY_REQUEST",
+			relatedResourceId = (request.id ?: 0).toString(),
+			linkPath = "/external-api/api-keys?tab=requests",
+		)
+	}
+
+	private fun markNotificationsRead(notifications: List<NotificationEntity>) {
+		if (notifications.isEmpty()) {
+			return
+		}
+		val now = LocalDateTime.now()
+		notifications.forEach { notification ->
+			if (notification.readAt == null) {
+				notification.readAt = now
+			}
+		}
+	}
+
 	private fun create(
 		tenantId: Long,
 		clientId: Long?,
+		userId: Long? = null,
 		targetScope: NotificationTargetScope,
 		eventType: NotificationEventType,
 		severity: NotificationSeverity,
@@ -214,6 +331,7 @@ class NotificationService(
 			NotificationEntity(
 				tenantId = tenantId,
 				clientId = clientId,
+				userId = userId,
 				targetScope = targetScope,
 				eventType = eventType,
 				severity = severity,
@@ -293,3 +411,19 @@ private fun canAccess(
 		else -> clientId == null || notification.clientId == clientId
 	}
 }
+
+private fun batchNotificationSpec(
+	tenantId: Long,
+	relatedResourceType: String,
+	relatedResourceIds: Set<String>,
+	eventTypes: Set<NotificationEventType>,
+): Specification<NotificationEntity> =
+	Specification { root, _, criteriaBuilder ->
+		val predicates = mutableListOf<Predicate>()
+		predicates += criteriaBuilder.equal(root.get<Long>("tenantId"), tenantId)
+		predicates += criteriaBuilder.equal(root.get<String>("relatedResourceType"), relatedResourceType)
+		predicates += root.get<String>("relatedResourceId").`in`(relatedResourceIds)
+		predicates += root.get<NotificationEventType>("eventType").`in`(eventTypes)
+		predicates += criteriaBuilder.isNull(root.get<LocalDateTime>("readAt"))
+		criteriaBuilder.and(*predicates.toTypedArray())
+	}

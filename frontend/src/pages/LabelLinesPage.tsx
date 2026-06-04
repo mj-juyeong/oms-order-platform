@@ -1,12 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
-import { readBatchContextSelection, resetBatchContextSelection, saveBatchIdContextSelection } from '../app/batchContext';
+import { readBatchContextSelection, resetBatchContextSelection, saveAllBatchContextSelection, saveBatchIdContextSelection, useBatchContextSelection } from '../app/batchContext';
+import { resetClientContextSelection } from '../app/clientContext';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { omsApi, type BackendBatchSummary, type BackendLabelLine } from '../api/oms';
 import { Badge, Button, Card, EmptyState, ErrorState, Input, LoadingState, ModalFrame } from '../components/common';
-import { DataTable, Pagination, type DataTableColumn } from '../components/data';
+import { DataTable, Pagination, SortMenu, type DataTableColumn, type DataTableSort } from '../components/data';
 import { BatchSelectionPanel, BatchStatusBadge, ClientSelectionPanel, CodeCell, SelectedBatchScopeBar } from '../components/domain';
+import { usePageBackButton } from '../components/layout';
 import type { PageResponse } from '../types/api';
 import type { LabelLine } from '../types/label';
 import { areFilterStatesEqual } from '../utils/filterState';
@@ -26,6 +28,21 @@ interface LabelFilters {
 type LabelTypeFilter = 'ALL' | LabelLine['labelType'];
 
 const pageSize = 20;
+const initialSort: DataTableSort = { field: 'orderNo', direction: 'asc' };
+const labelSortOptions = [
+  { label: 'Label 유형', value: 'labelType' },
+  { label: '배치 ID', value: 'batchId' },
+  { label: '주문번호', value: 'orderNo' },
+  { label: '브랜드', value: 'brandName' },
+  { label: '거래처코드', value: 'storeCode' },
+  { label: '거래처명', value: 'storeName' },
+  { label: '품목코드', value: 'productCode' },
+  { label: '품목명', value: 'productName' },
+  { label: '주문량', value: 'orderQty' },
+  { label: '순번', value: 'sequenceNo' },
+  { label: '매칭코드', value: 'matchingCode' },
+  { label: 'QR코드', value: 'qrCode' },
+];
 
 const initialFilters: LabelFilters = {
   batchId: '',
@@ -53,11 +70,12 @@ export function LabelLinesPage() {
   const [error, setError] = useState<string | null>(null);
   const [downloadingKey, setDownloadingKey] = useState<string | null>(null);
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
+  const [sort, setSort] = useState<DataTableSort>(initialSort);
   const previousClientIdRef = useRef<number | undefined>(undefined);
 
   useEffect(() => {
     void loadLines();
-  }, [appliedFilters, appliedLabelType, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId]);
+  }, [appliedFilters, appliedLabelType, page, queryScope.canQuery, queryScope.clientId, queryScope.tenantId, sort]);
 
   const lines = useMemo(() => (pageData?.items ?? []).map(toLabelLine), [pageData]);
   const summary = useMemo(() => createLabelSummary(lines, pageData?.totalElements ?? 0), [lines, pageData]);
@@ -66,12 +84,11 @@ export function LabelLinesPage() {
     () => !areFilterStatesEqual(filters, appliedFilters) || labelType !== appliedLabelType,
     [appliedFilters, appliedLabelType, filters, labelType],
   );
-  const needsBatchSelection = queryScope.canQuery && !parseNumericFilter(appliedFilters.batchId);
-  const selectedBatchSelection = useMemo(() => {
-    const batchId = parseNumericFilter(appliedFilters.batchId);
-    const selection = readBatchContextSelection(queryScope.tenantId, queryScope.clientId);
-    return selection && selection.batchId === batchId ? selection : null;
-  }, [appliedFilters.batchId, queryScope.clientId, queryScope.tenantId]);
+  const appliedBatchId = parseNumericFilter(appliedFilters.batchId);
+  const storedBatchSelection = useBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+  const allBatchesSelected = storedBatchSelection?.mode === 'all' && !appliedBatchId;
+  const needsBatchSelection = queryScope.canQuery && Boolean(queryScope.clientId) && !appliedBatchId && !allBatchesSelected;
+  const selectedBatchSelection = storedBatchSelection?.mode === 'batch' && storedBatchSelection.batchId === appliedBatchId ? storedBatchSelection : null;
   const uniqueBatchIds = useMemo(() => uniqueVisibleBatchIds(lines), [lines]);
   const canDownloadCurrent = uniqueBatchIds.length === 1 && lines.length > 0 && lines.every((line) => line.batchStatus === 'CONFIRMED');
 
@@ -111,6 +128,8 @@ export function LabelLinesPage() {
         clientId: queryScope.clientId,
         page: page - 1,
         size: pageSize,
+        sortBy: sort.field,
+        sortDirection: sort.direction,
         batchId: parseNumericFilter(appliedFilters.batchId),
         labelType: appliedLabelType === 'ALL' ? undefined : appliedLabelType,
         orderNo: textFilter(appliedFilters.orderNo),
@@ -145,6 +164,11 @@ export function LabelLinesPage() {
     setFiltersOpen(false);
   }
 
+  function applySort(nextSort: DataTableSort) {
+    setPage(1);
+    setSort(nextSort);
+  }
+
   function resetFilters() {
     const nextFilters = labelFiltersForScope(queryScope.tenantId, queryScope.clientId);
     setPage(1);
@@ -162,6 +186,10 @@ export function LabelLinesPage() {
   }
 
   function chooseDifferentBatch() {
+    if (!queryScope.clientId) {
+      chooseDifferentClient();
+      return;
+    }
     resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
     const nextFilters: LabelFilters = { ...filters, batchId: '' };
     setPage(1);
@@ -169,6 +197,48 @@ export function LabelLinesPage() {
     setAppliedFilters(nextFilters);
     setPageData(null);
   }
+
+  function chooseDifferentClient() {
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    resetClientContextSelection();
+    const nextFilters = labelFiltersForScope(queryScope.tenantId, undefined);
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  function selectAllBatches() {
+    if (!queryScope.tenantId || !queryScope.clientId) return;
+    saveAllBatchContextSelection({ tenantId: queryScope.tenantId, clientId: queryScope.clientId });
+    const nextFilters: LabelFilters = { ...filters, batchId: '' };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }
+
+  const batchStepBackOverride = useMemo(() => {
+    const hasBatchResultStep =
+      Boolean(queryScope.clientId) &&
+      !queryScope.needsClientSelection &&
+      !queryScope.blockedReason &&
+      !needsBatchSelection &&
+      (Boolean(appliedBatchId) || allBatchesSelected);
+
+    return hasBatchResultStep ? { label: '배치 선택으로 돌아가기', onBack: chooseDifferentBatch } : null;
+  }, [
+    allBatchesSelected,
+    appliedBatchId,
+    filters,
+    needsBatchSelection,
+    queryScope.blockedReason,
+    queryScope.clientId,
+    queryScope.needsClientSelection,
+    queryScope.tenantId,
+  ]);
+
+  usePageBackButton(batchStepBackOverride);
 
   async function handleDownloadCurrent() {
     if (!canDownloadCurrent) {
@@ -257,6 +327,8 @@ export function LabelLinesPage() {
         clientId={queryScope.clientId}
         clientName={queryScope.clientName}
         description="선택한 배치 기준으로 Label 데이터를 조회합니다."
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
+        onSelectAllBatches={selectAllBatches}
         onSelectBatch={selectBatch}
         tenantId={queryScope.tenantId}
         title="Label 데이터를 조회할 배치를 선택하세요"
@@ -285,6 +357,7 @@ export function LabelLinesPage() {
         clientName={queryScope.clientName}
         deliveryDate={selectedBatchSelection?.deliveryDate}
         onChooseBatch={chooseDifferentBatch}
+        onChooseClient={!queryScope.isClientLocked ? chooseDifferentClient : undefined}
       />
 
       <LabelFilterPanel
@@ -314,6 +387,7 @@ export function LabelLinesPage() {
             </p>
           </div>
           <div className="flex shrink-0 flex-wrap gap-2">
+            <SortMenu onChange={applySort} options={labelSortOptions} sort={sort} />
             <Button disabled={!canDownloadCurrent || downloadingKey === 'current'} onClick={handleDownloadCurrent} size="sm" variant="secondary">
               {downloadingKey === 'current' ? '다운로드 중' : '현재 조건 다운로드'}
             </Button>
@@ -327,7 +401,9 @@ export function LabelLinesPage() {
           getRowClassName={(item) => (item.id === selectedLine?.id ? 'bg-teal-50/80' : '')}
           getRowKey={(item) => item.id}
           onRowClick={setSelectedLine}
+          onSortChange={applySort}
           renderMobileCard={renderLabelMobileCard}
+          sort={sort}
         />
         <div className="px-5 py-4">
           <Pagination
@@ -431,7 +507,10 @@ function LabelFilterPanel({
 }) {
   return (
     <Card className="px-4 py-4">
-      <div className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between" onClick={onToggleOpen}>
+      <div
+        className="flex cursor-pointer flex-col gap-3 rounded-md lg:flex-row lg:items-center lg:justify-between"
+        onClick={onToggleOpen}
+      >
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
             <p className="text-sm font-semibold text-slate-900">조회 조건</p>
@@ -478,19 +557,19 @@ function createColumns(
   downloadingKey: string | null,
 ): DataTableColumn<LabelLine>[] {
   return [
-    { key: 'type', header: 'Label 유형', width: '100px', cell: (item) => <Badge tone={item.labelType === 'EA' ? 'blue' : 'teal'}>{item.labelType}</Badge> },
-    { key: 'batch', header: '배치 ID', width: '100px', cell: (item) => <CodeCell value={item.batchId} /> },
+    { key: 'type', header: 'Label 유형', sortKey: 'labelType', width: '100px', cell: (item) => <Badge tone={item.labelType === 'EA' ? 'blue' : 'teal'}>{item.labelType}</Badge> },
+    { key: 'batch', header: '배치 ID', sortKey: 'batchId', width: '100px', cell: (item) => <CodeCell value={item.batchId} /> },
     { key: 'status', header: '배치 상태', width: '150px', cell: (item) => (item.batchStatus ? <BatchStatusBadge status={item.batchStatus} /> : '-') },
-    { key: 'orderNo', header: '주문번호', width: '180px', cell: (item) => <CodeCell value={item.orderNo} /> },
-    { key: 'source', header: '행 번호', width: '110px', cell: (item) => <span className="text-xs text-slate-500">{item.rowNo}행</span> },
-    { key: 'brand', header: '브랜드', width: '130px', cell: (item) => item.brandName || '-' },
-    { key: 'store', header: '거래처', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.storeCode} /> },
-    { key: 'product', header: '상품', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
-    { key: 'qty', header: '주문량', align: 'right', width: '90px', cell: (item) => item.orderQty.toLocaleString() },
-    { key: 'sequence', header: '순번', width: '80px', cell: (item) => item.sequence },
-    { key: 'matchingCode', header: '매칭코드', width: '140px', cell: (item) => <CodeCell value={item.matchingCode} /> },
-    { key: 'qr', header: 'QR코드', width: '160px', cell: (item) => <CodeCell muted={!item.qrCode} value={item.qrCode || '-'} /> },
-    { key: 'boxSequence', header: '박스', width: '120px', cell: (item) => <BoxCell line={item} /> },
+    { key: 'orderNo', header: '주문번호', sortKey: 'orderNo', width: '180px', cell: (item) => <CodeCell value={item.orderNo} /> },
+    { key: 'source', header: '행 번호', sortKey: 'rowNo', width: '110px', cell: (item) => <span className="text-xs text-slate-500">{item.rowNo}행</span> },
+    { key: 'brand', header: '브랜드', sortKey: 'brandName', width: '130px', cell: (item) => item.brandName || '-' },
+    { key: 'store', header: '거래처', sortKey: 'storeName', width: '190px', cell: (item) => <NameCode name={item.storeName} code={item.storeCode} /> },
+    { key: 'product', header: '상품', sortKey: 'productName', width: '220px', cell: (item) => <NameCode name={item.productName} code={item.productCode} /> },
+    { key: 'qty', header: '주문량', sortKey: 'orderQty', align: 'right', width: '90px', cell: (item) => item.orderQty.toLocaleString() },
+    { key: 'sequence', header: '순번', sortKey: 'sequenceNo', width: '80px', cell: (item) => item.sequence },
+    { key: 'matchingCode', header: '매칭코드', sortKey: 'matchingCode', width: '140px', cell: (item) => <CodeCell value={item.matchingCode} /> },
+    { key: 'qr', header: 'QR코드', sortKey: 'qrCode', width: '160px', cell: (item) => <CodeCell muted={!item.qrCode} value={item.qrCode || '-'} /> },
+    { key: 'boxSequence', header: '박스', sortKey: 'boxSequence', width: '120px', cell: (item) => <BoxCell line={item} /> },
     {
       key: 'download',
       header: '다운로드',
@@ -586,7 +665,7 @@ function LabelDetailModal({
           </details>
 
           <div className="mt-5 flex flex-wrap justify-end gap-2">
-            <Link className="inline-flex h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
+            <Link className="inline-flex h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 hover:bg-slate-50" to={`/batches/${line.batchId}`}>
               배치 상세
             </Link>
             <Button onClick={() => onDownload(line)} variant="secondary">이 배치 다운로드</Button>
@@ -768,6 +847,6 @@ function labelFiltersForScope(tenantId?: number | null, clientId?: number): Labe
   const storedBatch = readBatchContextSelection(tenantId, clientId);
   return {
     ...initialFilters,
-    batchId: storedBatch ? String(storedBatch.batchId) : '',
+    batchId: storedBatch?.mode === 'batch' ? String(storedBatch.batchId) : '',
   };
 }

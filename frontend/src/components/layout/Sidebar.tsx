@@ -5,6 +5,11 @@ import { omsApi } from '../../api/oms';
 import { fakeCurrentUser, hasAnyRole, hasAnyScope } from '../../app/auth';
 import { navigationGroups, navigationItems } from '../../app/navigation';
 import type { NavigationIconName } from '../../app/navigation';
+import {
+  acknowledgeWorkItemCount,
+  readAcknowledgedWorkItemCount,
+  subscribeWorkItemAcknowledgementChanged,
+} from '../../app/workItemAcknowledgement';
 import type { WorkItemSummary } from '../../types/notification';
 
 interface SidebarProps {
@@ -15,6 +20,8 @@ interface SidebarProps {
 export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
   const location = useLocation();
   const [workItemSummary, setWorkItemSummary] = useState<WorkItemSummary | null>(null);
+  const [, setAcknowledgementVersion] = useState(0);
+  const userKey = useMemo(() => userAcknowledgementKey(), []);
   const visibleItems = useMemo(
     () =>
       navigationItems.filter(
@@ -74,6 +81,30 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
     };
   }, []);
 
+  useEffect(() => subscribeWorkItemAcknowledgementChanged(() => setAcknowledgementVersion((current) => current + 1)), []);
+
+  useEffect(() => {
+    if (!workItemSummary) return;
+
+    visibleItems.forEach((item) => {
+      if (!item.badgeKey) return;
+      const count = workItemSummary[item.badgeKey] ?? 0;
+      const acknowledgedCount = readAcknowledgedWorkItemCount(userKey, item.badgeKey);
+      if (count < acknowledgedCount) {
+        acknowledgeWorkItemCount(userKey, item.badgeKey, count);
+      }
+    });
+  }, [userKey, visibleItems, workItemSummary]);
+
+  useEffect(() => {
+    if (!workItemSummary) return;
+
+    const activeItem = visibleItems.find((item) => item.badgeKey && isActiveItem(location.pathname, item.path, item.matchPaths));
+    if (!activeItem?.badgeKey) return;
+
+    acknowledgeWorkItemCount(userKey, activeItem.badgeKey, workItemSummary[activeItem.badgeKey] ?? 0);
+  }, [location.pathname, userKey, visibleItems, workItemSummary]);
+
   function toggleGroup(group: string) {
     setOpenGroups((current) => (current.includes(group) ? current.filter((item) => item !== group) : [...current, group]));
   }
@@ -131,7 +162,9 @@ export function Sidebar({ mobileOpen, onClose }: SidebarProps) {
                       <div className="mt-1 space-y-1">
                         {group.items.map((item) => {
                           const active = isActiveItem(location.pathname, item.path, item.matchPaths);
-                          const badgeCount = item.badgeKey && workItemSummary ? workItemSummary[item.badgeKey] : 0;
+                          const rawBadgeCount = item.badgeKey && workItemSummary ? workItemSummary[item.badgeKey] : 0;
+                          const acknowledgedCount = item.badgeKey ? readAcknowledgedWorkItemCount(userKey, item.badgeKey) : 0;
+                          const badgeCount = Math.max(0, rawBadgeCount - acknowledgedCount);
 
                           return (
                             <Link
@@ -173,6 +206,15 @@ function SidebarCountBadge({ count }: { count: number }) {
       {count > 99 ? '99+' : count}
     </span>
   );
+}
+
+function userAcknowledgementKey() {
+  return [
+    fakeCurrentUser.userScopeType ?? 'ANONYMOUS',
+    fakeCurrentUser.tenantId ?? 'none',
+    fakeCurrentUser.clientId ?? 'all',
+    fakeCurrentUser.id ?? 'anonymous',
+  ].join(':');
 }
 
 function isActiveItem(pathname: string, path: string, matchPaths: string[] = []) {

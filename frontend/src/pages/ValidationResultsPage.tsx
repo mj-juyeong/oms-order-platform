@@ -495,7 +495,7 @@ function ValidationRecoveryGuide({
           )}
           <Link
             className="inline-flex h-9 items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
-            to="/uploads"
+            to={`/uploads?supplementOf=${batch.id}`}
           >
             수정 엑셀 업로드
           </Link>
@@ -688,12 +688,14 @@ function OperatorValidationDetailModal({ batch, onClose, row }: { batch: Backend
                 </div>
               ))}
               {masterLink ? (
-                <Link
-                  className="inline-flex h-9 w-fit items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
-                  to={masterLink.to}
-                >
-                  {masterLink.label}
-                </Link>
+                <div className="flex justify-end">
+                  <Link
+                    className="inline-flex h-9 w-fit items-center justify-center rounded-md border border-teal-700 bg-teal-700 px-3 text-sm font-semibold text-white hover:bg-teal-800"
+                    to={masterLink.to}
+                  >
+                    {masterLink.label}
+                  </Link>
+                </div>
               ) : null}
             </div>
           </section>

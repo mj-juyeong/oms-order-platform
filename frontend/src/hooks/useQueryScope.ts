@@ -49,8 +49,8 @@ export function useQueryScope(): QueryScopeState {
       clientId: clientScope.clientId,
       clientName: clientScope.clientName,
       userScopeType,
-      canQuery: Boolean(tenantId && clientScope.clientId),
-      needsClientSelection: Boolean(tenantId && clientScope.isAllClients),
+      canQuery: Boolean(tenantId && !clientScope.isClientUnselected),
+      needsClientSelection: Boolean(tenantId && clientScope.isClientUnselected),
       isClientLocked: false,
       blockedReason: tenantId ? undefined : '물류사 계정 정보를 확인할 수 없습니다.',
     };

@@ -4,33 +4,46 @@ import { CodeCell } from './CodeCell';
 interface SelectedBatchScopeBarProps {
   batchId: string;
   batchNo?: string;
+  batchActionLabel?: string;
+  clientActionLabel?: string;
   clientName?: string;
   deliveryDate?: string | null;
   onChooseBatch: () => void;
+  onChooseClient?: () => void;
 }
 
 export function SelectedBatchScopeBar({
   batchId,
   batchNo,
+  batchActionLabel = '배치 선택하기',
+  clientActionLabel = '고객사 선택하기',
   clientName,
   deliveryDate,
   onChooseBatch,
+  onChooseClient,
 }: SelectedBatchScopeBarProps) {
-  const label = batchNo || (batchId ? `Batch ${batchId}` : '-');
+  const label = batchNo || (batchId ? `Batch ${batchId}` : '전체 배치');
 
   return (
-    <Card className="px-4 py-3">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
-          <span className="text-xs font-semibold text-slate-500">선택 배치</span>
-          <CodeCell value={label} />
-          {clientName ? <span className="text-sm font-semibold text-slate-700">{clientName}</span> : null}
-          {deliveryDate ? <span className="text-sm text-slate-500">납기일 {deliveryDate}</span> : null}
-        </div>
-        <Button className="shrink-0" onClick={onChooseBatch} size="sm" variant="secondary">
-          배치 선택하기
+    <div className="space-y-3">
+      <div className="flex flex-wrap justify-end gap-2">
+        {onChooseClient ? (
+          <Button className="min-w-[124px]" onClick={onChooseClient} size="md" variant="ghost">
+            {clientActionLabel}
+          </Button>
+        ) : null}
+        <Button className="min-w-[118px]" onClick={onChooseBatch} size="md" variant="secondary">
+          {batchActionLabel}
         </Button>
       </div>
-    </Card>
+      <Card className="px-4 py-3">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+          <span className="text-xs font-semibold text-slate-500">조회 배치</span>
+          <CodeCell value={label} />
+          <span className="text-sm font-semibold text-slate-700">{clientName ?? '전체 고객사'}</span>
+          {deliveryDate ? <span className="text-sm text-slate-500">납기일 {deliveryDate}</span> : null}
+        </div>
+      </Card>
+    </div>
   );
 }

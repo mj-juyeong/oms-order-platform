@@ -6,7 +6,10 @@ export type NotificationEventType =
   | 'BATCH_CONFIRMATION_REQUESTED'
   | 'BATCH_CONFIRMATION_APPROVED'
   | 'BATCH_CONFIRMATION_NEEDS_MORE_INFO'
-  | 'BATCH_CONFIRMATION_REJECTED';
+  | 'BATCH_CONFIRMATION_REJECTED'
+  | 'API_KEY_REQUESTED'
+  | 'API_KEY_ISSUED'
+  | 'API_KEY_REJECTED';
 
 export interface NotificationItem {
   id: number;
@@ -34,6 +37,7 @@ export interface WorkItemSummary {
   unreadNotifications: number;
   incompleteBatches: number;
   pendingConfirmationRequests: number;
+  pendingApiKeyRequests: number;
   needsMoreInfoBatches: number;
   rejectedConfirmationRequests: number;
   validationErrorBatches: number;

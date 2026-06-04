@@ -80,6 +80,27 @@ class ConfirmedBatchService(
 	}
 
 	@Transactional(readOnly = true)
+	fun findTenantConfirmedBatchesForExternalQuery(
+		tenantId: Long,
+		deliveryDate: LocalDate?,
+	): List<UploadBatchEntity> {
+		val confirmedBatches = uploadBatchRepository.findAllByTenantIdAndStatus(tenantId, BatchStatus.CONFIRMED)
+
+		if (confirmedBatches.isEmpty()) {
+			throw OmsException(ErrorCode.NO_CONFIRMED_BATCH, status = HttpStatus.NOT_FOUND)
+		}
+
+		return confirmedBatches
+			.asSequence()
+			.filter { deliveryDate == null || it.deliveryDate == deliveryDate }
+			.sortedWith(compareBy<UploadBatchEntity> { it.uploadedAt }.thenBy { it.id ?: 0 })
+			.toList()
+			.ifEmpty {
+				throw OmsException(ErrorCode.NO_CONFIRMED_BATCH, status = HttpStatus.NOT_FOUND)
+			}
+	}
+
+	@Transactional(readOnly = true)
 	fun resolveConfirmedBatch(
 		tenantId: Long,
 		clientId: Long,
@@ -103,5 +124,20 @@ class ConfirmedBatchService(
 			listOf(requireConfirmedBatch(tenantId, clientId, batchId))
 		} else {
 			findConfirmedBatchesForExternalQuery(tenantId, clientId, deliveryDate)
+		}
+
+	@Transactional(readOnly = true)
+	fun resolveConfirmedBatches(
+		tenantId: Long,
+		clientId: Long?,
+		batchId: Long?,
+		deliveryDate: LocalDate?,
+	): List<UploadBatchEntity> =
+		if (clientId != null) {
+			resolveConfirmedBatches(tenantId, clientId, batchId, deliveryDate)
+		} else if (batchId != null) {
+			listOf(requireConfirmedBatch(tenantId, clientId, batchId))
+		} else {
+			findTenantConfirmedBatchesForExternalQuery(tenantId, deliveryDate)
 		}
 }

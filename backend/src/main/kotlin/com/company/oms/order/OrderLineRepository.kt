@@ -1,9 +1,10 @@
 package com.company.oms.order
 
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor
 import java.time.LocalDate
 
-interface OrderLineRepository : JpaRepository<OrderLineEntity, Long> {
+interface OrderLineRepository : JpaRepository<OrderLineEntity, Long>, JpaSpecificationExecutor<OrderLineEntity> {
 	fun findAllByTenantIdAndClientId(
 		tenantId: Long,
 		clientId: Long,

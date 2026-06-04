@@ -268,7 +268,13 @@ export function BatchDetailPage() {
           </Link>
         </div>
         <div className="mt-4">
-          <DataTable columns={createSheetColumns()} data={sheetResults} getRowClassName={sheetRowClassName} getRowKey={(item) => item.sheetName} />
+          <DataTable
+            columns={createSheetColumns()}
+            data={sheetResults}
+            getRowClassName={sheetRowClassName}
+            getRowKey={(item) => item.sheetName}
+            renderMobileCard={renderSheetResultCard}
+          />
         </div>
       </Card>
     </div>
@@ -685,7 +691,7 @@ function BatchRecoveryPanel({ batch, canOperateBatch }: { batch: BackendBatchDet
 
   const hasErrors = batch.errorCount > 0 || batch.status === 'VALIDATION_FAILED';
   const needsSupplement = batch.status === 'NEEDS_MORE_INFO';
-  const uploadPath = needsSupplement ? `/uploads?supplementOf=${batch.id}` : '/uploads';
+  const uploadPath = hasErrors || needsSupplement || batch.status === 'REJECTED' ? `/uploads?supplementOf=${batch.id}` : '/uploads';
 
   return (
     <Card className={`p-5 ${hasErrors ? 'border-amber-200 bg-amber-50' : 'border-slate-200 bg-white'}`}>
@@ -758,6 +764,31 @@ function createSheetColumns(): DataTableColumn<SheetResult>[] {
     { key: 'status', header: '상태', cell: (item) => <Badge tone={sheetStatusTone[item.status]}>{sheetStatusLabel[item.status]}</Badge> },
     { key: 'message', header: '안내', width: '260px', cell: (item) => sheetMessage(item) },
   ];
+}
+
+function renderSheetResultCard(item: SheetResult) {
+  return (
+    <div className="space-y-3">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate font-mono text-sm font-bold text-slate-950" title={item.sheetName}>{item.sheetName}</p>
+          <p className="mt-1 text-xs text-slate-500">{sheetTypeLabel(item)} · {item.suffix ?? '-'}</p>
+        </div>
+        <Badge tone={sheetStatusTone[item.status]}>{sheetStatusLabel[item.status]}</Badge>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-sm">
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-500">Rows</p>
+          <p className="mt-1 font-mono font-bold text-slate-950">{item.rowCount.toLocaleString()}</p>
+        </div>
+        <div className="rounded-md bg-slate-50 px-3 py-2">
+          <p className="text-xs font-semibold text-slate-500">Type</p>
+          <p className="mt-1 font-semibold text-slate-950">{sheetTypeLabel(item)}</p>
+        </div>
+      </div>
+      <p className="break-words text-xs leading-5 text-slate-500">{sheetMessage(item)}</p>
+    </div>
+  );
 }
 
 function mapSheetResults(batch: BackendBatchDetail | null): SheetResult[] {
