@@ -6,6 +6,8 @@ const AUTH_EXPIRES_AT_KEY = 'oms.auth.expiresAt';
 const LEGACY_CLIENT_CONTEXT_KEY = 'oms.clientContext';
 const CLIENT_CONTEXT_KEY_PREFIX = 'oms.clientContext';
 const CLIENT_CONTEXT_CHANGED_EVENT = 'oms:client-context-changed';
+const BATCH_CONTEXT_KEY_PREFIX = 'oms.batchContext';
+const BATCH_CONTEXT_CHANGED_EVENT = 'oms:batch-context-changed';
 
 const emptyCurrentUser: CurrentUser = {
   id: null,
@@ -26,6 +28,7 @@ export function saveAuthSession(response: LoginResponse) {
   const expiresAt = Date.now() + response.expiresInSeconds * 1000;
   const previousUserKey = authUserContextKey(fakeCurrentUser);
   const nextUserKey = authUserContextKey(response.user);
+  clearStoredBatchContexts();
   localStorage.setItem(AUTH_TOKEN_KEY, response.accessToken);
   localStorage.setItem(AUTH_USER_KEY, JSON.stringify(response.user));
   localStorage.setItem(AUTH_EXPIRES_AT_KEY, String(expiresAt));
@@ -38,6 +41,7 @@ export function saveAuthSession(response: LoginResponse) {
 }
 
 export function clearAuthSession() {
+  clearStoredBatchContexts();
   localStorage.removeItem(AUTH_TOKEN_KEY);
   localStorage.removeItem(AUTH_USER_KEY);
   localStorage.removeItem(AUTH_EXPIRES_AT_KEY);
@@ -130,4 +134,18 @@ function clientContextStorageKey(user: CurrentUser) {
 
 function dispatchClientContextChanged() {
   window.dispatchEvent(new CustomEvent(CLIENT_CONTEXT_CHANGED_EVENT));
+}
+
+function clearStoredBatchContexts() {
+  const keysToRemove: string[] = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith(`${BATCH_CONTEXT_KEY_PREFIX}.`)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+  window.dispatchEvent(new CustomEvent(BATCH_CONTEXT_CHANGED_EVENT, { detail: null }));
 }

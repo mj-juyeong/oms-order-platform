@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi, type BackendBatchSummary, type ClientSummary, type ValidationErrorItem } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
-import { saveAllBatchContextSelection } from '../app/batchContext';
+import { resetAllBatchContextSelections, saveAllBatchContextSelection } from '../app/batchContext';
 import { clientSelectionFromValue, clientSelectionValue, saveClientContextSelection, useClientScope } from '../app/clientContext';
 import { Badge, Button, Card, Select } from '../components/common';
 import { FilterBar } from '../components/data';
@@ -40,6 +40,10 @@ const dashboardOrderPageSize = 500;
 const issueBatchLimit = 8;
 
 export function DashboardPage() {
+  useEffect(() => {
+    resetAllBatchContextSelections();
+  }, []);
+
   if (fakeCurrentUser.userScopeType === 'SYSTEM') {
     return <PlatformAdminDashboard />;
   }

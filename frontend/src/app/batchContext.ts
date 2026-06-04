@@ -132,6 +132,20 @@ export function resetBatchContextSelection(
   window.dispatchEvent(new CustomEvent(BATCH_CONTEXT_CHANGED_EVENT, { detail: null }));
 }
 
+export function resetAllBatchContextSelections() {
+  const keysToRemove: string[] = [];
+
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const key = localStorage.key(index);
+    if (key?.startsWith(`${BATCH_CONTEXT_KEY_PREFIX}.`)) {
+      keysToRemove.push(key);
+    }
+  }
+
+  keysToRemove.forEach((key) => localStorage.removeItem(key));
+  window.dispatchEvent(new CustomEvent(BATCH_CONTEXT_CHANGED_EVENT, { detail: null }));
+}
+
 function batchContextStorageKey(tenantId: number, clientId: number) {
   const scope = fakeCurrentUser.userScopeType ?? 'ANONYMOUS';
   const user = fakeCurrentUser.id ?? 'anonymous';
