@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { fakeCurrentUser } from '../app/auth';
 import { readBatchContextSelection, resetBatchContextSelection, saveAllBatchContextSelection, saveBatchIdContextSelection, useBatchContextSelection } from '../app/batchContext';
 import { resetClientContextSelection } from '../app/clientContext';
@@ -58,6 +58,7 @@ const initialFilters: LabelFilters = {
 
 export function LabelLinesPage() {
   const queryScope = useQueryScope();
+  const [searchParams] = useSearchParams();
   const [filters, setFilters] = useState<LabelFilters>(() => labelFiltersForScope(queryScope.tenantId, queryScope.clientId));
   const [appliedFilters, setAppliedFilters] = useState<LabelFilters>(() => labelFiltersForScope(queryScope.tenantId, queryScope.clientId));
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -72,6 +73,8 @@ export function LabelLinesPage() {
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
   const [sort, setSort] = useState<DataTableSort>(initialSort);
   const previousClientIdRef = useRef<number | undefined>(undefined);
+  const forceBatchSelectionHandledRef = useRef(false);
+  const forceBatchSelection = searchParams.get('selectBatch') === '1';
 
   useEffect(() => {
     void loadLines();
@@ -103,6 +106,20 @@ export function LabelLinesPage() {
     }
     previousClientIdRef.current = queryScope.clientId;
   }, [queryScope.clientId, queryScope.tenantId]);
+
+  useEffect(() => {
+    if (!forceBatchSelection || forceBatchSelectionHandledRef.current || !queryScope.tenantId || !queryScope.clientId) {
+      return;
+    }
+
+    forceBatchSelectionHandledRef.current = true;
+    resetBatchContextSelection(queryScope.tenantId, queryScope.clientId);
+    const nextFilters: LabelFilters = { ...labelFiltersForScope(queryScope.tenantId, queryScope.clientId), batchId: '' };
+    setPage(1);
+    setFilters(nextFilters);
+    setAppliedFilters(nextFilters);
+    setPageData(null);
+  }, [forceBatchSelection, queryScope.clientId, queryScope.tenantId]);
 
   useEffect(() => {
     const batchId = parseNumericFilter(appliedFilters.batchId);

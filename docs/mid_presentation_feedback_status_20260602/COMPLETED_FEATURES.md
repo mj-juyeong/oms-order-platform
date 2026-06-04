@@ -150,12 +150,17 @@
 - 알림 목록, 읽음 처리, 전체 읽음 처리, 미읽음 카운트가 구현되었다.
 - Header의 알림 벨과 알림 전용 화면이 추가되었다.
 - 작업 요약 API가 확정 요청, 보완 필요 배치, 반려 요청, 검증 오류 배치 등을 집계한다.
+- Header 알림 벨은 새 미읽음 알림이 들어오면 최대 3건까지 토스트로 즉시 보여주고, 자동 닫기와 수동 닫기를 모두 지원한다.
+- 물류사가 확정 요청을 승인, 반려, 보완 요청 처리한 직후 알림 변경 이벤트를 발생시켜 헤더 미읽음 수와 알림 목록이 즉시 다시 동기화된다.
+- 보완 업로드 배치 승인 후 고객사 사용자에게 승인 알림이 생성되고, 미읽음 카운트와 배치 상세 링크가 내려가는 흐름을 통합 테스트로 확인할 수 있다.
 
 ### 관련 위치
 
 - `backend/src/main/kotlin/com/company/oms/notification/`
 - `backend/src/main/resources/db/migration/V11__notifications.sql`
+- `backend/src/test/kotlin/com/company/oms/ValidationConfirmApiTest.kt`
 - `frontend/src/components/domain/NotificationBell.tsx`
+- `frontend/src/pages/BatchConfirmationRequestsPage.tsx`
 - `frontend/src/pages/NotificationsPage.tsx`
 - `frontend/src/api/notifications.ts`
 - `frontend/src/types/notification.ts`
@@ -386,6 +391,7 @@
 - API Key 요청 엔티티와 API가 추가되고, 발급 후에는 요청자만 원문을 1회 확인할 수 있도록 처리되었다.
 - API Key 관리 화면이 `요청`과 `발급된 Key` 관리를 함께 다루는 구조로 확장되었다.
 - 알림/작업 요약에 API Key 요청 대기 건수가 연결되어 운영자가 승인 대기 상태를 바로 확인할 수 있다.
+- API Key 요청 화면의 기본 상태 필터가 `REQUESTED`에서 `ALL`로 조정되어, 진입 즉시 요청 전체 이력과 상태 분포를 함께 확인할 수 있다.
 
 ### 관련 위치
 
@@ -434,3 +440,23 @@
 
 - `./gradlew.bat test --tests com.company.oms.Phase8AuthLogApiTest`
 - `npm.cmd run build`
+
+## 21. 물류사 대시보드 라우팅 및 라벨 진입 보강
+
+### 완료 내용
+
+- 물류사 대시보드의 검증 이슈 요약에서 Error, Warning, Info 막대 자체를 클릭하면 해당 severity로 필터된 검증 결과 화면으로 이동한다.
+- 우선 처리 배치 카드는 Error뿐 아니라 Warning 배치도 검증 결과 화면으로 바로 연결하고, severity에 맞는 진입 링크를 사용한다.
+- 외부 제공 준비 상태 카드의 `API 제공 가능`은 API 사용 안내 화면으로, `라벨 가능`은 라벨 조회/다운로드의 배치 선택 진입으로 연결된다.
+- 라벨 조회 화면은 `selectBatch=1` 쿼리로 들어오면 기존 배치 컨텍스트를 비우고 배치 선택 단계부터 다시 시작한다.
+- 납기 볼륨 차트는 Error 없는 일정만 대상으로 표시해 검증 이슈와 출고 볼륨 판단을 분리한다.
+
+### 관련 위치
+
+- `frontend/src/pages/DashboardPage.tsx`
+- `frontend/src/pages/LabelLinesPage.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/dashboard`의 검증 이슈/외부 제공 상태 카드 링크를 눌러 `/batches/:batchId/validation`, `/external-api/guide`, `/label-lines?selectBatch=1`로 이동하는지 확인한다.

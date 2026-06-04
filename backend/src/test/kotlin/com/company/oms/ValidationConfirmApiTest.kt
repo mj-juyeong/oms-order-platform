@@ -1,11 +1,20 @@
 package com.company.oms
 
 import com.company.oms.audit.BatchAuditLogRepository
+import com.company.oms.auth.RoleEntity
+import com.company.oms.auth.RoleRepository
+import com.company.oms.auth.UserEntity
+import com.company.oms.auth.UserRepository
+import com.company.oms.auth.UserRoleEntity
+import com.company.oms.auth.UserRoleId
+import com.company.oms.auth.UserRoleRepository
 import com.company.oms.common.scope.ClientEntity
 import com.company.oms.common.scope.ClientRepository
 import com.company.oms.common.scope.TenantEntity
 import com.company.oms.common.scope.TenantRepository
 import com.company.oms.common.persistence.BatchStatus
+import com.company.oms.common.persistence.NotificationEventType
+import com.company.oms.common.persistence.UserScopeType
 import com.company.oms.master.ClientProductCodeMappingEntity
 import com.company.oms.master.ClientProductCodeMappingRepository
 import com.company.oms.master.ClientStoreCodeMappingEntity
@@ -57,6 +66,9 @@ class ValidationConfirmApiTest @Autowired constructor(
 	private val clientStoreCodeMappingRepository: ClientStoreCodeMappingRepository,
 	private val uploadBatchRepository: UploadBatchRepository,
 	private val batchAuditLogRepository: BatchAuditLogRepository,
+	private val userRepository: UserRepository,
+	private val roleRepository: RoleRepository,
+	private val userRoleRepository: UserRoleRepository,
 ) {
 
 	@BeforeEach
@@ -263,6 +275,26 @@ class ValidationConfirmApiTest @Autowired constructor(
 		assertEquals(BatchStatus.CANCELLED, parentBatch.status)
 		assertTrue(parentBatch.cancelledAt != null)
 
+		val clientViewerUserId = createUser(scope, "VIEWER", UserScopeType.CLIENT, scope.clientId)
+		mockMvc.get("/api/v1/notifications/unread-count") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.unreadCount") { value(1) }
+		}
+		mockMvc.get("/api/v1/notifications") {
+			header("X-User-Id", clientViewerUserId.toString())
+			param("tenantId", scope.tenantId.toString())
+			param("eventType", NotificationEventType.BATCH_CONFIRMATION_APPROVED.name)
+			param("readStatus", "UNREAD")
+		}.andExpect {
+			status { isOk() }
+			jsonPath("$.data.items[0].eventType") { value("BATCH_CONFIRMATION_APPROVED") }
+			jsonPath("$.data.items[0].relatedResourceId") { value(supplementBatchId.toString()) }
+			jsonPath("$.data.items[0].linkPath") { value("/batches/$supplementBatchId") }
+		}
+
 		mockMvc.get("/api/v1/order-excel-batches") {
 			param("tenantId", scope.tenantId.toString())
 			param("clientId", scope.clientId.toString())
@@ -289,6 +321,28 @@ class ValidationConfirmApiTest @Autowired constructor(
 			),
 		)
 		return TestScope(tenant.id!!, client.id!!)
+	}
+
+	private fun createUser(
+		scope: TestScope,
+		roleCode: String,
+		userScopeType: UserScopeType = UserScopeType.TENANT,
+		clientId: Long? = null,
+	): Long {
+		val role = roleRepository.findByCode(roleCode) ?: roleRepository.saveAndFlush(RoleEntity(code = roleCode, name = roleCode))
+		val user =
+			userRepository.saveAndFlush(
+				UserEntity(
+					userScopeType = userScopeType,
+					tenantId = scope.tenantId,
+					clientId = clientId,
+					loginId = "user-${UUID.randomUUID()}",
+					name = "User",
+					passwordHash = "test",
+				),
+			)
+		userRoleRepository.saveAndFlush(UserRoleEntity(UserRoleId(user.id!!, role.id!!)))
+		return user.id!!
 	}
 
 	private fun seedMasters(

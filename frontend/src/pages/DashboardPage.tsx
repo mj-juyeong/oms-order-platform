@@ -372,15 +372,15 @@ function TenantOperationsDashboard() {
               <h2 className="text-base font-bold text-slate-950">검증 이슈 요약</h2>
               <p className="mt-1 text-sm text-slate-600">배치에 저장된 Error, Warning, Info 건수를 비교합니다.</p>
             </div>
-            <Link className="text-sm font-semibold text-teal-700 hover:underline" to={firstErrorLink(summary.blockedBatches)}>
+            <Link className="text-sm font-semibold text-teal-700 hover:underline" to={firstSeverityLink(visibleBatches, 'ERROR')}>
               Error 보기
             </Link>
           </div>
 
           <div className="mt-7 space-y-6">
-            <SeverityBar label="Error" severityTotals={summary.severityTotals} tone="red" value={summary.severityTotals.ERROR} />
-            <SeverityBar label="Warning" severityTotals={summary.severityTotals} tone="amber" value={summary.severityTotals.WARNING} />
-            <SeverityBar label="Info" severityTotals={summary.severityTotals} tone="neutral" value={summary.severityTotals.INFO} />
+            <SeverityBar label="Error" severityTotals={summary.severityTotals} to={firstSeverityLink(visibleBatches, 'ERROR')} tone="red" value={summary.severityTotals.ERROR} />
+            <SeverityBar label="Warning" severityTotals={summary.severityTotals} to={firstSeverityLink(visibleBatches, 'WARNING')} tone="amber" value={summary.severityTotals.WARNING} />
+            <SeverityBar label="Info" severityTotals={summary.severityTotals} to={firstSeverityLink(visibleBatches, 'INFO')} tone="neutral" value={summary.severityTotals.INFO} />
           </div>
 
           <div className="mt-7 rounded-md border border-red-100 bg-red-50 px-4 py-4">
@@ -443,9 +443,9 @@ function TenantOperationsDashboard() {
             <p className="mt-1 text-xs text-slate-500">확정 완료 배치만 외부 API 응답과 라벨 다운로드 대상입니다.</p>
           </div>
           <div className="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-3 lg:w-[560px]">
-            <ExternalStatusTile label="API 제공 가능" tone="green" value={summary.confirmedBatches.length} />
-            <ExternalStatusTile label="라벨 가능" tone="green" value={summary.confirmedBatches.length} />
-            <ExternalStatusTile label="제외" tone="amber" value={summary.externalExcludedBatches.length} />
+            <ExternalStatusTile label="API 제공 가능" tone="green" to="/external-api/guide" value={summary.confirmedBatches.length} />
+            <ExternalStatusTile label="라벨 가능" tone="green" to="/label-lines?selectBatch=1" value={summary.confirmedBatches.length} />
+            <ExternalStatusTile label="제외" tone="amber" to="/batches" value={summary.externalExcludedBatches.length} />
           </div>
         </div>
       </Card>
@@ -914,11 +914,13 @@ function StackedStatusBar({
 function SeverityBar({
   label,
   severityTotals,
+  to,
   tone,
   value,
 }: {
   label: string;
   severityTotals: Record<ValidationSeverity, number>;
+  to: string;
   tone: 'red' | 'amber' | 'neutral';
   value: number;
 }) {
@@ -947,7 +949,7 @@ function SeverityBar({
   const width = Math.max((value / total) * 100, value > 0 ? 10 : 0);
 
   return (
-    <div className={`rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm`}>
+    <Link className={`block rounded-lg border ${borderColor} ${accentColor} bg-white px-3 py-3 shadow-sm transition hover:border-teal-300 hover:bg-teal-50/40`} to={to}>
       <div className="mb-2 flex items-center justify-between text-sm">
         <span className="font-semibold text-slate-800">{label}</span>
         <span className={`font-mono text-sm font-bold ${textColor}`}>{value.toLocaleString()}건</span>
@@ -961,7 +963,7 @@ function SeverityBar({
           {value > 0 ? `${Math.round((value / total) * 100)}%` : ''}
         </div>
       </div>
-    </div>
+    </Link>
   );
 }
 
@@ -1007,6 +1009,12 @@ function IssueBar({ count, label, max, severity, to }: { count: number; label: s
 
 function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
   const hasError = batch.errorCount > 0;
+  const hasWarning = batch.warningCount > 0;
+  const validationLink = hasError
+    ? `/batches/${batch.id}/validation?severity=ERROR`
+    : hasWarning
+      ? `/batches/${batch.id}/validation?severity=WARNING`
+      : `/batches/${batch.id}`;
 
   return (
     <div className={`min-w-0 overflow-hidden rounded-lg border bg-white px-4 py-4 shadow-sm ${hasError ? 'border-red-200 border-l-4 border-l-red-500' : 'border-slate-200 border-l-4 border-l-slate-500'}`}>
@@ -1024,16 +1032,16 @@ function PriorityBatchCard({ batch }: { batch: BackendBatchSummary }) {
         <Badge tone="amber">Warning {batch.warningCount}</Badge>
         <Link
           className="ml-auto shrink-0 text-xs font-semibold text-teal-700 hover:underline"
-          to={hasError ? `/batches/${batch.id}/validation?severity=ERROR` : `/batches/${batch.id}`}
+          to={validationLink}
         >
-          {hasError ? '오류 확인' : '확정 검토'}
+          {hasError ? '오류 확인' : hasWarning ? 'Warning 확인' : '확정 검토'}
         </Link>
       </div>
     </div>
   );
 }
 
-function ExternalStatusTile({ label, tone, value }: { label: string; tone: 'green' | 'amber'; value: number }) {
+function ExternalStatusTile({ label, tone, to, value }: { label: string; tone: 'green' | 'amber'; to: string; value: number }) {
   const toneClasses =
     tone === 'green'
       ? 'border-teal-200 bg-teal-50 text-teal-800'
@@ -1042,10 +1050,10 @@ function ExternalStatusTile({ label, tone, value }: { label: string; tone: 'gree
         : 'border-slate-200 bg-slate-50 text-slate-700';
 
   return (
-    <div className={`min-w-0 rounded-lg border px-3 py-3 sm:px-4 ${toneClasses}`}>
+    <Link className={`block min-w-0 rounded-lg border px-3 py-3 transition hover:border-teal-300 hover:bg-teal-50/60 sm:px-4 ${toneClasses}`} to={to}>
       <p className="truncate text-xs font-semibold opacity-80">{label}</p>
       <p className="mt-2 font-mono text-2xl font-bold">{value.toLocaleString()}</p>
-    </div>
+    </Link>
   );
 }
 
@@ -1118,7 +1126,7 @@ function DueDateVolumeChart({
   rows: DueDateSummaryRow[];
   selectedDueDate: string;
 }) {
-  const chartRows = rows.filter((row) => isIsoDate(row.dueDate)).slice(0, 7);
+  const chartRows = rows.filter((row) => isIsoDate(row.dueDate) && row.errorCount === 0).slice(0, 7);
   const maxOrders = Math.max(...chartRows.map((row) => row.orderNoCount), 1);
 
   if (loading) {
@@ -1590,6 +1598,17 @@ function firstErrorLink(issueBatches: BackendBatchSummary[]) {
 
   const severity = batch.errorCount > 0 ? 'ERROR' : batch.warningCount > 0 ? 'WARNING' : 'INFO';
   return `/batches/${batch.id}/validation?severity=${severity}`;
+}
+
+function firstSeverityLink(batches: BackendBatchSummary[], severity: ValidationSeverity) {
+  const batch = batches.find((item) => severityCount(item, severity) > 0);
+  return batch ? `/batches/${batch.id}/validation?severity=${severity}` : '/batches';
+}
+
+function severityCount(batch: BackendBatchSummary, severity: ValidationSeverity) {
+  if (severity === 'ERROR') return batch.errorCount;
+  if (severity === 'WARNING') return batch.warningCount;
+  return batch.infoCount;
 }
 
 function dueDateVolumeLink(row: DueDateSummaryRow) {

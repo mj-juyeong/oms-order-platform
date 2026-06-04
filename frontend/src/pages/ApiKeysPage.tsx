@@ -67,7 +67,7 @@ export function ApiKeysPage() {
   const [tab, setTab] = useState<ApiKeyTab>(initialTab);
   const [clients, setClients] = useState<ClientSummary[]>([]);
   const [clientFilter, setClientFilter] = useState('ALL');
-  const [requestStatus, setRequestStatus] = useState<RequestStatusFilter>('REQUESTED');
+  const [requestStatus, setRequestStatus] = useState<RequestStatusFilter>('ALL');
   const [keyStatus, setKeyStatus] = useState<KeyStatusFilter>('ACTIVE');
   const [requestPage, setRequestPage] = useState(1);
   const [keyPage, setKeyPage] = useState(1);

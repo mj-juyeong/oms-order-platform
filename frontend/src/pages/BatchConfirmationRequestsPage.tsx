@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { OmsApiError } from '../api/client';
 import { omsApi } from '../api/oms';
 import { fakeCurrentUser } from '../app/auth';
+import { dispatchNotificationsChanged } from '../app/notificationEvents';
 import { Badge, Button, Card, ModalFrame } from '../components/common';
 import { DataTable, Pagination, type DataTableColumn } from '../components/data';
 import { BatchStatusBadge, ConfirmActionModal } from '../components/domain';
@@ -137,6 +138,7 @@ export function BatchConfirmationRequestsPage() {
       setReviewComment('');
       setSupplementType('FILE_REUPLOAD');
       setReloadSeq((current) => current + 1);
+      dispatchNotificationsChanged();
     } catch (error) {
       const message = formatApiError(error);
       setReviewError(message);

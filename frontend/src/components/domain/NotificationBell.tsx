@@ -1,4 +1,4 @@
-import { Bell, Check, ExternalLink } from 'lucide-react';
+import { Bell, Check, ExternalLink, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { OmsApiError } from '../../api/client';
@@ -13,18 +13,61 @@ import {
 import { Badge, Button } from '../common';
 import type { NotificationItem, NotificationSeverity, WorkItemSummary } from '../../types/notification';
 
+const NOTIFICATION_TOAST_LIMIT = 3;
+const NOTIFICATION_TOAST_DISMISS_MS = 5_000;
+
 export function NotificationBell() {
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<NotificationItem[]>([]);
+  const [toastItems, setToastItems] = useState<NotificationItem[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [workItemSummary, setWorkItemSummary] = useState<WorkItemSummary | null>(null);
   const [, setAcknowledgementVersion] = useState(0);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const initializedToastIdsRef = useRef(false);
+  const seenNotificationIdsRef = useRef<Set<number>>(new Set());
+  const toastTimeoutIdsRef = useRef<Map<number, number>>(new Map());
   const params = useMemo(() => notificationParams(), []);
   const userKey = useMemo(() => userAcknowledgementKey(), []);
+
+  const dismissToast = useCallback((notificationId: number) => {
+    const timeoutId = toastTimeoutIdsRef.current.get(notificationId);
+    if (timeoutId) {
+      window.clearTimeout(timeoutId);
+      toastTimeoutIdsRef.current.delete(notificationId);
+    }
+    setToastItems((current) => current.filter((item) => item.id !== notificationId));
+  }, []);
+
+  const clearToasts = useCallback(() => {
+    toastTimeoutIdsRef.current.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    toastTimeoutIdsRef.current.clear();
+    setToastItems([]);
+  }, []);
+
+  const scheduleToastDismiss = useCallback((notificationId: number) => {
+    const existingTimeoutId = toastTimeoutIdsRef.current.get(notificationId);
+    if (existingTimeoutId) {
+      window.clearTimeout(existingTimeoutId);
+    }
+    const timeoutId = window.setTimeout(() => dismissToast(notificationId), NOTIFICATION_TOAST_DISMISS_MS);
+    toastTimeoutIdsRef.current.set(notificationId, timeoutId);
+  }, [dismissToast]);
+
+  const showNotificationToasts = useCallback((notifications: NotificationItem[]) => {
+    if (notifications.length === 0) {
+      return;
+    }
+
+    notifications.forEach((item) => scheduleToastDismiss(item.id));
+    setToastItems((current) => {
+      const incomingIds = new Set(notifications.map((item) => item.id));
+      return [...notifications, ...current.filter((item) => !incomingIds.has(item.id))].slice(0, NOTIFICATION_TOAST_LIMIT);
+    });
+  }, [scheduleToastDismiss]);
 
   const reload = useCallback(async () => {
     if (!params) {
@@ -40,7 +83,20 @@ export function NotificationBell() {
     setItems(listResult.items);
     setWorkItemSummary(summaryResult);
     setErrorMessage(null);
-  }, [params]);
+
+    const seenNotificationIds = seenNotificationIdsRef.current;
+    if (!initializedToastIdsRef.current) {
+      listResult.items.forEach((item) => seenNotificationIds.add(item.id));
+      initializedToastIdsRef.current = true;
+      return;
+    }
+
+    const newUnreadItems = listResult.items.filter((item) => !seenNotificationIds.has(item.id));
+    listResult.items.forEach((item) => seenNotificationIds.add(item.id));
+    showNotificationToasts(newUnreadItems);
+  }, [params, showNotificationToasts]);
+
+  useEffect(() => () => clearToasts(), [clearToasts]);
 
   useEffect(() => {
     if (!params) {
@@ -104,6 +160,7 @@ export function NotificationBell() {
       setUnreadCount((current) => Math.max(0, current - 1));
       setItems((current) => current.filter((notification) => notification.id !== item.id));
     }
+    dismissToast(item.id);
     try {
       await omsApi.notifications.markRead(item.id, params);
       dispatchNotificationsChanged();
@@ -123,6 +180,7 @@ export function NotificationBell() {
       const result = await omsApi.notifications.markAllRead(params);
       setUnreadCount(result.unreadCount);
       setItems([]);
+      clearToasts();
       setErrorMessage(null);
       dispatchNotificationsChanged();
     } catch (error) {
@@ -137,20 +195,21 @@ export function NotificationBell() {
     : 0;
 
   return (
-    <div className="relative" ref={containerRef}>
-      <button
-        aria-label="알림"
-        className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50"
-        onClick={() => setOpen((current) => !current)}
-        type="button"
-      >
-        <Bell className="h-4 w-4" />
-        {unreadCount > 0 ? (
-          <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white">
-            {unreadCount > 99 ? '99+' : unreadCount}
-          </span>
-        ) : null}
-      </button>
+    <>
+      <div className="relative" ref={containerRef}>
+        <button
+          aria-label="알림"
+          className="relative inline-flex h-9 w-9 items-center justify-center rounded-md border border-slate-300 bg-white text-slate-700 transition hover:bg-slate-50"
+          onClick={() => setOpen((current) => !current)}
+          type="button"
+        >
+          <Bell className="h-4 w-4" />
+          {unreadCount > 0 ? (
+            <span className="absolute -right-1 -top-1 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-red-600 px-1 text-[11px] font-bold leading-none text-white">
+              {unreadCount > 99 ? '99+' : unreadCount}
+            </span>
+          ) : null}
+        </button>
 
       {open ? (
         <div className="fixed left-3 right-3 top-[64px] z-50 max-h-[calc(100dvh-5rem)] overflow-hidden rounded-md border border-slate-200 bg-white shadow-xl sm:absolute sm:left-auto sm:right-0 sm:top-11 sm:w-[min(360px,calc(100vw-2rem))]">
@@ -217,7 +276,9 @@ export function NotificationBell() {
           </button>
         </div>
       ) : null}
-    </div>
+      </div>
+      <NotificationToastViewport items={toastItems} onDismiss={dismissToast} onOpen={handleNotificationClick} />
+    </>
   );
 }
 
@@ -225,6 +286,53 @@ function SeverityBadge({ severity }: { severity: NotificationSeverity }) {
   if (severity === 'ERROR') return <Badge tone="red">Error</Badge>;
   if (severity === 'WARNING') return <Badge tone="amber">Warning</Badge>;
   return <Badge tone="teal">Info</Badge>;
+}
+
+function NotificationToastViewport({
+  items,
+  onDismiss,
+  onOpen,
+}: {
+  items: NotificationItem[];
+  onDismiss: (notificationId: number) => void;
+  onOpen: (item: NotificationItem) => void;
+}) {
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div aria-live="polite" className="fixed bottom-4 right-4 z-[60] flex w-[calc(100vw-2rem)] max-w-sm flex-col gap-2 sm:bottom-5 sm:right-5">
+      {items.map((item) => (
+        <div className={`rounded-md border border-l-4 bg-white shadow-lg ${toastToneClass(item.severity)}`} key={item.id} role="status">
+          <div className="flex items-start gap-3 p-3">
+            <button className="min-w-0 flex-1 text-left" onClick={() => onOpen(item)} type="button">
+              <div className="flex flex-wrap items-center gap-2">
+                <SeverityBadge severity={item.severity} />
+                <span className="text-xs font-semibold text-slate-500">새 알림</span>
+              </div>
+              <p className="mt-2 line-clamp-1 text-sm font-bold text-slate-950">{item.title}</p>
+              <p className="mt-1 line-clamp-2 text-xs leading-5 text-slate-600">{item.message}</p>
+            </button>
+            <button
+              aria-label="알림 토스트 닫기"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+              onClick={() => onDismiss(item.id)}
+              type="button"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function toastToneClass(severity: NotificationSeverity) {
+  if (severity === 'ERROR') return 'border-red-200 border-l-red-600';
+  if (severity === 'WARNING') return 'border-amber-200 border-l-amber-500';
+  return 'border-teal-200 border-l-teal-500';
 }
 
 function notificationParams() {
