@@ -51,12 +51,12 @@ const initialProductSearch: ProductSearchState = { ezadminCode: '', productName:
 const initialStoreRouteSearch: StoreRouteSearchState = { baljugoCode: '', storeName: '' };
 
 const productVisibilityOptions = [
-  { label: '사용 범위만 공개', value: 'SCOPED_ONLY' },
+  { label: '선택한 상품만 공개', value: 'SCOPED_ONLY' },
   { label: '전체 상품 마스터 공개', value: 'ALL_PRODUCTS' },
 ];
 
 const storeRouteVisibilityOptions = [
-  { label: '사용 범위만 공개', value: 'SCOPED_ONLY' },
+  { label: '선택한 발주고/배송지만 공개', value: 'SCOPED_ONLY' },
   { label: '전체 발주고/배송지 공개', value: 'ALL_STORE_ROUTES' },
 ];
 
@@ -420,7 +420,7 @@ export function ClientMasterVisibilitySettingsPage() {
           <VisibilityToggle checked={form.showStoreRouteInternalFieldsYn} disabled={!selectedClient} label="차량/기사/주소 공개" onChange={(checked) => setForm((current) => ({ ...current, showStoreRouteInternalFieldsYn: checked }))} />
         </div>
         <div className="mt-6 flex flex-col gap-3 border-t border-slate-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-500">{setting?.updatedAt ? `마지막 저장: ${formatDateTime(setting.updatedAt)}` : '저장된 설정이 없으면 기본값으로 사용 범위만 공개됩니다.'}</p>
+          <p className="text-sm text-slate-500">{setting?.updatedAt ? `마지막 저장: ${formatDateTime(setting.updatedAt)}` : '저장된 설정이 없으면 기본값으로 선택한 항목만 공개됩니다.'}</p>
           <Button disabled={!tenantId || !selectedClient || !changed || saving} onClick={handleSave} variant="primary"><Save aria-hidden="true" size={16} />저장</Button>
         </div>
       </Card>
@@ -429,7 +429,7 @@ export function ClientMasterVisibilitySettingsPage() {
         <div className="flex flex-col gap-3 border-b border-slate-200 pb-4 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h3 className="text-base font-bold text-slate-950">수동 공개 범위</h3>
-            <p className="mt-1 text-sm text-slate-500">사용 범위만 공개 모드에서 고객사에게 노출할 항목을 직접 추가하거나 해제합니다.</p>
+            <p className="mt-1 text-sm text-slate-500">선택 항목만 공개 모드에서 고객사에게 노출할 항목을 직접 추가하거나 해제합니다.</p>
           </div>
           <div className="flex flex-wrap gap-2">
             <TabButton active={scopeTab === 'products'} label="상품" onClick={() => setScopeTab('products')} />
@@ -658,11 +658,11 @@ function TabButton({ active, label, onClick }: { active: boolean; label: string;
 }
 
 function productVisibilityLabel(mode: ClientProductMasterVisibilityMode) {
-  return mode === 'ALL_PRODUCTS' ? '전체 상품 공개' : '사용 범위 공개';
+  return mode === 'ALL_PRODUCTS' ? '전체 상품 공개' : '선택한 상품만 공개';
 }
 
 function storeRouteVisibilityLabel(mode: ClientStoreRouteMasterVisibilityMode) {
-  return mode === 'ALL_STORE_ROUTES' ? '전체 발주고 공개' : '사용 범위 공개';
+  return mode === 'ALL_STORE_ROUTES' ? '전체 발주고 공개' : '선택한 발주고/배송지만 공개';
 }
 
 function scopeSourceLabel(source: string) {

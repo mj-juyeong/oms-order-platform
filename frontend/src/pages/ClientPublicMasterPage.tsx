@@ -61,6 +61,7 @@ export function ClientPublicMasterPage() {
   const [storeRouteDetailError, setStoreRouteDetailError] = useState<string | null>(null);
   const [requestResponse, setRequestResponse] = useState<PageResponse<MasterDataAddRequest> | null>(null);
   const [loadingRequests, setLoadingRequests] = useState(false);
+  const [selectedRequest, setSelectedRequest] = useState<MasterDataAddRequest | null>(null);
   const [requestModalOpen, setRequestModalOpen] = useState(false);
   const [requestType, setRequestType] = useState<MasterDataAddRequestType>('PRODUCT');
   const [requestTitle, setRequestTitle] = useState('');
@@ -390,7 +391,7 @@ export function ClientPublicMasterPage() {
           <Pagination onPageChange={(page) => setStoreRoutePage(page - 1)} page={storeRoutePage + 1} total={storeRouteResponse?.totalElements ?? 0} totalPages={Math.max(1, storeRouteResponse?.totalPages ?? 1)} />
         </>
       )}
-      <MasterDataAddRequestHistory loading={loadingRequests} requests={requestResponse?.items ?? []} />
+      <MasterDataAddRequestHistory loading={loadingRequests} onSelectRequest={setSelectedRequest} requests={requestResponse?.items ?? []} />
       <ClientProductMasterDetailModal
         detail={productDetail}
         error={productDetailError}
@@ -405,6 +406,7 @@ export function ClientPublicMasterPage() {
         loading={storeRouteDetailLoading}
         onClose={closeStoreRouteDetail}
       />
+      <RequestDetailModal onClose={() => setSelectedRequest(null)} request={selectedRequest} />
       <Modal open={requestModalOpen} title="마스터 데이터 추가 요청" size="wide" onClose={closeRequestModal}>
         <div className="space-y-5">
           <div className="grid gap-3 lg:grid-cols-2">
@@ -545,9 +547,10 @@ function ActiveBadge({ active }: { active: boolean }) {
 }
 
 function visibilityLabel(setting: ClientMasterVisibilitySetting | null, tab: MasterTab) {
-  if (!setting) return '사용 범위 공개';
-  if (tab === 'products') return setting.productVisibilityMode === 'ALL_PRODUCTS' ? '전체 상품 공개' : '사용 범위 공개';
-  return setting.storeRouteVisibilityMode === 'ALL_STORE_ROUTES' ? '전체 발주고 공개' : '사용 범위 공개';
+  if (tab === 'products') {
+    return setting?.productVisibilityMode === 'ALL_PRODUCTS' ? '전체 상품 공개' : '선택한 상품만 공개';
+  }
+  return setting?.storeRouteVisibilityMode === 'ALL_STORE_ROUTES' ? '전체 발주고 공개' : '선택한 발주고/배송지만 공개';
 }
 
 function activeYnFromFilter(value: ActiveFilter) {
@@ -641,7 +644,87 @@ function RequestFieldGrid({
   );
 }
 
-function MasterDataAddRequestHistory({ loading, requests }: { loading: boolean; requests: MasterDataAddRequest[] }) {
+function RequestDetailModal({
+  onClose,
+  request,
+}: {
+  onClose: () => void;
+  request: MasterDataAddRequest | null;
+}) {
+  if (!request) return null;
+
+  return (
+    <Modal open title="마스터 요청 상세" size="wide" onClose={onClose}>
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge tone={requestStatusTone(request.status)}>{requestStatusLabel(request.status)}</Badge>
+          <Badge tone="neutral">{requestTypeLabel(request.requestType)}</Badge>
+        </div>
+
+        <div className="grid gap-4 lg:grid-cols-2">
+          <RequestDetailSection title="요청 정보">
+            <RequestDetailItem label="제목" value={request.title} />
+            <RequestDetailItem label="요청일시" value={formatDateTime(request.requestedAt)} />
+            <RequestDetailItem label="요청 메모" value={request.requestMemo ?? '-'} />
+          </RequestDetailSection>
+          <RequestDetailSection title="처리 정보">
+            <RequestDetailItem label="상태" value={requestStatusLabel(request.status)} />
+            <RequestDetailItem label="검토일시" value={formatDateTime(request.reviewedAt)} />
+            <RequestDetailItem label="처리 메모" value={request.reviewComment ?? '-'} />
+            <RequestDetailItem
+              label="반영 마스터"
+              value={request.appliedMasterType && request.appliedMasterItemId ? `${request.appliedMasterType} #${request.appliedMasterItemId}` : '-'}
+            />
+          </RequestDetailSection>
+        </div>
+
+        <RequestDetailSection title="요청 필드">
+          <div className="grid gap-3 lg:grid-cols-2">
+            {Object.entries(request.requestFields).length === 0 ? (
+              <p className="text-sm text-slate-500">입력된 상세 필드가 없습니다.</p>
+            ) : (
+              Object.entries(request.requestFields).map(([key, value]) => (
+                <RequestDetailItem key={key} label={requestFieldLabel(key)} value={value || '-'} />
+              ))
+            )}
+          </div>
+        </RequestDetailSection>
+
+        <div className="flex justify-end">
+          <Button onClick={onClose} variant="primary">확인</Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function RequestDetailSection({ children, title }: { children: ReactNode; title: string }) {
+  return (
+    <div className="rounded-lg border border-slate-200 p-4">
+      <p className="text-sm font-bold text-slate-950">{title}</p>
+      <div className="mt-4 space-y-3">{children}</div>
+    </div>
+  );
+}
+
+function RequestDetailItem({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="grid gap-1">
+      <p className="text-xs font-semibold text-slate-500">{label}</p>
+      <p className="break-all text-sm text-slate-900">{value}</p>
+    </div>
+  );
+}
+
+function MasterDataAddRequestHistory({
+  loading,
+  onSelectRequest,
+  requests,
+}: {
+  loading: boolean;
+  onSelectRequest: (request: MasterDataAddRequest) => void;
+  requests: MasterDataAddRequest[];
+}) {
   return (
     <Card className="p-5">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -668,7 +751,11 @@ function MasterDataAddRequestHistory({ loading, requests }: { loading: boolean; 
             </thead>
             <tbody className="divide-y divide-slate-100">
               {requests.map((request) => (
-                <tr key={request.id}>
+                <tr
+                  key={request.id}
+                  className="cursor-pointer transition-colors hover:bg-slate-50"
+                  onClick={() => onSelectRequest(request)}
+                >
                   <td className="whitespace-nowrap px-3 py-3 text-slate-600">{formatDateTime(request.requestedAt)}</td>
                   <td className="whitespace-nowrap px-3 py-3 text-slate-700">{requestTypeLabel(request.requestType)}</td>
                   <td className="min-w-[220px] px-3 py-3 font-semibold text-slate-950">{request.title}</td>
@@ -688,6 +775,28 @@ function MasterDataAddRequestHistory({ loading, requests }: { loading: boolean; 
 
 function requestTypeLabel(value: MasterDataAddRequestType) {
   return requestTypeOptions.find((option) => option.value === value)?.label ?? value;
+}
+
+function requestFieldLabel(key: string) {
+  const labels: Record<string, string> = {
+    productName: '상품명',
+    customerProductCode: '거래처 상품코드',
+    outboundUnit: '출고단위',
+    boxQty: '박스입수량',
+    temperatureType: '보관온도',
+    storeName: '지점명',
+    customerCode: '거래처코드',
+    brandName: '브랜드명',
+    area: '권역',
+    deliveryRound: '차수',
+    vehicleName: '차량명',
+    address: '주소',
+    clientProductCode: '고객사 상품코드',
+    ezadminCode: 'OMS 상품코드',
+    clientStoreCode: '고객사 배송지코드',
+    baljugoCode: '발주고코드',
+  };
+  return labels[key] ?? key;
 }
 
 function defaultRequestTitle(value: MasterDataAddRequestType) {
