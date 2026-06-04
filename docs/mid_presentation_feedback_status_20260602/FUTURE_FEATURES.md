@@ -18,9 +18,6 @@
 
 | 우선순위 | 기능 | 상태 |
 |---|---|---|
-| P0 | 조회페이지 스코프별 기본 흐름 정리 | 부분 구현 |
-| P0 | 주문 조회 DB 기반 검색/정렬/페이징 전환 | 부분 구현 |
-| P0 | 주문 목록 모달/테이블 UX 개선 | 신규 추가 필요 |
 | P0 | 마스터 상세 정보 및 관련 주문/배치 연결 | 신규 추가 필요 |
 | P0 | 마스터 데이터 추가 요청 기능 | 미구현 |
 | P1 | 고객사 API Key 신청/발급 정책 및 화면 | 신규 추가 필요 |
@@ -95,64 +92,6 @@
 - `backend/src/main/kotlin/com/company/oms/scan/ScanQueryController.kt`
 - `backend/src/main/kotlin/com/company/oms/pl/PlQueryController.kt`
 - `backend/src/main/kotlin/com/company/oms/label/LabelQueryController.kt`
-
-## P0-2. 주문 조회 DB 기반 검색/정렬/페이징 전환
-
-### 현재 상태
-
-- 프론트에는 검색 버튼 방식과 `totalElements` 표시가 반영되어 있다.
-- 백엔드 `OrderQueryService`는 아직 `findAll()` 후 메모리 필터링, 정렬, 페이징을 수행한다.
-- 주문 목록의 정렬 요구가 추가되었으므로 DB 기반 정렬 전환이 더 중요해졌다.
-
-### 추가 필요
-
-- 주문 조회를 Scan/PL/Label처럼 JPA Specification 또는 명시적 query 기반으로 전환한다.
-- `storeName`, `brandName`, `productName`, `vehicleName`, `dueDateFrom`, `dueDateTo`, `confirmedOnly` 조건을 DB 단계에서 처리한다.
-- `sortBy`, `sortDirection`을 백엔드 query parameter로 받고 DB query에서 정렬한다.
-- 프론트 주문 테이블의 컬럼 헤더에서 오름차순/내림차순을 전환할 수 있게 한다.
-- 정렬 가능한 컬럼은 주문번호, 고객사, 배치번호, 거래처코드, 거래처명, 브랜드, 품목코드, 품목명, 납기일, 수량, 배치 상태 정도로 시작한다.
-
-### 관련 위치
-
-- `backend/src/main/kotlin/com/company/oms/order/OrderQueryService.kt`
-- `backend/src/main/kotlin/com/company/oms/order/OrderLineRepository.kt`
-- `frontend/src/pages/OrdersPage.tsx`
-- `frontend/src/components/data/DataTable.tsx`
-
-## P0-3. 주문 목록 모달/테이블 UX 개선
-
-### 현재 상태
-
-- 주문 목록 화면에는 필터와 테이블이 있다.
-- 주문 상세 또는 선택 모달에서 더 빠르게 주문을 찾는 전용 검색/드롭다운 UI는 아직 부족하다.
-
-### 추가 필요
-
-- 주문 목록 또는 주문 선택 모달에 검색 input을 추가한다.
-- 단순 텍스트 검색 외에 드롭다운 필터를 제공한다.
-- 드롭다운 후보:
-  - 고객사
-  - 배치
-  - 배치 상태
-  - 납기일 범위
-  - 브랜드
-  - 거래처/배송지
-  - 품목
-- 검색 input은 주문번호, 거래처코드, 거래처명, 품목코드, 품목명을 대상으로 한다.
-- 모달 안에서도 검색 버튼 방식과 `검색 필요` 상태를 유지한다.
-- 테이블 컬럼 오름차순/내림차순 정렬 UI를 추가한다.
-
-### 확인 필요
-
-- 주문 모달은 “상세 보기 모달”인지 “다른 화면에서 주문을 선택하는 모달”인지 화면 목적을 확정해야 한다.
-- 모달에서 전체 주문을 검색할지, 현재 선택된 고객사/배치 안에서만 검색할지 확인 필요.
-
-### 예상 위치
-
-- `frontend/src/pages/OrdersPage.tsx`
-- `frontend/src/components/data/DataTable.tsx`
-- `frontend/src/components/common/Select.tsx`
-- `frontend/src/components/common/Input.tsx`
 
 ## P0-4. 마스터 상세 정보 및 관련 주문/배치 연결
 

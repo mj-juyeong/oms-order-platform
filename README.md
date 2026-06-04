@@ -6,19 +6,32 @@ OIS가 생성한 목적별 엑셀 데이터를 업로드 받아 저장, 검증, 
 
 ## 기준 문서
 
-작업 전 아래 문서를 우선 확인한다.
+Codex 작업 지침은 루트 `AGENTS.md`를 우선한다. README는 프로젝트 소개와 실행법 중심으로 사용한다.
+
+일반 구현 작업은 기본적으로 다음 문서만 확인한다.
 
 | 문서 | 용도 |
 |---|---|
-| `AGENTS.md` | Codex와 개발자가 따라야 할 작업 규칙 |
-| `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 최상위 요구사항 기준 |
-| `docs/IMPLEMENTATION_PLAN.md` | Phase별 구현 순서 |
-| `docs/DB_DECISION.md` | DB 후보 비교 및 판단 기준 |
-| `docs/DB_DESIGN_PROPOSAL.md` | RDB 설계 제안 |
-| `docs/ERD_DESIGN.md` | ERD 설계 초안 |
-| `docs/API_DESIGN_DRAFT.md` | API 설계 초안 |
+| `AGENTS.md` | Codex와 개발자가 따라야 할 최소 공통 작업 규칙 |
+| `frontend/AGENTS.md` | Frontend 작업 시 추가로 적용하는 규칙 |
+| `backend/AGENTS.md` | Backend 작업 시 추가로 적용하는 규칙 |
+| `docs/mid_presentation_feedback_status_20260602/FUTURE_FEATURES.md` | 앞으로 구현할 기능과 남은 보완 항목 |
+| `docs/mid_presentation_feedback_status_20260602/COMPLETED_FEATURES.md` | 완료 여부가 애매할 때만 확인하는 완료 근거 |
 
-요구사항 문서와 다른 문서 또는 구현 내용이 충돌하면 최종 요구사항 문서를 우선한다. 요구사항에 없는 업무 정책은 `확인 필요`로 남긴다.
+아래 문서는 전체를 매번 읽지 않는다. 충돌 판단, 신규 설계, API/DB 구조 확인이 필요한 경우에만 관련 섹션만 확인한다.
+
+| 문서 | 확인하는 경우 |
+|---|---|
+| `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 요구사항 충돌 또는 업무 정책 판단이 필요할 때 |
+| `docs/API_DESIGN_DRAFT.md` | 신규 API 설계 또는 응답 필드 확인이 필요할 때 |
+| `docs/ERD_DESIGN.md` | 테이블 관계나 데이터 모델 확인이 필요할 때 |
+| `docs/DB_DECISION.md` | DB 정책, MySQL/PostgreSQL 판단이 필요할 때 |
+| `docs/DB_DESIGN_PROPOSAL.md` | RDB 상세 컬럼/인덱스 확인이 필요할 때 |
+| `docs/IMPLEMENTATION_PLAN.md` | 전체 Phase 흐름을 다시 검토할 때 |
+| `frontend/FRONTEND_IMPLEMENTATION_PLAN.md` | 전체 Frontend 구현 계획을 다시 검토할 때 |
+| `backend/BACKEND_IMPLEMENTATION_PLAN.md` | 전체 Backend 구현 계획을 다시 검토할 때 |
+
+문서와 구현 내용이 충돌하면 최종 요구사항 문서를 우선하되, 요구사항에 없는 업무 정책은 임의 확정하지 않고 `확인 필요`로 남긴다.
 
 ## 프로젝트 전제
 

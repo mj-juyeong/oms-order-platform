@@ -1,5 +1,7 @@
 # Frontend Implementation Plan
 
+> 주의: 이 문서는 전체 Frontend 구현 계획 참고용이다. 일반 Codex 작업 시작 시 자동으로 전체를 읽지 않는다. 루트 `AGENTS.md`, `frontend/AGENTS.md`, `FUTURE_FEATURES.md`의 관련 항목만으로 판단이 부족할 때 필요한 섹션만 확인한다.
+
 - 작성일: 2026-05-28
 - 목적: OMS Admin/Backoffice 프론트엔드 구현 시 참고할 실행 계획
 - 범위: 구현 계획 문서 작성만 포함한다. React 코드, 라우팅, CSS, Tailwind 설정, API 코드는 이 문서 작성 단계에서 수정하지 않는다.
@@ -38,24 +40,25 @@ MVP 구현 범위는 다음 화면을 포함한다.
 
 현재 repo에는 위 화면의 라우트와 skeleton 페이지가 이미 존재한다. 이후 구현은 기존 파일을 기준으로 확장하되, Stitch HTML의 DOM 구조나 Tailwind class를 직접 복사하지 않는다.
 
-## 2. 구현 기준 문서 우선순위
+## 2. 구현 기준 문서 사용 원칙
 
-요구사항과 디자인 참고 자료가 충돌할 경우 아래 순서를 따른다.
+이 문서는 전체 Frontend 방향을 정리한 참고 문서다. 일반 수정 작업에서는 아래 문서를 모두 읽지 않는다.
 
-| 우선순위 | 기준 문서/자료 | 사용 방식 |
-|---|---|---|
-| 1 | `AGENTS.md` | 프로젝트 최상위 규칙, 금지사항, 도메인 정의 |
-| 2 | `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 업무 요구사항의 최상위 기준 |
-| 3 | `docs/UI_DESIGN_BRIEF.md` | UI/UX 원칙, 화면 목록, 컴포넌트 기준 |
-| 4 | `docs/DESIGN_HANDOFF_PAGE_MAPPING.md` | `design-handoff/stitch_oms` 폴더명과 실제 OMS 화면 매핑 |
-| 5 | `design-handoff/stitch/STITCH_DESIGN_REVIEW.md` | Stitch 시안에서 유지/수정해야 할 UX 체크리스트 |
-| 6 | `design-handoff/stitch_oms/screenshots/*`, `design-handoff/stitch_oms/*/code.html` | 레이아웃, 정보 배치, 밀도, 톤 참고용 |
-| 7 | `docs/API_DESIGN_DRAFT.md` | API 경로, 권한, 응답 필드 예상 기준 |
-| 8 | `docs/ERD_DESIGN.md` | 화면에 노출할 데이터 관계와 도메인 구조 확인 |
-| 9 | `docs/IMPLEMENTATION_PLAN.md` | 전체 프로젝트 단계와 선후관계 확인 |
+| 문서/자료 | 확인하는 경우 |
+|---|---|
+| `AGENTS.md` | 모든 작업의 공통 규칙 확인 |
+| `frontend/AGENTS.md` | Frontend 작업 규칙 확인 |
+| `docs/mid_presentation_feedback_status_20260602/FUTURE_FEATURES.md` | 다음 구현 항목이나 남은 보완 범위 확인 |
+| `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 요구사항 충돌 또는 업무 정책 판단이 필요할 때 관련 섹션만 확인 |
+| `docs/UI_DESIGN_BRIEF.md` | UI 원칙이 애매할 때 관련 섹션만 확인 |
+| `docs/DESIGN_HANDOFF_PAGE_MAPPING.md` | 디자인 반영 작업이 명시된 경우 해당 화면 매핑만 확인 |
+| `design-handoff/stitch/STITCH_DESIGN_REVIEW.md` | Stitch 시안 반영 작업이 명시된 경우 관련 체크만 확인 |
+| `design-handoff/stitch_oms/screenshots/*`, `design-handoff/stitch_oms/*/code.html` | 해당 화면의 레이아웃/밀도 참고가 필요할 때만 확인 |
+| `docs/API_DESIGN_DRAFT.md` | API 경로, 권한, 응답 필드가 애매할 때 관련 endpoint만 확인 |
+| `docs/ERD_DESIGN.md` | 화면에 노출할 데이터 관계가 애매할 때 관련 테이블만 확인 |
+| `docs/IMPLEMENTATION_PLAN.md` | 전체 프로젝트 단계와 선후관계를 다시 검토할 때만 확인 |
 
 Stitch 산출물은 production 코드가 아니다. 실제 구현에서는 현재 `frontend/src/components`, `frontend/src/pages`, `frontend/src/routes`, `frontend/src/types`, `frontend/src/api` 구조를 우선한다.
-페이지 구현 또는 디자인 반영 작업 전에는 `docs/DESIGN_HANDOFF_PAGE_MAPPING.md`에서 해당 화면의 디자인 폴더를 먼저 확인한다.
 
 ## 3. 화면 구현 우선순위
 
@@ -531,16 +534,16 @@ API 응답 타입은 `src/types`에 도메인별로 둔다. Backend 공통 응�
 - 마스터 버전 선택/활성화 중심 UI
 - Stitch HTML의 Tailwind class, spacing, color token, DOM 구조를 그대로 복사하는 구현
 
-## 12. 구현 시작 시 읽는 순서
+## 12. 구현 시작 시 확인 순서
 
-실제 구현을 시작할 때는 다음 순서로 확인한다.
+일반 구현을 시작할 때는 다음 순서로 필요한 범위만 확인한다.
 
 1. `AGENTS.md`
-2. `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md`
-3. 이 문서의 `3. 화면 구현 우선순위`
-4. 이 문서의 `10. 구현 전 체크리스트`
-5. `design-handoff/stitch/STITCH_DESIGN_REVIEW.md`
-6. 구현 대상 화면의 Stitch screenshot
-7. 현재 `frontend/src`의 기존 page/component/type/api 파일
+2. `frontend/AGENTS.md`
+3. `docs/mid_presentation_feedback_status_20260602/FUTURE_FEATURES.md`의 관련 항목
+4. 현재 `frontend/src`의 기존 page/component/type/api 파일
+5. 이 문서의 관련 화면 또는 공통 컴포넌트 섹션
+
+최종 요구사항, API 설계, ERD, 디자인 산출물은 충돌 판단이나 명시된 디자인/API 작업이 있을 때만 관련 섹션만 확인한다.
 
 Phase 1에서는 특히 `Sidebar`, `Header`, `Breadcrumb`, `PageHeader`, `DataTable`, `StatusBadge`, `SeverityBadge`, `CodeCell`의 방향을 먼저 잡는다. Phase 2에서는 OIS 업로드의 상태 분기와 현재 마스터 기준 검증 UI를 우선한다.

@@ -1,21 +1,29 @@
 # OMS Backend Implementation Plan
 
-이 문서는 이후 Backend 구현자가 작업을 시작할 때 먼저 확인할 실행 계획서다.
+> 주의: 이 문서는 전체 Backend 구현 계획 참고용이다. 일반 Codex 작업 시작 시 자동으로 전체를 읽지 않는다. 루트 `AGENTS.md`, `backend/AGENTS.md`, `FUTURE_FEATURES.md`의 관련 항목만으로 판단이 부족할 때 필요한 섹션만 확인한다.
+
+이 문서는 Backend 구현자가 전체 구현 흐름이나 아키텍처를 재검토할 때 참고하는 실행 계획서다.
 기존 설계 문서를 Backend 구현 관점으로 재구성했으며, 실제 코드를 구현하지 않는다.
 
-## 1. 기준 문서와 우선순위
+## 1. 기준 문서 사용 원칙
 
-구현 전에는 아래 문서를 확인한다. 문서 간 충돌이 있으면 이 순서대로 판단한다.
+일반 Backend 구현 전에는 아래 문서를 모두 읽지 않는다. 작업 유형에 따라 필요한 범위만 확인한다.
 
-1. `AGENTS.md`
-2. `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md`
-3. `docs/IMPLEMENTATION_PLAN.md`
-4. `docs/DB_DESIGN_PROPOSAL.md`
-5. `docs/ERD_DESIGN.md`
-6. `docs/API_DESIGN_DRAFT.md`
-7. `docs/DB_DECISION.md`
-8. `README.md`
-9. migration SQL
+| 문서/자료 | 확인하는 경우 |
+|---|---|
+| `AGENTS.md` | 모든 작업의 공통 규칙 확인 |
+| `backend/AGENTS.md` | Backend 작업 규칙 확인 |
+| `docs/mid_presentation_feedback_status_20260602/FUTURE_FEATURES.md` | 다음 구현 항목이나 남은 보완 범위 확인 |
+| `docs/OMS_개발팀_전달용_최종요구사항_Codex_대화반영_최종.md` | 요구사항 충돌 또는 업무 정책 판단이 필요할 때 관련 섹션만 확인 |
+| `docs/API_DESIGN_DRAFT.md` | 신규 API 설계 또는 응답 필드 확인이 필요할 때 관련 endpoint만 확인 |
+| `docs/ERD_DESIGN.md` | 테이블 관계나 데이터 모델 확인이 필요할 때 관련 테이블만 확인 |
+| `docs/DB_DECISION.md` | DB 정책, MySQL/PostgreSQL 판단이 필요할 때 확인 |
+| `docs/DB_DESIGN_PROPOSAL.md` | 상세 컬럼, 인덱스, 제약 조건 확인이 필요할 때 관련 테이블만 확인 |
+| `docs/IMPLEMENTATION_PLAN.md` | 전체 Phase 흐름을 다시 검토할 때만 확인 |
+| `README.md` | 실행법이나 저장소 구조 확인이 필요할 때 확인 |
+| migration SQL | 변경 대상 테이블의 현재 migration만 확인 |
+
+문서 간 충돌이 있으면 `AGENTS.md`와 최종 요구사항 문서를 우선하되, 요구사항에 없는 업무 정책은 `확인 필요`로 남긴다.
 
 ## 2. 현재 Backend 상태 요약
 

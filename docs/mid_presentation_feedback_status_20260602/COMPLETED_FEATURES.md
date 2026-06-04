@@ -201,3 +201,236 @@
 - `backend/src/main/kotlin/com/company/oms/auth/UserManagementService.kt`
 - `backend/src/main/kotlin/com/company/oms/common/scope/ClientScopeService.kt`
 - `frontend/src/app/auth.ts`
+
+## 12. 주문 조회 DB 기반 검색/정렬/페이징 전환
+
+### 완료 내용
+
+- 주문 조회 백엔드가 `findAll()` 후 메모리 필터링/정렬/페이징을 수행하던 흐름에서 JPA Specification과 `PageRequest`, `Sort` 기반 조회로 전환되었다.
+- 주문 조회 API가 검색 조건과 `sortBy`, `sortDirection`을 받아 DB 조회 단계에서 검색, 정렬, 페이징을 처리한다.
+- 주문 조회 응답은 백엔드 `totalElements`, `totalPages` 기준으로 총건수와 페이지 정보를 표시한다.
+- 주문번호, 고객사, 배치번호, 거래처코드, 거래처명, 브랜드, 품목코드, 품목명, 납기일, 주문량, 배치 상태 정렬을 지원한다.
+- 배치 상태, 고객사명처럼 연관 엔티티 기반 정렬이 필요한 항목을 처리하기 위해 주문 라인 엔티티에 조회용 연관 매핑이 보강되었다.
+
+### 관련 위치
+
+- `backend/src/main/kotlin/com/company/oms/order/OrderLineEntity.kt`
+- `backend/src/main/kotlin/com/company/oms/order/OrderLineRepository.kt`
+- `backend/src/main/kotlin/com/company/oms/order/OrderQueryService.kt`
+- `backend/src/test/kotlin/com/company/oms/Phase7ApiTest.kt`
+- `frontend/src/pages/OrdersPage.tsx`
+
+### 확인 방법
+
+- `./gradlew.bat test --tests com.company.oms.Phase7ApiTest`
+- `npm.cmd run build`
+
+## 13. 주문 목록 모달/테이블 UX 개선
+
+### 완료 내용
+
+- 주문 목록 페이지의 브랜드별, 상품별, 거래처별, 차량별, 배치별 상세 모달에 검색 input과 검색 유형 드롭다운이 추가되었다.
+- 모달 검색은 주문번호, 거래처코드, 거래처명, 품목코드, 품목명을 대상으로 동작한다.
+- 모달 검색 input은 남는 영역을 채우도록 레이아웃이 조정되었다.
+- 주문 목록 테이블의 정렬 UI는 별도 드롭다운 2개 대신 `정렬: ...` 단일 메뉴와 테이블 헤더 정렬을 함께 사용하는 방식으로 정리되었다.
+- `전체 고객사 보기`, `전체 배치 보기` 버튼 크기와 노출 조건이 개선되었다.
+- 물류사 계정에서도 배치 선택/조회 상태에서 `전체 고객사 보기`를 사용할 수 있게 되었다.
+
+### 관련 위치
+
+- `frontend/src/pages/OrdersPage.tsx`
+- `frontend/src/components/domain/SelectedBatchScopeBar.tsx`
+- `frontend/src/components/data/SortMenu.tsx`
+- `frontend/src/components/common/Button.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/orders` 주문 조회 화면과 주문 그룹 상세 모달을 확인한다.
+
+## 14. 조회 테이블 공통 정렬 UX 개선
+
+### 완료 내용
+
+- 주문, Scan, PL, Label 조회 테이블의 정렬 컨트롤이 공통 `SortMenu` 컴포넌트로 통일되었다.
+- 화면 우측에 항상 노출되던 정렬 필드/방향 드롭다운 2개를 하나의 정렬 메뉴로 정리해 테이블 액션 영역의 밀도를 낮췄다.
+- 데스크톱에서는 테이블 헤더 클릭 정렬을 유지하고, 모바일/좁은 화면에서는 상단 정렬 메뉴로 정렬 기준과 방향을 바꿀 수 있게 했다.
+- Scan, PL, Label 조회 API 호출에도 `sortBy`, `sortDirection` 전달이 반영되었다.
+
+### 관련 위치
+
+- `frontend/src/components/data/SortMenu.tsx`
+- `frontend/src/components/data/DataTable.tsx`
+- `frontend/src/components/data/index.ts`
+- `frontend/src/pages/OrdersPage.tsx`
+- `frontend/src/pages/ScanLinesPage.tsx`
+- `frontend/src/pages/PlLinesPage.tsx`
+- `frontend/src/pages/LabelLinesPage.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/orders`, `/scan-lines`, `/pl-lines`, `/label-lines`의 정렬 메뉴 렌더링을 확인한다.
+
+## 15. 공통 페이지 뒤로가기 UX 1차 반영
+
+### 완료 내용
+
+- 공통 레이아웃의 breadcrumb 왼쪽에 뒤로가기 아이콘 버튼이 추가되었다.
+- 버튼은 현재 UI 톤에 맞게 배경/테두리/그림자를 제거한 고스트 아이콘 형태로 정리되었다.
+- 일반 페이지에서는 히스토리가 있으면 `navigate(-1)`을 사용하고, 직접 진입처럼 히스토리가 없으면 안전한 fallback 경로로 이동한다.
+- 배치 상세 계열은 fallback을 `/batches`로 둔다.
+- 주문, Scan, PL, Label 조회에서 배치 선택 후 결과 화면으로 들어간 상태에서는 뒤로가기 버튼이 브라우저 뒤로가기가 아니라 배치 선택 단계로 돌아가도록 override된다.
+
+### 관련 위치
+
+- `frontend/src/components/layout/AppShell.tsx`
+- `frontend/src/components/layout/PageBackContext.tsx`
+- `frontend/src/components/layout/index.ts`
+- `frontend/src/pages/OrdersPage.tsx`
+- `frontend/src/pages/ScanLinesPage.tsx`
+- `frontend/src/pages/PlLinesPage.tsx`
+- `frontend/src/pages/LabelLinesPage.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/orders` 배치 조회 상태의 뒤로가기 버튼이 배치 선택 화면으로 돌아가는지 확인한다.
+- 브라우저에서 `/client-masters` 같은 일반 페이지의 breadcrumb 왼쪽 뒤로가기 버튼 위치와 스타일을 확인한다.
+
+## 16. 조회페이지 스코프별 기본 흐름 정리
+
+### 완료 내용
+
+- 주문, Scan, PL, Label 조회 화면이 `고객사 선택 -> 배치 선택 또는 전체 배치 보기 -> 결과 조회` 흐름으로 정리되었다.
+- 배치 컨텍스트가 `단일 배치`와 `전체 배치` 모드를 함께 저장하도록 바뀌어, 화면 이동 후에도 조회 기준을 안정적으로 복원한다.
+- 조회 결과 화면에서 고객사 다시 선택, 배치 다시 선택, 브라우저 뒤로가기 override가 공통 흐름으로 맞춰졌다.
+- TENANT 사용자는 고객사 미선택 상태를 별도 차단 상태로 처리하고, CLIENT 사용자는 잠긴 고객사 스코프로 바로 진입한다.
+
+### 관련 위치
+
+- `frontend/src/app/batchContext.ts`
+- `frontend/src/app/clientContext.ts`
+- `frontend/src/hooks/useQueryScope.ts`
+- `frontend/src/components/domain/BatchSelectionPanel.tsx`
+- `frontend/src/components/domain/SelectedBatchScopeBar.tsx`
+- `frontend/src/pages/OrdersPage.tsx`
+- `frontend/src/pages/ScanLinesPage.tsx`
+- `frontend/src/pages/PlLinesPage.tsx`
+- `frontend/src/pages/LabelLinesPage.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/orders`, `/scan-lines`, `/pl-lines`, `/label-lines` 진입 시 고객사 선택, 배치 선택, 전체 배치 보기 흐름을 확인한다.
+
+## 17. 마스터 상세 정보 및 관련 주문/배치 연결
+
+### 완료 내용
+
+- 상품/배송지-차량 마스터 목록 행 클릭 시 상세 모달이 열리고, 최근 반영 파일, 최근 확정 배치, 관련 주문, 검증 오류, 사용량 요약을 함께 보여준다.
+- 고객사 공개 마스터 화면에서도 동일한 상세 조회 흐름을 제공한다.
+- 마스터 목록 응답에 최근 확정 배치 정보가 포함되어 목록과 모바일 카드에서 최근 사용 시점을 바로 확인할 수 있다.
+- 마스터 업서트는 동일 데이터 재반영 시에도 마지막 업로드 배치와 원본 row 정보를 갱신하도록 보강되었다.
+
+### 관련 위치
+
+- `backend/src/main/kotlin/com/company/oms/master/MasterController.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterDtos.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterDetailService.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterConfirmedUsageService.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterUpsertService.kt`
+- `frontend/src/components/domain/MasterDetailModal.tsx`
+- `frontend/src/pages/ProductMasterPage.tsx`
+- `frontend/src/pages/StoreRouteMasterPage.tsx`
+- `frontend/src/pages/ClientPublicMasterPage.tsx`
+- `frontend/src/api/masters.ts`
+
+### 확인 방법
+
+- `./gradlew.bat test --tests com.company.oms.ValidationConfirmApiTest`
+- `npm.cmd run build`
+
+## 18. 마스터 데이터 추가 요청 기능
+
+### 완료 내용
+
+- 고객사가 상품, 배송지/차량, 상품 코드 매핑, 배송지 코드 매핑 추가 요청을 등록할 수 있는 요청 모델과 API가 추가되었다.
+- 물류사는 마스터 요청 처리 화면에서 요청 목록을 조회하고, 승인, 반려, 보완 요청, 마스터 반영 완료 처리를 할 수 있다.
+- 요청 처리 시 마스터 반영 대상과 코멘트를 함께 남길 수 있고, 상태 이력이 화면에 반영된다.
+- 요청 기능이 라우팅, 네비게이션, 타입, API 클라이언트까지 연결되어 운영 화면에서 바로 사용할 수 있다.
+
+### 관련 위치
+
+- `backend/src/main/kotlin/com/company/oms/master/MasterDataAddRequestController.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterDataAddRequestService.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterDataAddRequestEntity.kt`
+- `backend/src/main/kotlin/com/company/oms/master/MasterDataAddRequestRepository.kt`
+- `backend/src/main/resources/db/migration/V13__master_data_add_requests.sql`
+- `frontend/src/pages/MasterDataAddRequestsPage.tsx`
+- `frontend/src/pages/ClientPublicMasterPage.tsx`
+- `frontend/src/api/masters.ts`
+- `frontend/src/types/master.ts`
+- `frontend/src/routes/router.tsx`
+
+### 확인 방법
+
+- `npm.cmd run build`
+- 브라우저에서 `/client-masters`, `/masters/requests`에서 요청 등록과 상태 변경 화면을 확인한다.
+
+## 19. 고객사 API Key 신청/발급 정책 및 화면
+
+### 완료 내용
+
+- 고객사 요청 기반 API Key 발급 흐름이 추가되어, 요청 등록, 승인, 반려, 취소, 1회성 원문 열람까지 지원한다.
+- API Key 요청 엔티티와 API가 추가되고, 발급 후에는 요청자만 원문을 1회 확인할 수 있도록 처리되었다.
+- API Key 관리 화면이 `요청`과 `발급된 Key` 관리를 함께 다루는 구조로 확장되었다.
+- 알림/작업 요약에 API Key 요청 대기 건수가 연결되어 운영자가 승인 대기 상태를 바로 확인할 수 있다.
+
+### 관련 위치
+
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyRequestController.kt`
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyRequestService.kt`
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyRequestEntity.kt`
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyRequestRepository.kt`
+- `backend/src/main/resources/db/migration/V15__api_key_requests.sql`
+- `backend/src/main/resources/db/migration/V16__api_key_request_scope_type.sql`
+- `backend/src/main/resources/db/migration/V17__api_key_request_reveal_once.sql`
+- `backend/src/main/kotlin/com/company/oms/notification/NotificationService.kt`
+- `backend/src/main/kotlin/com/company/oms/notification/WorkItemSummaryService.kt`
+- `frontend/src/pages/ApiKeysPage.tsx`
+- `frontend/src/pages/NotificationsPage.tsx`
+- `frontend/src/types/apiKey.ts`
+
+### 확인 방법
+
+- `./gradlew.bat test --tests com.company.oms.Phase8AuthLogApiTest`
+- `npm.cmd run build`
+
+## 20. 물류사 전체 API / tenant-wide API Key
+
+### 완료 내용
+
+- API Key에 `TENANT` / `CLIENT` scope 구분이 추가되어 tenant-wide API Key를 발급하고 관리할 수 있게 되었다.
+- 외부 API 조회는 tenant-wide Key 사용 시 고객사 전체의 확정 배치를 조회하고, 응답에 `clientId`, `clientCode`, `clientName`을 포함한다.
+- 외부 API 호출 로그가 `client_id nullable` 구조를 처리하도록 확장되었다.
+- 프론트 API Key 화면과 외부 API 안내 문구가 tenant-wide 정책을 반영하도록 정리되었다.
+
+### 관련 위치
+
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyEntity.kt`
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyDtos.kt`
+- `backend/src/main/kotlin/com/company/oms/auth/ApiKeyService.kt`
+- `backend/src/main/kotlin/com/company/oms/externalapi/ExternalApiController.kt`
+- `backend/src/main/kotlin/com/company/oms/externalapi/ExternalApiKeyAuthService.kt`
+- `backend/src/main/kotlin/com/company/oms/externalapi/ExternalApiQueryService.kt`
+- `backend/src/main/kotlin/com/company/oms/externalapi/ApiCallLogEntity.kt`
+- `backend/src/main/resources/db/migration/V14__tenant_wide_api_keys.sql`
+- `frontend/src/pages/ApiKeysPage.tsx`
+- `frontend/src/pages/ExternalApiGuidePage.tsx`
+- `frontend/src/pages/ExternalApiStatusPage.tsx`
+
+### 확인 방법
+
+- `./gradlew.bat test --tests com.company.oms.Phase8AuthLogApiTest`
+- `npm.cmd run build`
